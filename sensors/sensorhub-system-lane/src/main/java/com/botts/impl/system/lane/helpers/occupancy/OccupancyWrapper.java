@@ -1,5 +1,6 @@
 package com.botts.impl.system.lane.helpers.occupancy;
 
+import com.botts.impl.process.d5.occupancy.D5OccupancyProcessModule;
 import com.botts.impl.process.rs350.occupancy.Rs350OccupancyProcessModule;
 import com.botts.impl.sensor.aspect.AspectSensor;
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
@@ -435,6 +436,10 @@ public class OccupancyWrapper {
         } else if (sensor instanceof RapiscanSensor) {
             return new RapiscanStateManager();
         } else if (sensor instanceof Rs350OccupancyProcessModule){
+            return new Rs350StateManager();
+        } else if (sensor instanceof D5OccupancyProcessModule){
+            // The D5 process publishes the same dailyFile record as the RS350
+            // one, so the RS350 state manager's semantics apply as-is
             return new Rs350StateManager();
         }
         return null;
