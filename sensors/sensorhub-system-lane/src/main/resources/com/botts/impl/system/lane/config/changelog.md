@@ -2,7 +2,13 @@
 All notable changes to this project will be documented in this file. 
 
 ## [Unreleased]
+### Added
+- New "Mobile Detector System" module type (com.botts.impl.system.lane.mobile) for RS-350/D5 mobile detectors: single Detector Connection config, no fixed-lane options
+- Kromek D5 lanes (d5-occupancy process) and GPS location datastreams for RS-350/D5; alarm occupancies are stamped with the last fix
+- Lane-level RPM Remote Host/Port is now authoritative: pushed down to the RPM driver's comm settings on every lane (re)initialization
 ### Changed
+- Occupancy process submodules are named "<lane> - Occupancy", created once and reused across restarts instead of being deleted and recreated
+- Removed occupancy process members are cleaned up so they no longer resurrect themselves from leftover event-bus subscriptions
 - Camera recordings are now matched by exact occupancy timestamp, camera, lifecycle epoch, and
   immutable generation instead of mutable filenames or callback order.
 - Per-camera command ordering, bounded timeout quarantine, and late-result cleanup prevent

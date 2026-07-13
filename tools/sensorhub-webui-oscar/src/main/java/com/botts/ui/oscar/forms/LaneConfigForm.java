@@ -47,6 +47,7 @@ public class LaneConfigForm extends GenericConfigForm {
                 addTranslatedType(classList, "AspectRPMConfig", "Aspect");
                 addTranslatedType(classList, "RapiscanRPMConfig", "Rapiscan");
                 addTranslatedType(classList, "RS350RPMConfig", "RS350");
+                addTranslatedType(classList, "D5RPMConfig", "D5");
             }
             catch (ClassNotFoundException e)
             {
