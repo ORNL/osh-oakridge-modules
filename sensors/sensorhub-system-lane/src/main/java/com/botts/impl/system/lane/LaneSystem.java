@@ -141,6 +141,12 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         shutdownThreadPool();
         threadPool = Executors.newSingleThreadExecutor();
         ffmpegConfigs = new HashMap<>();
+        // Re-init replaces the wrapper, so cancel the outgoing one's event-bus
+        // subscriptions first — dropping the reference alone would leave an
+        // orphan listening for occupancies and recording alongside its
+        // replacement.
+        if (occupancyWrapper != null)
+            occupancyWrapper.stop();
         occupancyWrapper = null;
         existingRPMModule = null;
         occupancyProducer = null;
