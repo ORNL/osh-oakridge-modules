@@ -1,0 +1,73 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: '21'
+
+jobs:
+  gradle-tests:
+    name: Build and self-contained module tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout ORNL/oscar build root
+        uses: actions/checkout@v4
+        with:
+          repository: ORNL/oscar
+          submodules: recursive
+
+      - name: Overlay tested osh-oakridge-modules revision
+        uses: actions/checkout@v4
+        with:
+          path: include/osh-oakridge-modules
+
+      - name: Validate release and localized manual metadata
+        run: node tools/validate-release-metadata.js
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: zulu
+
+      - name: Run self-contained Oak Ridge module tests
+        run: |
+          ./gradlew --no-parallel \
+            :sensorhub-service-oscar:test \
+            :sensorhub-service-bucket:test \
+            :sensorhub-service-dailyfile-journal:test \
+            :sensorhub-system-lane:test
+
+          ./gradlew --no-parallel \
+            :sensorhub-utils-rad:test \
+            --tests org.sensorhub.impl.utils.rad.cambio.CambioTempDirectoryTest \
+            --tests org.sensorhub.impl.utils.rad.dailyfile.DailyFileAppenderTest \
+            --tests org.sensorhub.impl.utils.rad.output.OccupancyOutputConcurrencyTest
+
+          ./gradlew --no-parallel \
+            :sensorhub-driver-aspect:test \
+            --tests com.botts.impl.sensor.aspect.MessageHandlerJournalTest \
+            :sensorhub-driver-ffmpeg:test \
+            --tests org.sensorhub.impl.sensor.ffmpeg.controls.FileControlPublicationTest \
+            :sensorhub-driver-rapiscan:test \
+            --tests com.botts.impl.sensor.rapiscan.MessageHandlerJournalTest \
+            :sensorhub-driver-rs350:test \
+            --tests com.botts.impl.sensor.rs350.MessageHandlerJournalTest
+
+      - name: Compile all OSCAR Java modules
+        run: ./gradlew assemble -x osgi

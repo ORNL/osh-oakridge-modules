@@ -40,7 +40,7 @@ Vous avez besoin :
 - de l'adresse IP/DNS, des identifiants, du fabricant et des informations de flux de chaque caméra ; et
 - d'un navigateur pris en charge sur un poste capable de résoudre et de joindre l'hôte OSCAR.
 
-Consultez le [Guide de démarrage rapide](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/QUICKSTART.md) pour l'installation. Le [Guide de déploiement](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/DEPLOYMENT.md) couvre l'initialisation, le DNS, les certificats, les commandes de cycle de vie, les contrôles de sécurité et les mises à niveau. OSCAR ne fournit aucun mot de passe administrateur par défaut ; il est défini pendant `oscar init`.
+Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md) pour l'installation. Le [Guide de déploiement](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md) couvre l'initialisation, le DNS, les certificats, les commandes de cycle de vie, les contrôles de sécurité et les mises à niveau. OSCAR ne fournit aucun mot de passe administrateur par défaut ; il est défini pendant `oscar init`.
 
 ### Conventions de coordonnées et de réseau
 
@@ -53,7 +53,7 @@ Consultez le [Guide de démarrage rapide](https://github.com/Botts-Innovative-Re
 
 OSCAR utilise HTTPS. Un déploiement muni de son certificat autosigné affiche un avertissement de confidentialité jusqu'à ce que le poste lui fasse confiance. Un certificat émis par une autorité publique ou d'entreprise déjà approuvée ne nécessite pas cette procédure.
 
-![Avertissement de certificat dans Chrome](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/01-certificate-warning.png)
+![Avertissement de certificat dans Chrome](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/01-certificate-warning.png)
 
 ### 2.1 Vérifier avant d'approuver
 
@@ -69,15 +69,15 @@ Les captures utilisent Chrome sous Windows ; le libellé peut varier selon la ve
 2. À l'avertissement, utilisez **Paramètres avancés** uniquement après avoir confirmé le serveur attendu.
 3. Ouvrez les informations du site à côté de l'adresse et sélectionnez **Détails du certificat**.
 
-![Ouvrir les détails du certificat](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/02-certificate-details.png)
+![Ouvrir les détails du certificat](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/02-certificate-details.png)
 
 4. Dans la visionneuse, sélectionnez le certificat, ouvrez **Détails**, puis **Exporter**.
 
-![Exporter le certificat](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/03-certificate-export.png)
+![Exporter le certificat](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/03-certificate-export.png)
 
 5. Enregistrez-le au format X.509 codé Base-64, de préférence avec l'extension `.cer` ou `.crt`. L'extension `.download` de l'exemple peut être importée si Windows la reconnaît, mais `.cer` est plus explicite.
 
-![Enregistrer le certificat](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/04-certificate-save.png)
+![Enregistrer le certificat](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/04-certificate-save.png)
 
 Si une autorité privée est utilisée, importez le **certificat d'AC** fourni par l'administrateur, et non un certificat de serveur obtenu sur une page non vérifiée.
 
@@ -88,7 +88,7 @@ Si une autorité privée est utilisée, importez le **certificat d'AC** fourni p
 3. Sélectionnez **Placer tous les certificats dans le magasin suivant**, puis **Autorités de certification racines de confiance**.
 4. Sélectionnez le fichier exporté et terminez l'assistant.
 
-![Choisir le certificat à importer](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/05-certificate-import.png)
+![Choisir le certificat à importer](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/05-certificate-import.png)
 
 5. Fermez toutes les fenêtres du navigateur, relancez-le et rechargez OSCAR. L'avertissement doit avoir disparu et le certificat doit être valide pour l'hôte.
 
@@ -98,7 +98,7 @@ Sur un poste administré, distribuez la confiance par le mécanisme de l'organis
 
 Ouvrez `https://<hote-oscar>/sensorhub/admin` et saisissez les identifiants créés lors du déploiement.
 
-![Connexion à l'administration OSCAR](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/06-login.png)
+![Connexion à l'administration OSCAR](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/06-login.png)
 
 ### 3.1 Langue
 
@@ -116,7 +116,7 @@ Après toute configuration, utilisez **Appliquer les modifications** lorsqu'il e
 
 Dans la navigation de gauche, ouvrez **Services > Module de service OSCAR**.
 
-![Configuration générale du service OSCAR](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/14-service-general.png)
+![Configuration générale du service OSCAR](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/14-service-general.png)
 
 ### 4.1 Onglet Général
 
@@ -228,11 +228,11 @@ Le plan est une image rectangulaire orientée au nord, interpolée linéairement
 1. Ouvrez **Services > Module de service OSCAR > Configuration du plan de site**.
 2. Si la configuration facultative n'existe pas, sélectionnez **Ajouter**.
 
-![Configuration vide du plan](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/07-site-diagram-empty.png)
+![Configuration vide du plan](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/07-site-diagram-empty.png)
 
 Le formulaire contient le téléversement et deux paires de coordonnées.
 
-![Champs du plan](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/08-site-diagram-fields.png)
+![Champs du plan](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/08-site-diagram-fields.png)
 
 ### 5.2 Préparer l'image
 
@@ -241,9 +241,9 @@ Le formulaire contient le téléversement et deux paires de coordonnées.
 3. Cadrez le plus petit rectangle contenant la zone d'exploitation et les voies. Un cadrage serré améliore le zoom initial.
 4. Capturez uniquement ce rectangle et enregistrez-le en `.png`, `.jpg` ou `.jpeg`.
 
-![Carte source cadrée](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/09-source-map.png)
+![Carte source cadrée](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/09-source-map.png)
 
-![Plan recadré](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/10-cropped-site-diagram.png)
+![Plan recadré](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/10-cropped-site-diagram.png)
 
 Évitez les menus, le curseur, les contrôles du navigateur et les grandes marges. Les étiquettes ou épingles déjà présentes sont des pixels de l'image, pas des marqueurs OSCAR.
 
@@ -256,7 +256,7 @@ Notez les coordonnées exactes des coins de l'image :
 
 Dans Google Maps, cliquez avec le bouton droit sur un point pour afficher et copier ses coordonnées décimales. Répétez aux deux coins opposés du recadrage.
 
-![Copier les coordonnées d'un coin](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/11-corner-coordinate.png)
+![Copier les coordonnées d'un coin](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/11-corner-coordinate.png)
 
 Vérifiez que :
 
@@ -270,11 +270,11 @@ Vérifiez que :
 1. Choisissez l'image avec **Choisir un fichier**.
 2. Saisissez les quatre limites avant **Téléverser**.
 
-![Limites saisies](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/12-site-bounds-entered.png)
+![Limites saisies](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/12-site-bounds-entered.png)
 
 3. Sélectionnez **Téléverser** et attendez le message vert.
 
-![Téléversement réussi](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/13-site-upload-success.png)
+![Téléversement réussi](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/13-site-upload-success.png)
 
 4. Sélectionnez **Appliquer les modifications**, puis **Enregistrer** globalement.
 5. Ouvrez ou rechargez Viewer et vérifiez l'alignement ainsi que l'étendue initiale.
@@ -290,17 +290,17 @@ L'importation en masse est recommandée pour de nombreuses voies. Sur un site ex
 1. Ouvrez **Services > Module de service OSCAR > Général**.
 2. Sous **Chemin de configuration de feuille de calcul**, choisissez un `.csv`.
 
-![Choisir un CSV de voies](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/15-csv-selected.png)
+![Choisir un CSV de voies](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/15-csv-selected.png)
 
 3. Sélectionnez **Téléverser** et attendez la confirmation.
 
-![CSV téléversé](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/16-csv-upload-success.png)
+![CSV téléversé](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/16-csv-upload-success.png)
 
 4. Ouvrez **Capteurs** et inspectez chaque voie et ses sous-modules RPM/caméra. Le chargement est asynchrone ; attendez l'apparition de toutes les lignes.
 5. Corrigez les valeurs par voie, appliquez les changements, utilisez l'action globale **Enregistrer**, confirmez **Oui**, puis attendez **Configuration de SensorHub enregistrée**. Ouvrir la boîte sans sélectionner **Oui** n'enregistre rien. Tant que cet enregistrement global n'a pas réussi, les voies importées n'existent qu'en mémoire et peuvent disparaître au redémarrage.
 6. Pendant la fenêtre de vérification planifiée, redémarrez OSCAR avec la commande de déploiement prise en charge, reconnectez-vous et vérifiez que toutes les voies attendues et leurs enfants RPM/caméra réapparaissent sous **Capteurs**. Ne considérez pas l'importation comme terminée avant la réussite de ce contrôle après redémarrage.
 
-![Voies importées](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/17-sensors-overview.png)
+![Voies importées](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/17-sensors-overview.png)
 
 Une ligne est ignorée si son `UniqueID` appartient déjà à un Système de voie chargé ; les voies existantes ne sont pas écrasées. Assurez aussi l'unicité dans le fichier lui-même. L'analyse précède le chargement, mais l'initialisation des enfants est asynchrone : la panne d'un appareil peut toucher une voie sans annuler les autres déjà acceptées.
 
@@ -384,11 +384,11 @@ Cliquez avec le bouton droit sur **Capteurs** ou utilisez son action d'ajout :
 - **Supprimer le module** retire sa configuration. Si **Supprimer les données avec la voie** est activé, les observations, flux et enregistrements de cette voie sont aussi supprimés.
 - **Tout sélectionner/désélectionner** ne change que la sélection de l'arborescence.
 
-![Menu contextuel de capteur](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/20-lane-context-menu.png)
+![Menu contextuel de capteur](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/20-lane-context-menu.png)
 
 Sélectionnez **Système de voie**.
 
-![Sélecteur de type de module](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/21-module-picker.png)
+![Sélecteur de type de module](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/21-module-picker.png)
 
 Le sélecteur montre tous les types compatibles installés. La version illustrée comprend :
 
@@ -408,7 +408,7 @@ La liste varie selon les paquets installés. Pour une voie ordinaire, choisissez
 
 ### 7.2 Onglet Général
 
-![Champs généraux d'une voie](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/22-lane-general.png)
+![Champs généraux d'une voie](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/22-lane-general.png)
 
 | Champ | Recommandation |
 | --- | --- |
@@ -430,7 +430,7 @@ Saisissez latitude, longitude et altitude facultative (hauteur au-dessus de l'el
 
 Si un plan valide existe, il apparaît dans le formulaire. Cliquez à l'emplacement précis de la voie : OSCAR calcule latitude et longitude depuis les limites du plan. Vérifiez les valeurs avant d'enregistrer. Vous pouvez aussi les saisir directement.
 
-![Choisir l'emplacement sur le plan](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/23-lane-location.png)
+![Choisir l'emplacement sur le plan](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/23-lane-location.png)
 
 ### 7.4 Onglet Orientation fixe
 
@@ -446,7 +446,7 @@ Laissez-la non définie si le site ne l'utilise pas. Elle ne remplace pas l'empl
 
 Sélectionnez **Ajouter** sous **Configuration RPM initiale** et le bouton plus/**Ajouter** sous **Configuration initiale de caméra**.
 
-![Options initiales vides](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/24-lane-options-empty.png)
+![Options initiales vides](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/24-lane-options-empty.png)
 
 Ces options génèrent les modules enfants à l'initialisation. Elles ne constituent pas une seconde copie dynamique de tous leurs réglages. Ensuite, inspectez et gérez les enfants RPM/caméra dans l'arborescence Capteurs.
 
@@ -474,7 +474,7 @@ Tous exposent **Hôte distant**, **Nom d'utilisateur**, **Mot de passe** et **Lo
 
 Les enfants FFmpeg générés utilisent TCP, demandent 24 i/s, activent HLS, désactivent les images individuelles, utilisent un délai de connexion de cinq secondes et des reconnexions. Le résultat réel dépend de la caméra et du réseau.
 
-![RPM et caméras configurés](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/25-lane-options-filled.png)
+![RPM et caméras configurés](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/25-lane-options-filled.png)
 
 ### 7.6 Terminer et vérifier
 
@@ -485,13 +485,13 @@ Les enfants FFmpeg générés utilisent TCP, demandent 24 i/s, activent HLS, dé
 5. Corrigez les enfants si nécessaire et confirmez l'état **Démarré**.
 6. Sélectionnez **Enregistrer** globalement.
 
-Consultez la documentation [Rapiscan](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rapiscan), [Aspect](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-aspect), [RS-350](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rs350) et [FFmpeg](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-ffmpeg).
+Consultez la documentation [Rapiscan](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rapiscan), [Aspect](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-aspect), [RS-350](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rs350) et [FFmpeg](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-ffmpeg).
 
 ## 8. Utiliser OSCAR Viewer
 
 Ouvrez `https://<hote-oscar>/`. Le tableau de bord doit afficher l'état des voies, la table des événements et la carte. Avec un plan configuré, il est l'image supérieure et l'étendue initiale correspond à ses limites. Les marqueurs OSCAR restent interactifs au-dessus ; une épingle dessinée dans la capture n'est qu'une partie de l'image.
 
-![Tableau de bord OSCAR Viewer](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/18-viewer-dashboard.png)
+![Tableau de bord OSCAR Viewer](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/18-viewer-dashboard.png)
 
 ### 8.1 Tableau de bord et file d'alarmes
 
@@ -505,7 +505,7 @@ Ouvrez `https://<hote-oscar>/`. Le tableau de bord doit afficher l'état des voi
 
 ### 8.2 Adjudication rapide depuis le tableau de bord
 
-![Adjudication dans le tableau de bord](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/26-dashboard-adjudication.png)
+![Adjudication dans le tableau de bord](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/26-dashboard-adjudication.png)
 
 Utilisez-la lorsque graphiques et vidéo suffisent, sans preuve ni WebID:
 
@@ -519,7 +519,7 @@ L'envoi ajoute un enregistrement sans modifier l'observation d'origine. Pour pre
 
 ### 8.3 Page Événements
 
-![Liste des événements](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/27-event-list.png)
+![Liste des événements](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/27-event-list.png)
 
 **Événements** est l'historique de tous les nœuds locaux et fédérés configurés, pas seulement des alarmes en attente. Il affiche voie/nœud, ID d'occupation, début/fin, maxima gamma/neutron, état et présence d'une adjudication. Les filtres, décomptes, pages et la sélection groupée s'appliquent à l'ensemble complet des résultats correspondants côté serveur, pas seulement à la page visible.
 
@@ -534,7 +534,7 @@ L'envoi ajoute un enregistrement sans modifier l'observation d'origine. Pour pre
 
 ### 8.4 Détails de l'événement
 
-![Résumé, graphiques et vidéo de l'événement](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/28-event-details-summary.png)
+![Résumé, graphiques et vidéo de l'événement](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/28-event-details-summary.png)
 
 La page peut contenir :
 
@@ -568,7 +568,7 @@ Choisissez selon la procédure du site, jamais par commodité.
 
 ### 8.5 Adjudication complète et preuves
 
-![Preuves et adjudication complète](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/29-event-details-adjudication.png)
+![Preuves et adjudication complète](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/29-event-details-adjudication.png)
 
 - **Résultats d'analyse WebID** affiche heure, nom/type d'isotope, confiance, taux, texte/nombre d'isotopes, avertissements, khi carré, DRF, erreur et dose estimée; **Lire plus** développe le texte.
 - **Adjudications consignées** affiche occupation, heure, utilisateur, code, commentaire, isotopes, chemins, inspection secondaire et ID véhicule. Un nouvel envoi ajoute une ligne sans réécrire les anciennes.
@@ -645,7 +645,7 @@ Si la récupération automatique limitée est épuisée, le panneau affiche **La
 
 ## 9. Statistiques nationales
 
-![Statistiques nationales](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/30-national-statistics.png)
+![Statistiques nationales](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/30-national-statistics.png)
 
 Une ligne par nœud donne **ID nœud**, alarmes Gamma, Neutron, combinées, occupations, sabotage, défauts Gamma, défauts Neutron et défauts totaux. Colonnes/Filtres/Densité ajustent la grille.
 
@@ -658,7 +658,7 @@ Les plages prédéfinies sont mises en cache et rechargées après actualisation
 
 ## 10. Génération de rapports
 
-![Générateur de rapports](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
+![Générateur de rapports](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
 
 Le générateur crée un PDF dans le bucket `reports` du nœud et l'affiche à droite.
 
@@ -675,7 +675,7 @@ Le serveur réessaie jusqu'à trois fois. Le nom encode nœud/type/début/fin; u
 
 ## 11. Fédération de nœuds
 
-![Fédération de nœuds](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/32-node-federation.png)
+![Fédération de nœuds](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/32-node-federation.png)
 
 **Nœuds** interroge plusieurs serveurs. Le nœud local dérivé du navigateur est par défaut et non supprimable; les distants peuvent être ajoutés, modifiés ou retirés.
 
@@ -843,11 +843,11 @@ Pour l'assistance, relevez version OSCAR, navigateur, voie/occupation, heure et 
 
 ## 15. Documentation associée
 
-- [Démarrage rapide OSCAR](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/QUICKSTART.md)
-- [Guide de déploiement](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/DEPLOYMENT.md)
-- [Guide du système de traduction](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/docs/TRANSLATION_SYSTEM.md)
-- [Module Système de voie](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
-- [Module de service OSCAR](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)
+- [Démarrage rapide OSCAR](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
+- [Guide de déploiement](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
+- [Guide du système de traduction](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)
+- [Module Système de voie](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
+- [Module de service OSCAR](https://github.com/ORNL/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)
 
 ---
 

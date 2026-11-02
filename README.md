@@ -1,5 +1,7 @@
 # osh-oakridge-modules
 
+Oak Ridge National Laboratory OpenSensorHub sensor, lane, adjudication, retained-media, and daily-journal modules for [ORNL/oscar](https://github.com/ORNL/oscar).
+
 ## OSCAR operator documentation
 
 The complete OSCAR 3.11.0 administration and operations manual is available in every supported language:
@@ -21,7 +23,7 @@ and operator checks are documented in
 OSCAR 3.11.0 uses the tiered PostgreSQL/Parquet database, required direct daily-file journal, and
 exact-five JPEG retained-media implementation in this repository. Deployment-level archive,
 retention-hold, portable-export, coordinated-backup, restore, and deletion commands are documented
-in the matching 3.11.0 `osh-oakridge-buildnode` release under `documentation/`; operators must use
+in the matching 3.11.0 [ORNL/oscar](https://github.com/ORNL/oscar) release under `documentation/`; operators must use
 those supported launchers instead of deleting cataloged files or database rows directly.
 
 ## Tests

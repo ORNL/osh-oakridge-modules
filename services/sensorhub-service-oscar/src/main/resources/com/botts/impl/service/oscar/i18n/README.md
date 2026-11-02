@@ -40,7 +40,7 @@ You need:
 - the IP address or DNS name, credentials, manufacturer, and stream details of every camera; and
 - a supported browser on a workstation that can resolve and reach the OSCAR hostname.
 
-Use the release [Quick Start](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/QUICKSTART.md) for installation. The [Deployment Guide](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/DEPLOYMENT.md) covers initialization, DNS, certificates, lifecycle commands, security checks, and upgrades. OSCAR has no shipped default administrator password; the password is supplied during `oscar init`.
+Use the release [Quick Start](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md) for installation. The [Deployment Guide](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md) covers initialization, DNS, certificates, lifecycle commands, security checks, and upgrades. OSCAR has no shipped default administrator password; the password is supplied during `oscar init`.
 
 ### Coordinate and network conventions
 
@@ -53,7 +53,7 @@ Use the release [Quick Start](https://github.com/Botts-Innovative-Research/osh-o
 
 OSCAR uses HTTPS. A deployment using its generated, self-signed certificate produces a browser privacy warning until the workstation trusts that certificate. A deployment using a certificate from an already trusted organizational or public certificate authority does not require this workflow.
 
-![Chrome certificate warning](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/01-certificate-warning.png)
+![Chrome certificate warning](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/01-certificate-warning.png)
 
 ### 2.1 Verify before trusting
 
@@ -69,15 +69,15 @@ The screenshots use Chrome on Windows. Browser wording varies by version.
 2. At the privacy warning, use **Advanced** only after verifying that this is the expected OSCAR server.
 3. Open the site-information control beside the address and select **Certificate details**.
 
-![Open certificate details](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/02-certificate-details.png)
+![Open certificate details](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/02-certificate-details.png)
 
 4. In the certificate viewer, select the certificate to trust, open **Details**, and choose **Export**.
 
-![Export the certificate](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/03-certificate-export.png)
+![Export the certificate](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/03-certificate-export.png)
 
 5. Save it as a Base-64-encoded X.509 certificate. Prefer a `.cer` or `.crt` extension. The `.download` extension visible in the example can still be imported if Windows recognizes it as a certificate, but `.cer` is clearer.
 
-![Save the exported certificate](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/04-certificate-save.png)
+![Save the exported certificate](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/04-certificate-save.png)
 
 If the deployment uses a private certificate authority, import the administrator-provided **CA certificate**, not an arbitrary server certificate downloaded from an unverified page.
 
@@ -88,7 +88,7 @@ If the deployment uses a private certificate authority, import the administrator
 3. Select **Place all certificates in the following store** and choose **Trusted Root Certification Authorities**.
 4. Select the exported file and finish the wizard.
 
-![Select the certificate to import](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/05-certificate-import.png)
+![Select the certificate to import](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/05-certificate-import.png)
 
 5. Close all browser windows, reopen the browser, and reload OSCAR. The warning should be gone and the certificate should be reported as valid for the selected hostname.
 
@@ -98,7 +98,7 @@ For managed workstations, distribute trust through the organization's normal cer
 
 Open `https://<oscar-host>/sensorhub/admin` and enter the administrator credentials created during deployment.
 
-![OSCAR administrator login](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/06-login.png)
+![OSCAR administrator login](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/06-login.png)
 
 ### 3.1 Language
 
@@ -116,7 +116,7 @@ After any successful setup, use **Apply Changes** where available and then **Sav
 
 In the left navigation, open **Services > OSCAR Service Module**.
 
-![OSCAR Service Module general configuration](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/14-service-general.png)
+![OSCAR Service Module general configuration](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/14-service-general.png)
 
 ### 4.1 General tab
 
@@ -228,11 +228,11 @@ The site diagram is a north-up rectangular image mapped linearly between two geo
 1. Open **Services > OSCAR Service Module > Site Diagram Config**.
 2. If the optional configuration is absent, select **Add**.
 
-![Empty site diagram configuration](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/07-site-diagram-empty.png)
+![Empty site diagram configuration](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/07-site-diagram-empty.png)
 
 The form contains the image upload and two coordinate pairs.
 
-![Site diagram fields](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/08-site-diagram-fields.png)
+![Site diagram fields](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/08-site-diagram-fields.png)
 
 ### 5.2 Prepare the image
 
@@ -241,9 +241,9 @@ The form contains the image upload and two coordinate pairs.
 3. Frame the smallest rectangle that includes the operational area and all planned lanes. A tight rectangle gives the best default zoom.
 4. Capture only the desired map rectangle and save it as `.png`, `.jpg`, or `.jpeg`.
 
-![Source map framed for capture](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/09-source-map.png)
+![Source map framed for capture](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/09-source-map.png)
 
-![Cropped site diagram](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/10-cropped-site-diagram.png)
+![Cropped site diagram](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/10-cropped-site-diagram.png)
 
 Avoid browser chrome, menus, cursors, and large margins in the crop. Labels and a marker already present in the image are pixels, not OSCAR lane markers.
 
@@ -256,7 +256,7 @@ Record the coordinates of the exact image corners:
 
 In Google Maps, right-click a point to display and copy its decimal-degree coordinate. Repeat at the two opposing corners that match the crop.
 
-![Copy a corner coordinate](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/11-corner-coordinate.png)
+![Copy a corner coordinate](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/11-corner-coordinate.png)
 
 Sanity-check the values before upload:
 
@@ -270,11 +270,11 @@ Sanity-check the values before upload:
 1. Select the image with **Choose File**.
 2. Enter all four bound values before selecting **Upload**.
 
-![Entered site diagram bounds](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/12-site-bounds-entered.png)
+![Entered site diagram bounds](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/12-site-bounds-entered.png)
 
 3. Select **Upload**. Wait for the green success message.
 
-![Successful site diagram upload](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/13-site-upload-success.png)
+![Successful site diagram upload](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/13-site-upload-success.png)
 
 4. Select **Apply Changes**, then the global **Save** button.
 5. Open or reload the OSCAR Viewer and verify that the image aligns with the map and fills the initial map extent.
@@ -290,17 +290,17 @@ Bulk import is the preferred way to create many lanes. For an existing site, fir
 1. Open **Services > OSCAR Service Module > General**.
 2. At **Spreadsheet Config Path**, select a `.csv` file.
 
-![Select a lane CSV](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/15-csv-selected.png)
+![Select a lane CSV](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/15-csv-selected.png)
 
 3. Select **Upload** and wait for the success message.
 
-![Successful CSV upload](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/16-csv-upload-success.png)
+![Successful CSV upload](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/16-csv-upload-success.png)
 
 4. Open **Sensors** and inspect every new lane and its generated RPM/camera submodules. Loading is asynchronous, so allow time for all rows to appear.
 5. Correct any per-lane values, use **Apply Changes**, select the global **Save**, confirm **Yes**, and wait for **SensorHub Configuration Saved**. Opening the confirmation dialog without selecting **Yes** does not save. Until global Save succeeds, imported lanes exist only in memory and can disappear on restart.
 6. During the planned verification window, restart OSCAR with the supported deployment command, sign in again, and confirm that every expected lane and its RPM/camera children reappear under **Sensors**. Do not accept the import as complete until it passes this restart check.
 
-![Imported lanes in Sensors](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/17-sensors-overview.png)
+![Imported lanes in Sensors](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/17-sensors-overview.png)
 
 An uploaded row is skipped when its `UniqueID` already belongs to a loaded Lane System. Existing lanes are not overwritten. Ensure `UniqueID` is also unique within the upload file; duplicate rows in the same file are not a supported update mechanism. Parsing happens before module loading, but child-module initialization is asynchronous, so a device failure can affect one imported lane without rolling back lanes already accepted.
 
@@ -384,11 +384,11 @@ Right-click **Sensors** or use its add action to create a top-level lane. In the
 - **Remove Module** removes its configuration. When **Delete Data on Lane Removal** is enabled for a lane, removal also deletes that lane's stored observations, datastreams, and system records.
 - **Select/Deselect All** changes tree selection only.
 
-![Sensor context menu](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/20-lane-context-menu.png)
+![Sensor context menu](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/20-lane-context-menu.png)
 
 Select **Lane System** in the module picker.
 
-![Module type picker](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/21-module-picker.png)
+![Module type picker](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/21-module-picker.png)
 
 The picker shows every installed compatible type. The pictured build includes:
 
@@ -408,7 +408,7 @@ The available list can change with installed bundles. For ordinary lane setup, s
 
 ### 7.2 General tab
 
-![New Lane System general fields](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/22-lane-general.png)
+![New Lane System general fields](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/22-lane-general.png)
 
 | Field | Guidance |
 | --- | --- |
@@ -430,7 +430,7 @@ Enter the lane's latitude, longitude, and optional altitude (height above the WG
 
 If a valid site diagram has already been uploaded, the form displays it. Click the precise lane location and OSCAR calculates latitude and longitude from the diagram bounds. Review the calculated values before saving. You may instead type the coordinates directly.
 
-![Select lane location on the georeferenced diagram](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/23-lane-location.png)
+![Select lane location on the georeferenced diagram](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/23-lane-location.png)
 
 ### 7.4 Fixed Orientation tab
 
@@ -446,7 +446,7 @@ Leave the optional orientation unset unless the site uses it. Orientation does n
 
 Select **Add** under **Initial RPM Configuration** and the plus/**Add** control under **Initial Camera Configuration**.
 
-![Empty initial lane options](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/24-lane-options-empty.png)
+![Empty initial lane options](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/24-lane-options-empty.png)
 
 The initial options generate child modules when the Lane System initializes. They are not a second live copy of every child setting. After creation, inspect and maintain the generated RPM and camera modules under the lane in the Sensors tree.
 
@@ -485,7 +485,7 @@ Manufacturer-specific behavior:
 
 The generated FFmpeg children use TCP, request 24 frames per second, enable HLS output, disable individual video-frame output, use a 5-second connection timeout, and attempt reconnects. Camera capability and network capacity still determine the actual result.
 
-![Configured RPM and camera options](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/25-lane-options-filled.png)
+![Configured RPM and camera options](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/25-lane-options-filled.png)
 
 ### 7.6 Finish and verify
 
@@ -496,13 +496,13 @@ The generated FFmpeg children use TCP, request 24 frames per second, enable HLS 
 5. Correct child configuration if necessary and confirm that each required module reaches **Started**.
 6. Select global **Save**.
 
-For driver-specific details, see the [Rapiscan](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rapiscan), [Aspect](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-aspect), [RS-350](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rs350), and [FFmpeg](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-ffmpeg) module documentation.
+For driver-specific details, see the [Rapiscan](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rapiscan), [Aspect](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-aspect), [RS-350](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rs350), and [FFmpeg](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-ffmpeg) module documentation.
 
 ## 8. Operate the OSCAR Viewer
 
 Open `https://<oscar-host>/`. The dashboard should show lane status, the event table, and the map. When a site diagram is configured, it is the top map image and the initial extent matches its uploaded bounds. OSCAR-generated lane markers remain interactive above the diagram; a pin drawn into the source screenshot is only part of the image.
 
-![OSCAR Viewer dashboard](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/18-viewer-dashboard.png)
+![OSCAR Viewer dashboard](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/18-viewer-dashboard.png)
 
 ### 8.1 Dashboard checks and alarm queue
 
@@ -516,7 +516,7 @@ Open `https://<oscar-host>/`. The dashboard should show lane status, the event t
 
 ### 8.2 Quick adjudication on the dashboard
 
-![Dashboard alarm preview and adjudication](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/26-dashboard-adjudication.png)
+![Dashboard alarm preview and adjudication](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/26-dashboard-adjudication.png)
 
 Use the dashboard form when the chart/video is sufficient and no evidence upload or WebID analysis is needed:
 
@@ -530,7 +530,7 @@ Submitting creates an adjudication record; it does not alter the original detect
 
 ### 8.3 Events page
 
-![Events list](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/27-event-list.png)
+![Events list](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/27-event-list.png)
 
 The **Events** page is the historical list across configured local and federated nodes. It includes all occupancies, not only active unadjudicated alarms. Each row shows the lane and parent node, occupancy ID, start/end time, maximum gamma and neutron count rates, alarm status, and whether an adjudication exists.
 
@@ -546,7 +546,7 @@ The **Events** page is the historical list across configured local and federated
 
 ### 8.4 Event Details
 
-![Event Details summary, charts, and video](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/28-event-details-summary.png)
+![Event Details summary, charts, and video](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/28-event-details-summary.png)
 
 The page can include:
 
@@ -567,7 +567,7 @@ Available data depends on detector type, camera health, retention, event age, us
 
 ### 8.5 Complete adjudication and evidence workflow
 
-![Event Details evidence and adjudication](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/29-event-details-adjudication.png)
+![Event Details evidence and adjudication](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/29-event-details-adjudication.png)
 
 The lower half of Event Details contains three related areas:
 
@@ -660,7 +660,7 @@ If bounded automatic recovery is exhausted, the panel shows **Live video could n
 
 ## 9. National statistics
 
-![National statistics](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/30-national-statistics.png)
+![National statistics](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/30-national-statistics.png)
 
 The **National** page summarizes every configured node in one row per node. Columns are **Node ID**, **Gamma Alarms**, **Neutron Alarms**, **Gamma-Neutron Alarms**, **Occupancies**, **Tamper**, **Gamma Faults**, **Neutron Faults**, and total **Faults**. Use **Columns**, **Filters**, and **Density** to adjust the grid.
 
@@ -673,7 +673,7 @@ The Viewer caches the preset ranges for quick switching and refetches them after
 
 ## 10. Report generation
 
-![Report Generator with generated RDS site report](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
+![Report Generator with generated RDS site report](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
 
 The **Report Generator** asks the selected node's OSCAR Service to create a PDF in that node's `reports` bucket, then loads the returned URL in the **Generated Report** pane.
 
@@ -692,7 +692,7 @@ The server retries a failed report job up to three times. Filenames encode node,
 
 ## 11. Node federation
 
-![Node federation](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/32-node-federation.png)
+![Node federation](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/32-node-federation.png)
 
 The **Nodes** page lets one Viewer query multiple OSCAR/OpenSensorHub nodes. The local browser-derived node is the default and cannot be deleted. Remote nodes can be added, edited, or deleted.
 
@@ -864,11 +864,11 @@ When collecting support data, record the OSCAR version, browser, affected lane/o
 
 ## 15. Related documentation
 
-- [OSCAR release Quick Start](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/QUICKSTART.md)
-- [OSCAR Deployment Guide](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/DEPLOYMENT.md)
-- [OSCAR translation-system guide](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/docs/TRANSLATION_SYSTEM.md)
-- [Lane System module](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
-- [OSCAR Service module](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)
+- [OSCAR release Quick Start](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
+- [OSCAR Deployment Guide](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
+- [OSCAR translation-system guide](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)
+- [Lane System module](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
+- [OSCAR Service module](https://github.com/ORNL/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)
 
 ---
 

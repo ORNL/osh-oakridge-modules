@@ -40,7 +40,7 @@
 - τη διεύθυνση IP/DNS, τα διαπιστευτήρια, τον κατασκευαστή και τα στοιχεία ροής κάθε κάμερας και
 - υποστηριζόμενο πρόγραμμα περιήγησης σε σταθμό που επιλύει και προσεγγίζει τον κεντρικό υπολογιστή OSCAR.
 
-Για εγκατάσταση, δείτε τον [Οδηγό γρήγορης εκκίνησης](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/QUICKSTART.md). Ο [Οδηγός εγκατάστασης](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/DEPLOYMENT.md) καλύπτει αρχικοποίηση, DNS, πιστοποιητικά, εντολές κύκλου ζωής, ελέγχους ασφάλειας και αναβαθμίσεις. Το OSCAR δεν διαθέτει προεπιλεγμένο κωδικό διαχειριστή· ο κωδικός ορίζεται κατά το `oscar init`.
+Για εγκατάσταση, δείτε τον [Οδηγό γρήγορης εκκίνησης](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md). Ο [Οδηγός εγκατάστασης](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md) καλύπτει αρχικοποίηση, DNS, πιστοποιητικά, εντολές κύκλου ζωής, ελέγχους ασφάλειας και αναβαθμίσεις. Το OSCAR δεν διαθέτει προεπιλεγμένο κωδικό διαχειριστή· ο κωδικός ορίζεται κατά το `oscar init`.
 
 ### Συμβάσεις συντεταγμένων και δικτύου
 
@@ -53,7 +53,7 @@
 
 Το OSCAR χρησιμοποιεί HTTPS. Εγκατάσταση με αυτοϋπογεγραμμένο πιστοποιητικό εμφανίζει προειδοποίηση απορρήτου μέχρι ο σταθμός να το εμπιστευτεί. Πιστοποιητικό από ήδη έμπιστη δημόσια ή εταιρική αρχή δεν χρειάζεται αυτή τη διαδικασία.
 
-![Προειδοποίηση πιστοποιητικού στο Chrome](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/01-certificate-warning.png)
+![Προειδοποίηση πιστοποιητικού στο Chrome](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/01-certificate-warning.png)
 
 ### 2.1 Επαλήθευση πριν από την εμπιστοσύνη
 
@@ -69,15 +69,15 @@
 2. Στην προειδοποίηση, χρησιμοποιήστε **Για προχωρημένους** μόνο αφού επαληθεύσετε τον σωστό διακομιστή.
 3. Ανοίξτε τις πληροφορίες τοποθεσίας δίπλα στη διεύθυνση και επιλέξτε **Λεπτομέρειες πιστοποιητικού**.
 
-![Άνοιγμα λεπτομερειών πιστοποιητικού](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/02-certificate-details.png)
+![Άνοιγμα λεπτομερειών πιστοποιητικού](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/02-certificate-details.png)
 
 4. Στην προβολή πιστοποιητικού, επιλέξτε το πιστοποιητικό, ανοίξτε **Λεπτομέρειες** και επιλέξτε **Εξαγωγή**.
 
-![Εξαγωγή πιστοποιητικού](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/03-certificate-export.png)
+![Εξαγωγή πιστοποιητικού](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/03-certificate-export.png)
 
 5. Αποθηκεύστε ως X.509 κωδικοποιημένο σε Base-64, κατά προτίμηση με επέκταση `.cer` ή `.crt`. Η επέκταση `.download` του παραδείγματος μπορεί να εισαχθεί αν αναγνωρίζεται από τα Windows, αλλά η `.cer` είναι σαφέστερη.
 
-![Αποθήκευση πιστοποιητικού](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/04-certificate-save.png)
+![Αποθήκευση πιστοποιητικού](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/04-certificate-save.png)
 
 Αν χρησιμοποιείται ιδιωτική αρχή πιστοποίησης, εισαγάγετε το **πιστοποιητικό CA** που σας έδωσε ο διαχειριστής, όχι τυχαίο πιστοποιητικό διακομιστή από μη επαληθευμένη σελίδα.
 
@@ -88,7 +88,7 @@
 3. Επιλέξτε **Τοποθέτηση όλων των πιστοποιητικών στον ακόλουθο χώρο αποθήκευσης** και τον χώρο αξιόπιστων αρχών ρίζας.
 4. Επιλέξτε το εξαγόμενο αρχείο και ολοκληρώστε τον οδηγό.
 
-![Επιλογή πιστοποιητικού για εισαγωγή](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/05-certificate-import.png)
+![Επιλογή πιστοποιητικού για εισαγωγή](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/05-certificate-import.png)
 
 5. Κλείστε όλα τα παράθυρα του προγράμματος περιήγησης, ανοίξτε το ξανά και φορτώστε το OSCAR. Η προειδοποίηση πρέπει να έχει εξαφανιστεί και το πιστοποιητικό να είναι έγκυρο για το όνομα.
 
@@ -98,7 +98,7 @@
 
 Ανοίξτε `https://<oscar-host>/sensorhub/admin` και εισαγάγετε τα διαπιστευτήρια που δημιουργήθηκαν κατά την εγκατάσταση.
 
-![Σύνδεση στη διαχείριση OSCAR](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/06-login.png)
+![Σύνδεση στη διαχείριση OSCAR](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/06-login.png)
 
 ### 3.1 Γλώσσα
 
@@ -116,7 +116,7 @@
 
 Στην αριστερή πλοήγηση, ανοίξτε **Υπηρεσίες > Μονάδα υπηρεσίας OSCAR**.
 
-![Γενική διαμόρφωση υπηρεσίας OSCAR](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/14-service-general.png)
+![Γενική διαμόρφωση υπηρεσίας OSCAR](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/14-service-general.png)
 
 ### 4.1 Καρτέλα Γενικά
 
@@ -226,11 +226,11 @@ tombstone ανά κάμερα. Δημιουργείτε και επαναφέρ�
 1. Ανοίξτε **Υπηρεσίες > Μονάδα υπηρεσίας OSCAR > Διαμόρφωση διαγράμματος εγκατάστασης**.
 2. Αν δεν υπάρχει η προαιρετική διαμόρφωση, επιλέξτε **Προσθήκη**.
 
-![Κενή διαμόρφωση διαγράμματος](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/07-site-diagram-empty.png)
+![Κενή διαμόρφωση διαγράμματος](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/07-site-diagram-empty.png)
 
 Η φόρμα περιλαμβάνει τη μεταφόρτωση και δύο ζεύγη συντεταγμένων.
 
-![Πεδία διαγράμματος](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/08-site-diagram-fields.png)
+![Πεδία διαγράμματος](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/08-site-diagram-fields.png)
 
 ### 5.2 Προετοιμασία εικόνας
 
@@ -239,9 +239,9 @@ tombstone ανά κάμερα. Δημιουργείτε και επαναφέρ�
 3. Πλαισιώστε το μικρότερο ορθογώνιο που περιλαμβάνει τον χώρο λειτουργίας και όλες τις λωρίδες. Το στενό πλαίσιο βελτιώνει την αρχική μεγέθυνση.
 4. Καταγράψτε μόνο το ορθογώνιο και αποθηκεύστε ως `.png`, `.jpg` ή `.jpeg`.
 
-![Πλαισιωμένος χάρτης πηγής](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/09-source-map.png)
+![Πλαισιωμένος χάρτης πηγής](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/09-source-map.png)
 
-![Περικομμένο διάγραμμα](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/10-cropped-site-diagram.png)
+![Περικομμένο διάγραμμα](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/10-cropped-site-diagram.png)
 
 Αποφύγετε μενού, δρομέα, στοιχεία προγράμματος περιήγησης και μεγάλα περιθώρια. Ετικέτες ή καρφίτσες που υπάρχουν ήδη είναι εικονοστοιχεία, όχι δείκτες OSCAR.
 
@@ -254,7 +254,7 @@ tombstone ανά κάμερα. Δημιουργείτε και επαναφέρ�
 
 Στο Google Maps, κάντε δεξί κλικ σε σημείο για εμφάνιση και αντιγραφή δεκαδικών συντεταγμένων. Επαναλάβετε στις δύο απέναντι γωνίες της περικοπής.
 
-![Αντιγραφή συντεταγμένης γωνίας](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/11-corner-coordinate.png)
+![Αντιγραφή συντεταγμένης γωνίας](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/11-corner-coordinate.png)
 
 Ελέγξτε ότι:
 
@@ -268,11 +268,11 @@ tombstone ανά κάμερα. Δημιουργείτε και επαναφέρ�
 1. Επιλέξτε εικόνα με **Επιλογή αρχείου**.
 2. Εισαγάγετε και τα τέσσερα όρια πριν τη **Μεταφόρτωση**.
 
-![Καταχωρισμένα όρια](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/12-site-bounds-entered.png)
+![Καταχωρισμένα όρια](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/12-site-bounds-entered.png)
 
 3. Επιλέξτε **Μεταφόρτωση** και περιμένετε το πράσινο μήνυμα.
 
-![Επιτυχής μεταφόρτωση](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/13-site-upload-success.png)
+![Επιτυχής μεταφόρτωση](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/13-site-upload-success.png)
 
 4. Επιλέξτε **Εφαρμογή αλλαγών** και μετά την καθολική **Αποθήκευση**.
 5. Ανοίξτε ή ανανεώστε το Viewer και ελέγξτε ευθυγράμμιση και αρχική έκταση.
@@ -288,17 +288,17 @@ tombstone ανά κάμερα. Δημιουργείτε και επαναφέρ�
 1. Ανοίξτε **Υπηρεσίες > Μονάδα υπηρεσίας OSCAR > Γενικά**.
 2. Στη **Διαδρομή διαμόρφωσης υπολογιστικού φύλλου**, επιλέξτε `.csv`.
 
-![Επιλογή CSV λωρίδων](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/15-csv-selected.png)
+![Επιλογή CSV λωρίδων](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/15-csv-selected.png)
 
 3. Επιλέξτε **Μεταφόρτωση** και περιμένετε επιβεβαίωση.
 
-![Επιτυχής μεταφόρτωση CSV](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/16-csv-upload-success.png)
+![Επιτυχής μεταφόρτωση CSV](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/16-csv-upload-success.png)
 
 4. Ανοίξτε **Αισθητήρες** και ελέγξτε κάθε λωρίδα και τα υποσυστήματα RPM/κάμερας. Η φόρτωση είναι ασύγχρονη· περιμένετε να εμφανιστούν όλες.
 5. Διορθώστε επιμέρους τιμές, εφαρμόστε αλλαγές, χρησιμοποιήστε την καθολική **Αποθήκευση**, επιβεβαιώστε με **Ναι** και περιμένετε το μήνυμα **Η διαμόρφωση του SensorHub αποθηκεύτηκε**. Το άνοιγμα του παραθύρου χωρίς επιλογή **Ναι** δεν αποθηκεύει. Μέχρι να ολοκληρωθεί επιτυχώς η καθολική αποθήκευση, οι εισαγόμενες λωρίδες υπάρχουν μόνο στη μνήμη και μπορεί να χαθούν μετά από επανεκκίνηση.
 6. Στο προγραμματισμένο παράθυρο επαλήθευσης, επανεκκινήστε το OSCAR με την υποστηριζόμενη εντολή εγκατάστασης, συνδεθείτε ξανά και επιβεβαιώστε ότι κάθε αναμενόμενη λωρίδα και τα παιδιά RPM/κάμερας επανεμφανίζονται στους **Αισθητήρες**. Μη θεωρήσετε την εισαγωγή ολοκληρωμένη πριν περάσει αυτόν τον έλεγχο μετά την επανεκκίνηση.
 
-![Εισαγόμενες λωρίδες](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/17-sensors-overview.png)
+![Εισαγόμενες λωρίδες](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/17-sensors-overview.png)
 
 Παραλείπεται γραμμή όταν το `UniqueID` ανήκει ήδη σε φορτωμένο Σύστημα λωρίδας· οι υπάρχουσες λωρίδες δεν αντικαθίστανται. Διασφαλίστε μοναδικότητα και μέσα στο ίδιο αρχείο. Η ανάλυση προηγείται της φόρτωσης, αλλά η αρχικοποίηση παιδιών είναι ασύγχρονη: βλάβη συσκευής μπορεί να επηρεάσει μία λωρίδα χωρίς αναίρεση των άλλων.
 
@@ -382,11 +382,11 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 - **Αφαίρεση μονάδας** αφαιρεί τη διαμόρφωσή της. Με ενεργό **Διαγραφή δεδομένων κατά την αφαίρεση λωρίδας**, διαγράφονται και οι παρατηρήσεις, οι ροές και οι εγγραφές της λωρίδας.
 - **Επιλογή/Αποεπιλογή όλων** αλλάζει μόνο την επιλογή στο δέντρο.
 
-![Μενού περιβάλλοντος αισθητήρα](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/20-lane-context-menu.png)
+![Μενού περιβάλλοντος αισθητήρα](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/20-lane-context-menu.png)
 
 Επιλέξτε **Σύστημα λωρίδας**.
 
-![Επιλογέας τύπου μονάδας](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/21-module-picker.png)
+![Επιλογέας τύπου μονάδας](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/21-module-picker.png)
 
 Ο επιλογέας εμφανίζει όλους τους εγκατεστημένους συμβατούς τύπους. Η εικονιζόμενη έκδοση περιλαμβάνει:
 
@@ -406,7 +406,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ### 7.2 Καρτέλα Γενικά
 
-![Γενικά πεδία λωρίδας](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/22-lane-general.png)
+![Γενικά πεδία λωρίδας](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/22-lane-general.png)
 
 | Πεδίο | Οδηγία |
 | --- | --- |
@@ -428,7 +428,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 Αν υπάρχει έγκυρο διάγραμμα, εμφανίζεται στη φόρμα. Κάντε κλικ στην ακριβή θέση της λωρίδας και το OSCAR υπολογίζει πλάτος και μήκος από τα όρια. Ελέγξτε τις τιμές πριν την αποθήκευση. Μπορείτε επίσης να τις πληκτρολογήσετε.
 
-![Επιλογή θέσης λωρίδας στο διάγραμμα](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/23-lane-location.png)
+![Επιλογή θέσης λωρίδας στο διάγραμμα](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/23-lane-location.png)
 
 ### 7.4 Καρτέλα Σταθερός προσανατολισμός
 
@@ -444,7 +444,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 Επιλέξτε **Προσθήκη** στην **Αρχική διαμόρφωση RPM** και το συν/**Προσθήκη** στην **Αρχική διαμόρφωση κάμερας**.
 
-![Κενές αρχικές επιλογές](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/24-lane-options-empty.png)
+![Κενές αρχικές επιλογές](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/24-lane-options-empty.png)
 
 Οι αρχικές επιλογές δημιουργούν παιδιά κατά την αρχικοποίηση. Δεν αποτελούν δεύτερο ζωντανό αντίγραφο όλων των ρυθμίσεων των παιδιών. Μετά τη δημιουργία, ελέγχετε τα παιδιά RPM/κάμερας στο δέντρο Αισθητήρων.
 
@@ -472,7 +472,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 Τα παραγόμενα παιδιά FFmpeg χρησιμοποιούν TCP, ζητούν 24 fps, ενεργοποιούν HLS, απενεργοποιούν μεμονωμένα καρέ, χρησιμοποιούν χρονικό όριο σύνδεσης 5 δευτερολέπτων και επανασυνδέσεις. Το πραγματικό αποτέλεσμα εξαρτάται από κάμερα και δίκτυο.
 
-![Διαμορφωμένα RPM και κάμερες](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/25-lane-options-filled.png)
+![Διαμορφωμένα RPM και κάμερες](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/25-lane-options-filled.png)
 
 ### 7.6 Ολοκλήρωση και έλεγχος
 
@@ -483,13 +483,13 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 5. Διορθώστε τα παιδιά αν χρειάζεται και επιβεβαιώστε κατάσταση **Σε εκτέλεση**.
 6. Επιλέξτε καθολική **Αποθήκευση**.
 
-Δείτε την τεκμηρίωση [Rapiscan](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rapiscan), [Aspect](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-aspect), [RS-350](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rs350) και [FFmpeg](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-ffmpeg).
+Δείτε την τεκμηρίωση [Rapiscan](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rapiscan), [Aspect](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-aspect), [RS-350](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-rs350) και [FFmpeg](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-driver-ffmpeg).
 
 ## 8. Λειτουργία του OSCAR Viewer
 
 Ανοίξτε `https://<oscar-host>/`. Ο πίνακας πρέπει να εμφανίζει κατάσταση λωρίδων, πίνακα συμβάντων και χάρτη. Με διαμορφωμένο διάγραμμα, αυτό είναι η ανώτερη εικόνα και η αρχική έκταση ταιριάζει στα όριά του. Οι δείκτες OSCAR παραμένουν διαδραστικοί από πάνω· καρφίτσα που είναι ζωγραφισμένη στην εικόνα είναι μόνο εικονοστοιχεία.
 
-![Πίνακας OSCAR Viewer](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/18-viewer-dashboard.png)
+![Πίνακας OSCAR Viewer](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/18-viewer-dashboard.png)
 
 ### 8.1 Πίνακας και ουρά συναγερμών
 
@@ -503,7 +503,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ### 8.2 Γρήγορη κρίση στον πίνακα
 
-![Γρήγορη κρίση στον πίνακα](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/26-dashboard-adjudication.png)
+![Γρήγορη κρίση στον πίνακα](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/26-dashboard-adjudication.png)
 
 Χρησιμοποιήστε την όταν επαρκούν γράφημα και βίντεο, χωρίς αποδεικτικά στοιχεία ή WebID:
 
@@ -517,7 +517,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ### 8.3 Σελίδα Συμβάντα
 
-![Λίστα συμβάντων](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/27-event-list.png)
+![Λίστα συμβάντων](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/27-event-list.png)
 
 Τα **Συμβάντα** είναι το ιστορικό όλων των διαμορφωμένων τοπικών και ομοσπονδιακών κόμβων, όχι μόνο εκκρεμών συναγερμών. Εμφανίζουν λωρίδα/κόμβο, ID κατάληψης, έναρξη/λήξη, μέγιστα gamma/νετρονίων, κατάσταση και ύπαρξη κρίσης. Τα φίλτρα, οι μετρήσεις, οι σελίδες και η μαζική επιλογή εφαρμόζονται σε ολόκληρο το αντίστοιχο σύνολο αποτελεσμάτων του διακομιστή και όχι μόνο στην ορατή σελίδα.
 
@@ -532,7 +532,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ### 8.4 Λεπτομέρειες συμβάντος
 
-![Σύνοψη, γραφήματα και βίντεο συμβάντος](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/28-event-details-summary.png)
+![Σύνοψη, γραφήματα και βίντεο συμβάντος](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/28-event-details-summary.png)
 
 Η σελίδα μπορεί να περιλαμβάνει:
 
@@ -566,7 +566,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ### 8.5 Πλήρης κρίση και αποδεικτικά στοιχεία
 
-![Αποδεικτικά στοιχεία και πλήρης κρίση](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/29-event-details-adjudication.png)
+![Αποδεικτικά στοιχεία και πλήρης κρίση](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/29-event-details-adjudication.png)
 
 - Τα **Αποτελέσματα ανάλυσης WebID** δείχνουν χρόνο, όνομα/τύπο ισοτόπου, βεβαιότητα, ρυθμό, κείμενο/πλήθος ισοτόπων, προειδοποιήσεις, χι-τετράγωνο, DRF, σφάλμα και εκτιμώμενη δόση· **Περισσότερα** ανοίγει μεγάλο κείμενο.
 - Οι **Καταγεγραμμένες κρίσεις** δείχνουν κατάληψη, χρόνο, χρήστη, κωδικό, σχόλια, ισότοπα, διαδρομές, δευτερεύοντα έλεγχο και ID οχήματος. Νέα υποβολή προσθέτει γραμμή χωρίς αντικατάσταση προηγούμενης.
@@ -643,7 +643,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ## 9. Εθνικά στατιστικά
 
-![Εθνικά στατιστικά](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/30-national-statistics.png)
+![Εθνικά στατιστικά](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/30-national-statistics.png)
 
 Μία γραμμή ανά κόμβο δείχνει **ID κόμβου**, συναγερμούς Gamma, Νετρονίων και συνδυασμένους, καταλήψεις, παραβίαση, βλάβες Gamma, Νετρονίων και συνολικές. Στήλες/Φίλτρα/Πυκνότητα προσαρμόζουν τον πίνακα.
 
@@ -656,7 +656,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ## 10. Δημιουργία αναφορών
 
-![Δημιουργία αναφορών](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
+![Δημιουργία αναφορών](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
 
 Η γεννήτρια δημιουργεί PDF στον κάδο `reports` του κόμβου και το εμφανίζει δεξιά.
 
@@ -673,7 +673,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ## 11. Ομοσπονδία κόμβων
 
-![Ομοσπονδία κόμβων](https://raw.githubusercontent.com/Botts-Innovative-Research/osh-oakridge-modules/main/docs/oscar-operator-manual/images/32-node-federation.png)
+![Ομοσπονδία κόμβων](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/32-node-federation.png)
 
 Οι **Κόμβοι** επιτρέπουν ερωτήματα σε πολλούς διακομιστές. Ο τοπικός κόμβος από τον browser είναι προεπιλεγμένος και δεν διαγράφεται· οι απομακρυσμένοι προστίθενται, τροποποιούνται ή αφαιρούνται.
 
@@ -840,11 +840,11 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 
 ## 15. Σχετική τεκμηρίωση
 
-- [Γρήγορη εκκίνηση OSCAR](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/QUICKSTART.md)
-- [Οδηγός εγκατάστασης](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/dist/release/DEPLOYMENT.md)
-- [Οδηγός συστήματος μεταφράσεων](https://github.com/Botts-Innovative-Research/osh-oakridge-buildnode/blob/main/docs/TRANSLATION_SYSTEM.md)
-- [Μονάδα Συστήματος λωρίδας](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
-- [Μονάδα υπηρεσίας OSCAR](https://github.com/Botts-Innovative-Research/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)
+- [Γρήγορη εκκίνηση OSCAR](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
+- [Οδηγός εγκατάστασης](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
+- [Οδηγός συστήματος μεταφράσεων](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)
+- [Μονάδα Συστήματος λωρίδας](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
+- [Μονάδα υπηρεσίας OSCAR](https://github.com/ORNL/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)
 
 ---
 
