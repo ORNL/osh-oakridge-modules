@@ -28,7 +28,11 @@ import org.sensorhub.impl.sensor.ffmpeg.config.Connection;
 import org.sensorhub.impl.sensor.ffmpeg.config.FFMPEGConfig;
 import org.sensorhub.impl.sensor.ffmpeg.config.Output;
 import org.sensorhub.impl.sensor.tstar.TSTARConfig;
+import org.sensorhub.impl.security.session.BasicSessionConfig;
+import org.sensorhub.impl.utils.rad.dailyfile.DailyFileJournalClientConfig;
 import org.sensorhub.ui.AdminI18n;
+import com.botts.impl.process.occupancy.OccupancyProcessConfig;
+import com.botts.impl.process.rs350.occupancy.Rs350OccupancyProcessConfig;
 import com.botts.impl.sensor.aspect.AspectConfig;
 import com.botts.impl.sensor.aspect.comm.ModbusTCPCommProviderConfig;
 import com.botts.impl.sensor.aspect.comm.ModbusTCPConfig;
@@ -43,6 +47,8 @@ import com.botts.impl.sensor.rapiscan.RapiscanConfig;
 import com.botts.impl.sensor.rapiscan.SetupGammaConfig;
 import com.botts.impl.sensor.rs350.RS350Config;
 import com.botts.impl.sensor.rs350.RS350Outputs;
+import com.botts.impl.service.bucket.BucketServiceConfig;
+import com.botts.impl.service.dailyfile.DailyFileJournalServiceConfig;
 import com.botts.impl.service.oscar.OSCARServiceConfig;
 import com.botts.impl.sensor.wadwaz1.WADWAZ1Config;
 import com.botts.impl.sensor.wapirz1.WAPIRZ1Config;
@@ -83,6 +89,12 @@ public class OakridgeSensorI18nTest
         "/com/botts/impl/service/oscar/siteinfo/i18n/ConfigMessages",
         "/com/botts/impl/service/oscar/video/i18n/ConfigMessages",
         "/com/botts/impl/service/oscar/retention/i18n/ConfigMessages",
+        "/com/botts/impl/service/bucket/i18n/ConfigMessages",
+        "/com/botts/impl/service/dailyfile/i18n/ConfigMessages",
+        "/org/sensorhub/impl/security/session/i18n/ConfigMessages",
+        "/org/sensorhub/impl/utils/rad/dailyfile/i18n/ConfigMessages",
+        "/com/botts/impl/process/occupancy/i18n/ConfigMessages",
+        "/com/botts/impl/process/rs350/occupancy/i18n/ConfigMessages",
         "/com/botts/ui/oscar/forms/i18n/ConfigMessages");
 
     private static final List<Class<?>> MODULE_CONFIGS = Arrays.asList(
@@ -103,6 +115,11 @@ public class OakridgeSensorI18nTest
         ZSE18Config.class,
         ZW100Config.class,
         OSCARServiceConfig.class,
+        BucketServiceConfig.class,
+        DailyFileJournalServiceConfig.class,
+        BasicSessionConfig.class,
+        OccupancyProcessConfig.class,
+        Rs350OccupancyProcessConfig.class,
         ZwaveCommServiceConfig.class);
 
     private static final List<Class<?>> README_CONFIGS = Arrays.asList(
@@ -168,6 +185,12 @@ public class OakridgeSensorI18nTest
         SiteDiagramConfig.LatLonLocation.class,
         VideoRetentionConfig.class,
         StoragePressureRetentionConfig.class,
+        BucketServiceConfig.class,
+        DailyFileJournalServiceConfig.class,
+        DailyFileJournalClientConfig.class,
+        BasicSessionConfig.class,
+        OccupancyProcessConfig.class,
+        Rs350OccupancyProcessConfig.class,
         ZwaveCommServiceConfig.class,
         ZwaveCommServiceConfig.NodeList.class);
 
