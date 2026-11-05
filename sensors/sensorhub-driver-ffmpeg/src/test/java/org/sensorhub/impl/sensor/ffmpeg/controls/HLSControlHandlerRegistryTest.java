@@ -65,6 +65,23 @@ public class HLSControlHandlerRegistryTest {
         }
     }
 
+    @Test
+    public void hlsAndFileControlsUseDedicatedDaemonExecutorsOutsideCommonPool() throws Exception {
+        var hlsField = HLSControl.class.getDeclaredField("HLS_CONTROL_EXECUTOR");
+        hlsField.setAccessible(true);
+        ExecutorService hlsExecutor = (ExecutorService) hlsField.get(null);
+
+        var fileField = FileControl.class.getDeclaredField("FILE_CONTROL_EXECUTOR");
+        fileField.setAccessible(true);
+        ExecutorService fileExecutor = (ExecutorService) fileField.get(null);
+
+        assertNotSame(hlsExecutor, fileExecutor);
+        String hlsThreadName = hlsExecutor.submit(() -> Thread.currentThread().getName()).get(5, TimeUnit.SECONDS);
+        String fileThreadName = fileExecutor.submit(() -> Thread.currentThread().getName()).get(5, TimeUnit.SECONDS);
+        org.junit.Assert.assertTrue(hlsThreadName.startsWith("OSCAR-hls-control-"));
+        org.junit.Assert.assertTrue(fileThreadName.startsWith("OSCAR-file-control-"));
+    }
+
     private static final class TestBucketService implements IBucketService {
         private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
         private final AtomicInteger registrationCount = new AtomicInteger();
