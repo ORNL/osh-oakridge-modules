@@ -21,6 +21,11 @@ import java.nio.file.Paths;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class HLSControl<FFmpegConfigType extends FFMPEGConfig> extends AbstractSensorControl<FFMPEGSensorBase<FFmpegConfigType>> implements FFmpegControl, IStreamingControlInterfaceWithResult {
     public static final String SENSOR_CONTROL_NAME = "ffmpegHlsControl";
@@ -43,6 +48,25 @@ public class HLSControl<FFmpegConfigType extends FFMPEGConfig> extends AbstractS
     private volatile boolean forceStopPending = false;
 
     private static final Logger logger = LoggerFactory.getLogger(HLSControl.class);
+    private static final int MAX_HLS_CONTROL_THREADS = 16;
+    private static final AtomicInteger HLS_THREAD_COUNTER = new AtomicInteger();
+    private static final ExecutorService HLS_CONTROL_EXECUTOR = createHlsControlExecutor();
+
+    private static ExecutorService createHlsControlExecutor() {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                MAX_HLS_CONTROL_THREADS,
+                MAX_HLS_CONTROL_THREADS,
+                60L,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "OSCAR-hls-control-" + HLS_THREAD_COUNTER.incrementAndGet());
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
 
     public HLSControl(FFMPEGSensorBase<FFmpegConfigType> sensor, FileOutput<?> fileOutput) throws DataStoreException {
         super(SENSOR_CONTROL_NAME, sensor);
@@ -118,7 +142,7 @@ public class HLSControl<FFmpegConfigType extends FFMPEGConfig> extends AbstractS
 
     @Override
     public CompletableFuture<ICommandStatus> submitCommand(ICommandData command) {
-        return CompletableFuture.supplyAsync(() -> executeCommand(command));
+        return CompletableFuture.supplyAsync(() -> executeCommand(command), HLS_CONTROL_EXECUTOR);
     }
 
     private synchronized ICommandStatus executeCommand(ICommandData command) {

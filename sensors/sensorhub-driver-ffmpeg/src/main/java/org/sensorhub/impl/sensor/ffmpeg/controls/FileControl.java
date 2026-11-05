@@ -28,6 +28,11 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class FileControl<FFmpegConfigType extends FFMPEGConfig> extends AbstractSensorControl<FFMPEGSensorBase<FFmpegConfigType>> implements FFmpegControl {
     public static final String SENSOR_CONTROL_NAME = "ffmpegFileControl";
@@ -46,6 +51,25 @@ public class FileControl<FFmpegConfigType extends FFMPEGConfig> extends Abstract
     // bounded post-roll instead of publishing an MP4 that can never enter five-frame retention.
     static final int MINIMUM_RETAINABLE_VIDEO_PACKETS = 5;
     static final Duration RECORDING_COMPLETENESS_TIMEOUT = Duration.ofSeconds(5);
+    private static final int MAX_FILE_CONTROL_THREADS = 64;
+    private static final AtomicInteger FILE_THREAD_COUNTER = new AtomicInteger();
+    private static final ExecutorService FILE_CONTROL_EXECUTOR = createFileControlExecutor();
+
+    private static ExecutorService createFileControlExecutor() {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                MAX_FILE_CONTROL_THREADS,
+                MAX_FILE_CONTROL_THREADS,
+                60L,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "OSCAR-file-control-" + FILE_THREAD_COUNTER.incrementAndGet());
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
 
     private final IBucketStore bucketStore;
     DataRecord commandData;
@@ -113,7 +137,7 @@ public class FileControl<FFmpegConfigType extends FFMPEGConfig> extends Abstract
             } catch (Exception failure) {
                 throw new CompletionException(failure);
             }
-        });
+        }, FILE_CONTROL_EXECUTOR);
     }
 
     @Override
@@ -156,10 +180,11 @@ public class FileControl<FFmpegConfigType extends FFMPEGConfig> extends Abstract
 
     @Override
     public CompletableFuture<ICommandStatus> submitCommand(ICommandData command) {
-        // A synchronized execute method prevents simultaneous mutations, but common-pool tasks
+        // A synchronized execute method prevents simultaneous mutations, but worker tasks
         // can acquire that monitor in a different order than submitCommand was called. The FIFO
-        // preserves the required open -> close/cancel -> next open camera lifecycle.
-        return commandQueue.submit(() -> CompletableFuture.supplyAsync(() -> executeCommand(command)));
+        // preserves the required open -> close/cancel -> next open camera lifecycle without
+        // contending with ForkJoinPool.commonPool() or interactive HLS commands.
+        return commandQueue.submit(() -> CompletableFuture.supplyAsync(() -> executeCommand(command), FILE_CONTROL_EXECUTOR));
     }
 
     private synchronized ICommandStatus executeCommand(ICommandData command) {
