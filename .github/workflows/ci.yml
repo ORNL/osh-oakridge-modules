@@ -49,6 +49,7 @@ jobs:
         run: |
           ./gradlew --no-parallel \
             :sensorhub-service-oscar:test \
+            :sensorhub-webui-oscar:test \
             :sensorhub-service-bucket:test \
             :sensorhub-service-dailyfile-journal:test \
             :sensorhub-system-lane:test
@@ -57,6 +58,7 @@ jobs:
             :sensorhub-utils-rad:test \
             --tests org.sensorhub.impl.utils.rad.cambio.CambioTempDirectoryTest \
             --tests org.sensorhub.impl.utils.rad.dailyfile.DailyFileAppenderTest \
+            --tests org.sensorhub.impl.utils.rad.eml.EmlArchiveAndRuntimeTest \
             --tests org.sensorhub.impl.utils.rad.output.OccupancyOutputConcurrencyTest
 
           ./gradlew --no-parallel \

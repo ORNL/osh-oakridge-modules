@@ -2,6 +2,9 @@ package com.botts.impl.sensor.rapiscan;
 
 
 import com.opencsv.CSVReader;
+import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
+import org.sensorhub.impl.utils.rad.eml.PendingEmlAutoAdjudicationRegistry;
+import org.sensorhub.impl.utils.rad.model.Adjudication;
 import org.sensorhub.impl.utils.rad.model.Occupancy;
 
 import java.io.BufferedReader;
@@ -13,6 +16,7 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -374,6 +378,8 @@ public class MessageHandler {
                 occupancyEndTime = receivedAtMillis;
                 gammaMax = getGammaMax(occupancyGammaBatch);
                 neutronMax = getNeutronMax(occupancyNeutronBatch);
+                boolean hadGammaAlarm = Boolean.TRUE.equals(isGammaAlarm);
+                boolean hadNeutronAlarm = Boolean.TRUE.equals(isNeutronAlarm);
 
                 Occupancy occupancy = new Occupancy.Builder()
                         .occupancyCount(Integer.parseInt(csvLine[1]))
@@ -381,13 +387,12 @@ public class MessageHandler {
                         .endTime(occupancyEndTime/1000d)
                         .samplingTime(receivedAtMillis/1000d)
                         .neutronBackground(Double.parseDouble(csvLine[2])/1000)
-                        .gammaAlarm(isGammaAlarm)
-                        .neutronAlarm(isNeutronAlarm)
+                        .gammaAlarm(hadGammaAlarm)
+                        .neutronAlarm(hadNeutronAlarm)
                         .maxGammaCount(gammaMax)
                         .maxNeutronCount(neutronMax)
                         .build();
 
-                parentSensor.getOccupancyOutput().setData(occupancy);
                 currentOccupancy = false;
                 isGammaAlarm = false;
                 isNeutronAlarm = false;
@@ -397,12 +402,29 @@ public class MessageHandler {
                 occupancyNeutronBatch.clear();
                 occupancyGammaBatch.clear();
 
-                if (parentSensor.getConfiguration().emlConfig.emlEnabled) {
-                    // TODO: Make better determination of whether occupancy ended
-                    var results = parentSensor.getEmlService().processCurrentOccupancy();
-                    parentSensor.getEmlScanContextualOutput().handleScanContextualMessage(results);
-                    parentSensor.getEmlContextualOutput().handleContextualMessage(results);
-                    parentSensor.getEmlAnalysisOutput().handleAnalysisMessage(results);
+                Optional<EmlEvaluationResult> emlEvaluation = Optional.empty();
+                if (parentSensor.getConfiguration().emlConfig.emlEnabled && parentSensor.getEmlService() != null) {
+                    emlEvaluation = parentSensor.getEmlService().processCurrentOccupancy();
+                    if (emlEvaluation.isPresent()) {
+                        EmlEvaluationResult eval = emlEvaluation.get();
+                        if ((hadGammaAlarm || hadNeutronAlarm) && eval.isAutoReleaseNonThreat()) {
+                            occupancy.addAdjudicatedId(Adjudication.EML_NON_THREAT_MARKER);
+                            PendingEmlAutoAdjudicationRegistry.register(
+                                    parentSensor.getUniqueIdentifier(),
+                                    occupancy.getSamplingTime(),
+                                    occupancy.getOccupancyCount(),
+                                    eval);
+                        }
+                    }
+                }
+
+                parentSensor.getOccupancyOutput().setData(occupancy);
+
+                if (emlEvaluation.isPresent()) {
+                    EmlEvaluationResult eval = emlEvaluation.get();
+                    parentSensor.getEmlScanContextualOutput().handleScanContextualMessage(eval);
+                    parentSensor.getEmlContextualOutput().handleContextualMessage(eval);
+                    parentSensor.getEmlAnalysisOutput().handleAnalysisMessage(eval);
                 }
             }
 

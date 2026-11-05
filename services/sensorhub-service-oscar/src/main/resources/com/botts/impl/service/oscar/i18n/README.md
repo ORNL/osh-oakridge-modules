@@ -127,6 +127,7 @@ In the left navigation, open **Services > OSCAR Service Module**.
 | Module ID | Unique local registry ID. Keep the generated value unless performing a controlled migration. |
 | Description | Optional administrator description. |
 | Spreadsheet Config Path | Uploads a CSV lane configuration immediately. **Download** exports the currently loaded lanes as `config.csv`; it is unavailable when no lanes are loaded. |
+| EML Plugin Path | Uploads an external LLNL EML plugin archive (`.jar`, `.tar.gz`, `.tgz`, or `.zip`) into private OSCAR state (`/var/lib/oscar/eml-plugin/`) and hot-activates EML on Rapiscan lanes where **EML Analysis** (`EMLEnabled=true`) is enabled. OSCAR does not distribute EML; package a site-authorized `EML-VM250-*.tar.gz` into a single uploadable JAR with `tools/package-eml-jar.sh` (or `tools/package-eml-jar.ps1`) or upload the archive directly. |
 | Node ID | Required unique identifier for this OSCAR node. Use the site's naming convention and do not reuse it on another node. |
 | Database ID | Observation-system database used by OSCAR. If blank, statistics use the federated database, but database-specific purge/export jobs start only when a database is explicitly selected. |
 | WebID API Root | Base URL of the Sandia Full Spectrum Web ID API. The default is `https://full-spectrum.sandia.gov/api/v1`. Use an approved local endpoint for an isolated deployment, or leave it blank to disable creation of the Web ID client. |
@@ -211,7 +212,7 @@ never run an older binary against 3.11.0 storage.
 
 ### Custom disposition codes
 
-In the OSCAR Service Module configuration, add entries to **Custom Disposition Codes** (`customAdjudicationCodes`). Each entry needs a unique integer `code` greater than 11 and a nonblank `label`. Codes 0–11 remain built in and cannot be replaced. For example:
+In the OSCAR Service Module configuration, add entries to **Custom Disposition Codes** (`customAdjudicationCodes`). Each entry needs a unique integer `code` greater than 11 (excluding `9999`, which is reserved for automated **EML Non-Threat** adjudications) and a nonblank `label`. Codes 0–11 remain built in and cannot be replaced. For example:
 
 ```json
 "customAdjudicationCodes": [{"code": 12, "label": "Local review completed"}]
@@ -510,7 +511,7 @@ Open `https://<oscar-host>/`. The dashboard should show lane status, the event t
 2. Confirm that the lane marker is near the expected point on the diagram.
 3. Use the layer control to compare the site diagram with OSM or Esri when alignment needs verification.
 4. Confirm that new occupancies reach the event table and that start/end time, gamma, neutron, and status values are plausible.
-5. The dashboard alarm table contains alarming occupancies that have not yet been adjudicated. Select a row once to open its preview; select it again to close the preview. The selected status cell is color-coded for Gamma, Neutron, or Gamma & Neutron.
+5. The dashboard alarm table contains alarming occupancies that have not yet been adjudicated. On Rapiscan VM250 lanes with **EML Analysis** enabled and an uploaded EML plugin active, alarms classified by EML as non-threat (`RELEASE`) are suppressed from the dashboard alarm queue and browser notifications, and automatically adjudicated as **EML Non-Threat** (code `9999`) with queryable EML metadata; alarms classified as `INVESTIGATE` (or occurring while no EML plugin is loaded) appear in the dashboard queue as usual. Select a row once to open its preview; select it again to close the preview. The selected status cell is color-coded for Gamma, Neutron, or Gamma & Neutron.
 6. In the preview, review the CPS/NSIGMA chart tabs and each available recorded-camera item. Arrow controls move between media items.
 7. Use the expand action to open the full Event Details page. A double-click on a table row also opens Event Details.
 
@@ -537,7 +538,7 @@ The **Events** page is the historical list across configured local and federated
 - Use **Find event by UUID** to paste the durable event identifier from Event Details, a PDF, or an alarm transfer. OSCAR performs an exact observation lookup rather than requiring a filter chain, then opens that event directly. The identifier is OSCAR's public encoded observation ID; it is labeled Event UUID for operators but is not required to have RFC-4122 UUID punctuation.
 - **Columns** shows/hides optional columns; **Filters** opens server-side filters; **Density** changes row spacing. Filters, counts, pages, and bulk selection apply to the complete matching server-side result set, not only the currently visible page.
 - Build filter groups with **All conditions (AND)** or **Any condition (OR)**, and nest groups when a workflow needs both. Up to 20 rules and three group levels are supported. Node and lane conditions choose the streams to query; occupancy ID, time, gamma/neutron maxima, alarm status, and adjudication conditions are sent to the server for each applicable lane. Applying a filter returns to page 1.
-- Use the operators offered for each field. Times support before, after, and between; numeric values support inclusive limits, between, and exact match; status supports None, Gamma, Neutron, or Gamma & Neutron; adjudication supports Yes/No and empty/not empty.
+- Use the operators offered for each field. Times support before, after, and between; numeric values support inclusive limits, between, and exact match; status supports None, Gamma, Neutron, or Gamma & Neutron; adjudication supports Yes, No, **EML Non-Threat** (to query alarms auto-adjudicated by EML), and empty/not empty.
 - Check individual unadjudicated alarms, or select **Select all filtered alarms** to freeze the complete eligible result set at the current load time, including other pages. You may then clear individual rows. Bulk adjudication applies one code, secondary-inspection state, optional vehicle ID, and notes to the selection; it processes at most six events concurrently. It does not attach evidence or isotope selections; use Event Details when those are required.
 - Review the count and warning before submitting. Successful events leave the alarm queue or show as adjudicated. Failed events remain visible and selected, and **Retry failed** retries only those failures. If OSCAR cannot enumerate the full filtered result, it selects nothing rather than silently adjudicating a partial set.
 - Results are newest first and paged 15 at a time. The footer advances between pages. Counts cover the occupancy streams currently reachable from every configured node.
@@ -603,6 +604,7 @@ Deleting an item before submission removes it only from the pending form. After 
 | Test/Maintenance | 9 Authorized Test, Maintenance, or Training Activity |
 | Tamper/Fault | 10 Unauthorized Activity |
 | Other | 11 Other |
+| Automated | 9999 EML Non-Threat (system-generated when EML classifies an alarm as non-threat; includes release/investigate probabilities, model/collimation metadata, and source breakdown in **Event Details**) |
 
 Use site procedure—not convenience—to choose a code.
 

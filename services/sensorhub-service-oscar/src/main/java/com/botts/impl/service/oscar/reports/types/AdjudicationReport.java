@@ -25,6 +25,7 @@ import org.sensorhub.api.command.ICommandStreamInfo;
 import org.sensorhub.api.data.IObsData;
 import org.sensorhub.api.datastore.DataStoreException;
 import org.sensorhub.impl.utils.rad.RADHelper;
+import org.sensorhub.impl.utils.rad.model.Adjudication;
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -59,7 +60,8 @@ public class AdjudicationReport extends Report {
             Map.of("code", 8, "label", "Code 8: Other", "group", "False Alarm"),
             Map.of("code", 9, "label", "Code 9: Authorized Test, Maintenance, or Training Activity", "group", "Test/Maintenance"),
             Map.of("code", 10, "label", "Code 10: Unauthorized Activity", "group", "Tamper/Fault"),
-            Map.of("code", 11, "label", "Code 11: Other", "group", "Other")
+            Map.of("code", 11, "label", "Code 11: Other", "group", "Other"),
+            Map.of("code", Adjudication.EML_NON_THREAT_CODE, "label", "EML Non-Threat", "group", "Automated")
     );
 
     private record DatasetResult(DefaultCategoryDataset dataset, Map<String, String> tableData) {}
@@ -169,6 +171,10 @@ public class AdjudicationReport extends Report {
             renderer.setSeriesPaint(dataset.getRowIndex("False Alarm"), Color.GREEN);
             renderer.setSeriesPaint(dataset.getRowIndex("Test/Maintenance"), Color.ORANGE);
             renderer.setSeriesPaint(dataset.getRowIndex("Tamper/Fault"), new Color(128, 0, 128));
+            int automatedSeriesIdx = dataset.getRowIndex("Automated");
+            if (automatedSeriesIdx >= 0) {
+                renderer.setSeriesPaint(automatedSeriesIdx, new Color(14, 116, 144));
+            }
             renderer.setItemMargin(0.05);
 
             NumberAxis rangeAxis = (NumberAxis) plot.getRangeAxis();

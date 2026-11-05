@@ -86,6 +86,7 @@ public class AdjudicationCodeTests {
     public void builtInCodesWorkWithoutService() {
         for (int code = 0; code <= 11; code++)
             assertTrue(control.accepts(code));
+        assertTrue(control.accepts(Adjudication.EML_NON_THREAT_CODE));
         assertFalse(control.accepts(-1));
         assertFalse(control.accepts(12));
     }
@@ -262,7 +263,7 @@ public class AdjudicationCodeTests {
 
     @Test
     public void rejectsReservedNegativeDuplicateAndUnlabeledCodes() {
-        for (int code : new int[]{-1, 0, 11})
+        for (int code : new int[]{-1, 0, 11, Adjudication.EML_NON_THREAT_CODE})
             assertInvalid(entry(code, "Reserved"));
         assertInvalid(entry(12, null));
         assertInvalid(entry(12, "  "));

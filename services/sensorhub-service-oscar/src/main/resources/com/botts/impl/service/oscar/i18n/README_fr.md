@@ -127,6 +127,7 @@ Dans la navigation de gauche, ouvrez **Services > Module de service OSCAR**.
 | ID du module | Identifiant local unique. Conservez celui généré sauf migration contrôlée. |
 | Description | Description administrative facultative. |
 | Chemin de configuration de feuille de calcul | Téléverse immédiatement un CSV de voies. **Télécharger** exporte les voies chargées dans `config.csv` ; indisponible s'il n'y a aucune voie. |
+| Chemin du module EML | Téléverse une archive externe du module LLNL EML (`.jar`, `.tar.gz`, `.tgz` ou `.zip`) dans l'état privé d'OSCAR (`/var/lib/oscar/eml-plugin/`) et active à chaud EML sur les voies Rapiscan avec **Analyse EML** (`EMLEnabled=true`) activée. OSCAR ne distribue pas EML ; empaquetez l'archive autorisée `EML-VM250-*.tar.gz` avec `tools/package-eml-jar.sh` (ou `tools/package-eml-jar.ps1`) ou téléversez-la directement. |
 | ID du nœud | Identifiant obligatoire et unique de ce nœud OSCAR. Ne le réutilisez pas sur un autre nœud. |
 | ID de base de données | Base d'observations utilisée. Vide, les statistiques utilisent la base fédérée ; les tâches de purge/export propres à une base ne démarrent qu'avec une sélection explicite. |
 | Racine de l'API WebID | URL de Sandia Full Spectrum Web ID. Valeur par défaut : `https://full-spectrum.sandia.gov/api/v1`. Utilisez un service local approuvé en environnement isolé ou laissez vide pour ne pas créer le client Web ID. |
@@ -211,7 +212,7 @@ la même sauvegarde coordonnée antérieure à 3.11.0 ; n'exécutez jamais un an
 
 ### Codes de disposition personnalisés
 
-Dans la configuration du module de service OSCAR, ajoutez des entrées à **Custom Disposition Codes** (`customAdjudicationCodes`). Chaque entrée nécessite un entier `code` unique supérieur à 11 et un libellé `label` non vide. Les codes 0–11 sont intégrés et ne peuvent pas être remplacés. Exemple :
+Dans la configuration du module de service OSCAR, ajoutez des entrées à **Custom Disposition Codes** (`customAdjudicationCodes`). Chaque entrée nécessite un entier `code` unique supérieur à 11 (à l'exception de `9999`, réservé aux adjudications automatiques **Sans menace EML**) et un libellé `label` non vide. Les codes 0–11 sont intégrés et ne peuvent pas être remplacés. Exemple :
 
 ```json
 "customAdjudicationCodes": [{"code": 12, "label": "Examen local terminé"}]
@@ -499,7 +500,7 @@ Ouvrez `https://<hote-oscar>/`. Le tableau de bord doit afficher l'état des voi
 2. Vérifiez la position de chaque marqueur.
 3. Utilisez les couches pour comparer le plan à OSM ou Esri.
 4. Vérifiez que les nouvelles occupations arrivent et que heures, gamma, neutrons et état sont plausibles.
-5. La table d'alarmes contient les occupations en alarme non encore adjugées. Sélectionnez une ligne pour ouvrir/fermer l'aperçu; l'état colore Gamma, Neutron ou Gamma et Neutron.
+5. La table d'alarmes contient les occupations en alarme non encore adjugées. Sur les voies Rapiscan VM250 avec **Analyse EML** activée et un module EML téléversé, les alarmes classées sans menace (`RELEASE`) par EML sont masquées du tableau de bord et des notifications navigateur et adjugées automatiquement comme **Sans menace EML** (code `9999`) avec métadonnées EML interrogeables ; les alarmes `INVESTIGATE` apparaissent normalement. Sélectionnez une ligne pour ouvrir/fermer l'aperçu; l'état colore Gamma, Neutron ou Gamma et Neutron.
 6. Vérifiez les onglets CPS/NSIGMA et chaque vidéo; les flèches changent de média.
 7. Agrandissez ou double-cliquez la ligne pour ouvrir **Détails de l'événement**.
 
@@ -526,7 +527,7 @@ L'envoi ajoute un enregistrement sans modifier l'observation d'origine. Pour pre
 - Utilisez **Rechercher un événement par UUID** pour coller l'identifiant durable affiché dans les Détails de l'événement, un PDF ou un transfert d'alarme. OSCAR recherche exactement cette observation et ouvre l'événement sans reconstruire une suite de filtres. Il s'agit de l'ID public codé de l'observation OSCAR ; il est présenté comme UUID de l'événement aux opérateurs mais n'est pas tenu d'utiliser la ponctuation RFC-4122.
 - **Colonnes** masque/affiche les champs, **Filtres** ouvre les filtres serveur et **Densité** règle l'espacement.
 - Créez des groupes avec **Toutes les conditions (ET)** ou **Une condition au choix (OU)** et imbriquez-les si les deux logiques sont nécessaires. Jusqu'à 20 règles et trois niveaux de groupes sont admis. Les conditions de nœud et de voie choisissent les flux ; celles d'ID d'occupation, d'heure, de maxima gamma/neutron, d'état et d'adjudication sont envoyées au serveur pour chaque voie concernée. L'application revient à la première page.
-- Utilisez les opérateurs proposés pour chaque champ. Les heures acceptent avant, après et entre ; les nombres, des limites inclusives, entre et l'égalité ; l'état, Aucun, Gamma, Neutron ou Gamma et Neutron ; et l'adjudication, Oui/Non et vide/non vide.
+- Utilisez les opérateurs proposés pour chaque champ. Les heures acceptent avant, après et entre ; les nombres, des limites inclusives, entre et l'égalité ; l'état, Aucun, Gamma, Neutron ou Gamma et Neutron ; et l'adjudication, Oui, Non, **Sans menace EML** (pour interroger les alarmes adjugées automatiquement par EML) et vide/non vide.
 - Cochez séparément des alarmes non adjugées ou choisissez **Sélectionner toutes les alarmes filtrées** pour figer l'ensemble admissible au moment du chargement, y compris les autres pages. Vous pouvez ensuite décocher des lignes. L'adjudication groupée applique à la sélection un code, un état d'inspection secondaire, un ID véhicule facultatif et des notes, avec au plus six événements traités simultanément. Elle ne joint ni preuves ni choix d'isotopes ; utilisez les Détails de l'événement lorsque ceux-ci sont nécessaires.
 - Vérifiez le nombre et l'avertissement avant l'envoi. Les succès quittent la file d'alarmes ou apparaissent adjugés. Les échecs restent visibles et sélectionnés ; **Réessayer les échecs** ne relance qu'eux. Si OSCAR ne peut pas énumérer tout le résultat filtré, il ne sélectionne rien plutôt que d'adjuger silencieusement un sous-ensemble.
 - Résultats du plus récent, par pages de 15. Sélection = aperçu; double-clic ou **Détails** = page complète.
@@ -563,6 +564,7 @@ Les données disponibles dépendent du détecteur, de la caméra, de la conserva
 | Test/Maintenance | 9 Activité autorisée de test, maintenance ou formation |
 | Sabotage/Défaut | 10 Activité non autorisée |
 | Autre | 11 Autre |
+| Automatisé | 9999 Sans menace EML (généré par le système lorsqu'EML classe une alarme sans menace ; inclut probabilités, modèle/collimation et détail des sources dans **Détails de l'événement**) |
 
 Choisissez selon la procédure du site, jamais par commodité.
 

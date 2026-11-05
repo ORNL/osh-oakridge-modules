@@ -127,6 +127,7 @@ En la navegación izquierda, abra **Servicios > Módulo de servicio OSCAR**.
 | ID del módulo | ID local único. Conserve el generado salvo migración controlada. |
 | Descripción | Descripción administrativa opcional. |
 | Ruta de configuración de hoja de cálculo | Carga inmediatamente un CSV de carriles. **Descargar** exporta los carriles cargados como `config.csv`; no está disponible si no hay carriles. |
+| Ruta del complemento EML | Carga un archivo externo del complemento LLNL EML (`.jar`, `.tar.gz`, `.tgz` o `.zip`) en el estado privado de OSCAR (`/var/lib/oscar/eml-plugin/`) y activa en caliente EML en los carriles Rapiscan con **Análisis EML** (`EMLEnabled=true`) activado. OSCAR no distribuye EML; empaquete el archivo `EML-VM250-*.tar.gz` autorizado con `tools/package-eml-jar.sh` (o `tools/package-eml-jar.ps1`) o cárguelo directamente. |
 | ID de nodo | Identificador obligatorio y único de este nodo OSCAR. No lo reutilice en otro nodo. |
 | ID de base de datos | Base de observaciones usada por OSCAR. En blanco, las estadísticas usan la base federada; los trabajos de purga/exportación específicos solo arrancan con una base elegida explícitamente. |
 | Raíz de API WebID | URL base de Sandia Full Spectrum Web ID. Predeterminado: `https://full-spectrum.sandia.gov/api/v1`. Use un servicio local aprobado para despliegues aislados o déjelo vacío para no crear el cliente Web ID. |
@@ -211,7 +212,7 @@ misma copia coordinada anterior a 3.11.0; no ejecute un binario antiguo sobre es
 
 ### Códigos de disposición personalizados
 
-En la configuración del módulo de servicio OSCAR, añada entradas a **Custom Disposition Codes** (`customAdjudicationCodes`). Cada entrada requiere un entero `code` único mayor que 11 y una descripción `label` no vacía. Los códigos 0–11 están integrados y no se pueden reemplazar. Ejemplo:
+En la configuración del módulo de servicio OSCAR, añada entradas a **Custom Disposition Codes** (`customAdjudicationCodes`). Cada entrada requiere un entero `code` único mayor que 11 (excepto `9999`, reservado para adjudicaciones automáticas **Sin amenaza EML**) y una descripción `label` no vacía. Los códigos 0–11 están integrados y no se pueden reemplazar. Ejemplo:
 
 ```json
 "customAdjudicationCodes": [{"code": 12, "label": "Revisión local completada"}]
@@ -499,7 +500,7 @@ Abra `https://<host-oscar>/`. El panel debe mostrar estados, tabla de eventos y 
 2. Compruebe que el marcador esté en el punto esperado.
 3. Use el control de capas para comparar el plano con OSM o Esri.
 4. Verifique que nuevas ocupaciones lleguen a la tabla y que tiempos, gamma, neutrones y estado sean plausibles.
-5. La tabla de alarmas contiene ocupaciones con alarma aún no adjudicadas. Seleccione una fila para abrir/cerrar su vista previa; el estado distingue Gamma, Neutrón o Gamma y Neutrón por color.
+5. La tabla de alarmas contiene ocupaciones con alarma aún no adjudicadas. En carriles Rapiscan VM250 con **Análisis EML** activo y un complemento EML cargado, las alarmas clasificadas por EML como sin amenaza (`RELEASE`) se omiten del panel y de las notificaciones del navegador y se adjudican automáticamente como **Sin amenaza EML** (código `9999`) con metadatos EML consultables; las alarmas `INVESTIGATE` aparecen normalmente en el panel. Seleccione una fila para abrir/cerrar su vista previa; el estado distingue Gamma, Neutrón o Gamma y Neutrón por color.
 6. Revise las pestañas CPS/NSIGMA y cada vídeo disponible. Las flechas cambian de elemento multimedia.
 7. Use expandir o haga doble clic en la fila para abrir **Detalles del evento**.
 
@@ -526,7 +527,7 @@ El envío añade un registro de adjudicación; no modifica la observación del d
 - Use **Buscar evento por UUID** para pegar el identificador permanente mostrado en Detalles del evento, un PDF o una transferencia de alarma. OSCAR consulta exactamente esa observación y abre el evento sin reconstruir una cadena de filtros. Es el ID público codificado de la observación OSCAR; se presenta como UUID del evento para los operadores, pero no tiene que usar la puntuación RFC-4122.
 - **Columnas** muestra u oculta campos; **Filtros** abre filtros del servidor; **Densidad** cambia el espaciado.
 - Cree grupos con **Todas las condiciones (Y)** o **Cualquier condición (O)** y anide grupos cuando necesite ambas lógicas. Se admiten hasta 20 reglas y tres niveles de grupos. Las condiciones de nodo y carril eligen los flujos; las de ID de ocupación, tiempo, máximos gamma/neutrón, estado y adjudicación se envían al servidor para cada carril aplicable. Al aplicar, se vuelve a la primera página.
-- Use los operadores ofrecidos para cada campo. Las horas admiten antes, después y entre; los números, límites inclusivos, entre e igualdad; el estado, Ninguno, Gamma, Neutrón o Gamma y Neutrón; y la adjudicación, Sí/No y vacío/no vacío.
+- Use los operadores ofrecidos para cada campo. Las horas admiten antes, después y entre; los números, límites inclusivos, entre e igualdad; el estado, Ninguno, Gamma, Neutrón o Gamma y Neutrón; y la adjudicación, Sí, No, **Sin amenaza EML** (para consultar alarmas adjudicadas automáticamente por EML) y vacío/no vacío.
 - Marque alarmas no adjudicadas por separado o pulse **Seleccionar todas las alarmas filtradas** para fijar el conjunto elegible completo en el momento de la carga, incluidas otras páginas. Después puede desmarcar filas concretas. La adjudicación masiva aplica a la selección un código, estado de inspección secundaria, ID de vehículo opcional y notas, con un máximo de seis eventos simultáneos. No adjunta evidencias ni selecciones de isótopos; use Detalles del evento cuando sean necesarias.
 - Revise el recuento y la advertencia antes de enviar. Los eventos correctos salen de la cola o aparecen como adjudicados. Los fallidos permanecen visibles y seleccionados; **Reintentar fallidos** procesa solo esos fallos. Si OSCAR no puede enumerar todo el resultado filtrado, no selecciona nada en vez de adjudicar silenciosamente un subconjunto.
 - Los resultados se ordenan del más reciente y se paginan de 15 en 15.
@@ -564,6 +565,7 @@ La disponibilidad depende del detector, cámara, retención, antigüedad, permis
 | Prueba/Mantenimiento | 9 Actividad autorizada de prueba, mantenimiento o formación |
 | Manipulación/Fallo | 10 Actividad no autorizada |
 | Otro | 11 Otro |
+| Automatizado | 9999 Sin amenaza EML (generado por el sistema cuando EML clasifica una alarma como sin amenaza; incluye probabilidades, modelo/colimación y desglose de fuentes en **Detalles del evento**) |
 
 Elija según el procedimiento del sitio, no por conveniencia.
 

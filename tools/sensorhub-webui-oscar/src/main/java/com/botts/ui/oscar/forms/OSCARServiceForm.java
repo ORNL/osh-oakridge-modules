@@ -3,6 +3,7 @@ package com.botts.ui.oscar.forms;
 import com.botts.impl.service.oscar.IFileHandler;
 import com.botts.impl.service.oscar.OSCARServiceConfig;
 import com.botts.impl.service.oscar.OSCARServiceModule;
+import com.botts.impl.service.oscar.eml.EmlPluginHandler;
 import com.botts.impl.service.oscar.siteinfo.SitemapDiagramHandler;
 import com.vaadin.server.FileDownloader;
 import com.vaadin.server.StreamResource;
@@ -14,12 +15,14 @@ import com.vaadin.v7.ui.Field;
 import com.vaadin.v7.ui.TextField;
 import com.vaadin.v7.ui.Upload;
 import org.sensorhub.api.datastore.DataStoreException;
+import org.sensorhub.impl.utils.rad.eml.EmlRuntimeStatus;
 import org.sensorhub.ui.DisplayUtils;
 import org.sensorhub.ui.FieldWrapper;
 import org.sensorhub.ui.GenericConfigForm;
 import org.sensorhub.ui.data.MyBeanItem;
 
 import java.io.OutputStream;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.sensorhub.ui.AdminI18n.trConfig;
@@ -28,6 +31,7 @@ public class OSCARServiceForm extends GenericConfigForm {
 
     private static final String PROP_SPREADSHEET = "spreadsheetConfigPath";
     private static final String PROP_SITEMAP = "siteDiagramConfig.siteDiagramPath";
+    private static final String PROP_EML_PLUGIN = "emlPluginPath";
     private final OSCARServiceModule oscarService;
 
 
@@ -51,14 +55,19 @@ public class OSCARServiceForm extends GenericConfigForm {
     protected Field<?> buildAndBindField(String label, String propId, Property<?> prop) {
         Field<?> field = super.buildAndBindField(label, propId, prop);
 
-        if (propId.endsWith(PROP_SPREADSHEET) || propId.endsWith(PROP_SITEMAP)) {
+        if (propId.endsWith(PROP_SPREADSHEET) || propId.endsWith(PROP_SITEMAP) || propId.endsWith(PROP_EML_PLUGIN)) {
 
-            IFileHandler fileHandler;
+            final EmlPluginHandler emlHandler = propId.endsWith(PROP_EML_PLUGIN) && oscarService != null
+                    ? oscarService.getEmlPluginHandler()
+                    : null;
+            final IFileHandler fileHandler;
 
             if (propId.endsWith(PROP_SPREADSHEET)) {
                 fileHandler = oscarService.getSpreadsheetHandler();
             } else if (propId.endsWith(PROP_SITEMAP)) {
                 fileHandler = oscarService.getSitemapDiagramHandler();
+            } else if (propId.endsWith(PROP_EML_PLUGIN)) {
+                fileHandler = emlHandler;
             } else {
                 fileHandler = null;
             }
@@ -86,6 +95,14 @@ public class OSCARServiceForm extends GenericConfigForm {
                     Upload upload = new Upload();
                     layout.addComponent(upload);
                     layout.setComponentAlignment(upload, Alignment.MIDDLE_LEFT);
+
+                    final Label emlStatusLabel = propId.endsWith(PROP_EML_PLUGIN) ? new Label() : null;
+                    if (emlStatusLabel != null) {
+                        emlStatusLabel.setValue(formatEmlStatusText(null, emlHandler != null ? emlHandler.getStatus() : null));
+                        layout.addComponent(emlStatusLabel);
+                        layout.setComponentAlignment(emlStatusLabel, Alignment.MIDDLE_LEFT);
+                    }
+
                     AtomicReference<String> uploadedObjectKey = new AtomicReference<>();
                     AtomicReference<Throwable> uploadFailure = new AtomicReference<>();
                     upload.setReceiver(new Upload.Receiver() {
@@ -95,7 +112,7 @@ public class OSCARServiceForm extends GenericConfigForm {
                             uploadedObjectKey.set(objectKey);
                             uploadFailure.set(null);
 
-                            if (!fileHandler.isValidFileType(objectKey, mimeType)) {
+                            if (fileHandler == null || !fileHandler.isValidFileType(objectKey, mimeType)) {
                                 uploadFailure.set(new IllegalArgumentException(trConfig(
                                         OSCARServiceForm.class,
                                         "ui.invalidFileType",
@@ -135,7 +152,11 @@ public class OSCARServiceForm extends GenericConfigForm {
                             fileLoaded = oscarService.getSitemapDiagramHandler()
                                     .handleFile(objectKey, siteDiagramConfig);
                         } else {
-                            fileLoaded = fileHandler.handleFile(objectKey);
+                            fileLoaded = fileHandler != null && fileHandler.handleFile(objectKey);
+                        }
+
+                        if (emlStatusLabel != null) {
+                            emlStatusLabel.setValue(formatEmlStatusText(null, emlHandler != null ? emlHandler.getStatus() : null));
                         }
 
                         if (!fileLoaded) {
@@ -161,6 +182,9 @@ public class OSCARServiceForm extends GenericConfigForm {
                         Throwable reason = uploadFailure.getAndSet(null);
                         if (reason == null)
                             reason = e.getReason();
+                        if (emlStatusLabel != null) {
+                            emlStatusLabel.setValue(formatEmlStatusText(null, emlHandler != null ? emlHandler.getStatus() : null));
+                        }
                         DisplayUtils.showErrorPopup(trConfig(
                                 OSCARServiceForm.class, "ui.uploadFailed", "Upload failed."), reason);
                     });
@@ -199,6 +223,26 @@ public class OSCARServiceForm extends GenericConfigForm {
             
         }
         return field;
+    }
+
+    static String formatEmlStatusText(Locale locale, EmlRuntimeStatus status) {
+        String notLoaded = locale == null
+                ? trConfig(OSCARServiceForm.class, "ui.emlStatus.notLoaded", "Not loaded")
+                : trConfig(locale, OSCARServiceForm.class, "ui.emlStatus.notLoaded", "Not loaded");
+        if (status == null || !status.loaded()) {
+            if (status != null && status.lastError() != null && !status.lastError().isBlank()) {
+                return notLoaded + " (" + status.lastError() + ")";
+            }
+            return notLoaded;
+        }
+        String ver = (status.versionId() == null || status.versionId().isBlank()) ? "loaded" : ("v" + status.versionId());
+        String details = (status.collimatedModelId() == null || status.collimatedModelId().isBlank())
+                ? ver
+                : (ver + ", " + status.collimatedModelId());
+        String template = locale == null
+                ? trConfig(OSCARServiceForm.class, "ui.emlStatus.active", "Active: {0} ({1})")
+                : trConfig(locale, OSCARServiceForm.class, "ui.emlStatus.active", "Active: {0} ({1})");
+        return template.replace("{0}", status.fileName()).replace("{1}", details);
     }
 
     static void recordUploadedObjectKey(TextField persistentPathField, String objectKey) {

@@ -2,7 +2,6 @@ package com.botts.impl.sensor.rapiscan.eml.outputs;
 
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
 import com.botts.impl.sensor.rapiscan.eml.EMLFieldFactory;
-import gov.llnl.ernie.api.Results;
 import net.opengis.swe.v20.DataBlock;
 import net.opengis.swe.v20.DataComponent;
 import net.opengis.swe.v20.DataEncoding;
@@ -10,6 +9,8 @@ import net.opengis.swe.v20.DataRecord;
 import org.sensorhub.api.data.DataEvent;
 import org.sensorhub.impl.sensor.AbstractSensorOutput;
 import org.sensorhub.impl.utils.rad.RADHelper;
+import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
+import org.sensorhub.impl.utils.rad.eml.EmlSourceBreakdown;
 import org.vast.data.DataArrayImpl;
 import org.vast.data.TextEncodingImpl;
 import org.vast.swe.SWEBuilders;
@@ -33,7 +34,8 @@ public class EMLAnalysisOutput extends AbstractSensorOutput<RapiscanSensor> {
         dataStruct = getDataRecord();
         dataEncoding = new TextEncodingImpl(",", "\n");
     }
-    private DataRecord getDataRecord(){
+
+    private DataRecord getDataRecord() {
         var emlFieldFactory = new EMLFieldFactory();
 
         SWEBuilders.DataRecordBuilder dataRecordBuilder = emlFieldFactory.createRecord()
@@ -65,8 +67,8 @@ public class EMLAnalysisOutput extends AbstractSensorOutput<RapiscanSensor> {
         sourceArrayBuilder.addField(PROBABILITY_NORM_FIELD_NAME, emlFieldFactory.createProbabilityNormField());
         sourceArrayBuilder.addField(PROBABILITY_THREAT_FIELD_NAME, emlFieldFactory.createProbabilityThreatField());
         dataRecordBuilder.addField("sources", emlFieldFactory.createArray()
-                       .withVariableSize("sourceCountId")
-                       .withElement("source", sourceArrayBuilder));
+                .withVariableSize("sourceCountId")
+                .withElement("source", sourceArrayBuilder));
 
         dataRecordBuilder.addField(OVERALL_SOURCE_TYPE_FIELD_NAME, emlFieldFactory.createOverallSourceTypeField());
         dataRecordBuilder.addField(OVERALL_CLASSIFIER_FIELD_NAME, emlFieldFactory.createOverallClassifierUsedField());
@@ -78,53 +80,66 @@ public class EMLAnalysisOutput extends AbstractSensorOutput<RapiscanSensor> {
         dataRecordBuilder.addField(OVERALL_PROBABILITY_NORM_FIELD_NAME, emlFieldFactory.createOverallProbabilityNormField());
         dataRecordBuilder.addField(OVERALL_PROBABILITY_THREAT_FIELD_NAME, emlFieldFactory.createOverallProbabilityThreatField());
         return dataRecordBuilder.build();
-
     }
 
-    public void handleAnalysisMessage(Results results)
-    {
+    public void handleAnalysisMessage(EmlEvaluationResult results) {
         dataStruct = getDataRecord();
         DataBlock dataBlock = dataStruct.createDataBlock();
         dataStruct.setData(dataBlock);
 
         int index = 0;
-        dataBlock.setStringValue(index++, results.getResult().toString());
-        dataBlock.setDoubleValue(index++, results.getInvestigateProbability());
-        dataBlock.setDoubleValue(index++, results.getReleaseProbability());
-        dataBlock.setBooleanValue(index++, results.getERNIEGammaAlert());
-        dataBlock.setBooleanValue(index++, results.getERNIENeutronAlert());
+        dataBlock.setStringValue(index++, results.result());
+        dataBlock.setDoubleValue(index++, results.investigateProbability());
+        dataBlock.setDoubleValue(index++, results.releaseProbability());
+        dataBlock.setBooleanValue(index++, results.ernieGammaAlert());
+        dataBlock.setBooleanValue(index++, results.ernieNeutronAlert());
 
-        dataBlock.setIntValue(index++, results.getVehicleClass());
-        dataBlock.setDoubleValue(index++, results.getVehicleLength());
-        dataBlock.setStringValue(index++, results.getYellowLightMessage());
+        dataBlock.setIntValue(index++, results.vehicleClass());
+        dataBlock.setDoubleValue(index++, results.vehicleLength());
+        dataBlock.setStringValue(index++, results.yellowLightMessage());
 
-        int sourceCount = results.getNumberOfSources();
+        int sourceCount = results.sources().size();
         dataBlock.setIntValue(index++, sourceCount);
 
         var array = ((DataArrayImpl) dataStruct.getComponent("sources"));
         array.updateSize();
+        dataBlock.updateAtomCount();
 
-        if(sourceCount > 0){
-            for(int i = 0; i < sourceCount; i++){
-                dataBlock.setStringValue(index++, results.getSource(i).getSourceType());
-                dataBlock.setStringValue(index++, results.getSource(i).getClassifierUsed());
-                dataBlock.setDoubleValue(index++, results.getSource(i).getxLocation1());
-                dataBlock.setDoubleValue(index++, results.getSource(i).getxLocation2());
-                dataBlock.setDoubleValue(index++, results.getSource(i).getyLocation());
-                dataBlock.setDoubleValue(index++, results.getSource(i).getzLocation());
-                dataBlock.setDoubleValue(index++, results.getSource(i).getProbabilityNonEmitting());
-                dataBlock.setDoubleValue(index++, results.getSource(i).getProbabilityNORM());
-                dataBlock.setDoubleValue(index++, results.getSource(i).getProbabilityThreat());
-            }
-            dataBlock.setStringValue(index++, results.getOverallSource().getSourceType());
-            dataBlock.setStringValue(index++, results.getOverallSource().getClassifierUsed());
-            dataBlock.setDoubleValue(index++, results.getOverallSource().getxLocation1());
-            dataBlock.setDoubleValue(index++, results.getOverallSource().getxLocation2());
-            dataBlock.setDoubleValue(index++, results.getOverallSource().getyLocation());
-            dataBlock.setDoubleValue(index++, results.getOverallSource().getzLocation());
-            dataBlock.setDoubleValue(index++, results.getOverallSource().getProbabilityNonEmitting());
-            dataBlock.setDoubleValue(index++, results.getOverallSource().getProbabilityNORM());
-            dataBlock.setDoubleValue(index, results.getOverallSource().getProbabilityThreat());
+        for (int i = 0; i < sourceCount; i++) {
+            EmlSourceBreakdown src = results.sources().get(i);
+            dataBlock.setStringValue(index++, src.sourceType());
+            dataBlock.setStringValue(index++, src.classifierUsed());
+            dataBlock.setDoubleValue(index++, src.xLocation1());
+            dataBlock.setDoubleValue(index++, src.xLocation2());
+            dataBlock.setDoubleValue(index++, src.yLocation());
+            dataBlock.setDoubleValue(index++, src.zLocation());
+            dataBlock.setDoubleValue(index++, src.probabilityNonEmitting());
+            dataBlock.setDoubleValue(index++, src.probabilityNorm());
+            dataBlock.setDoubleValue(index++, src.probabilityThreat());
+        }
+
+        EmlSourceBreakdown overall = results.overallSource();
+        if (overall != null) {
+            dataBlock.setStringValue(index++, overall.sourceType());
+            dataBlock.setStringValue(index++, overall.classifierUsed());
+            dataBlock.setDoubleValue(index++, overall.xLocation1());
+            dataBlock.setDoubleValue(index++, overall.xLocation2());
+            dataBlock.setDoubleValue(index++, overall.yLocation());
+            dataBlock.setDoubleValue(index++, overall.zLocation());
+            dataBlock.setDoubleValue(index++, overall.probabilityNonEmitting());
+            dataBlock.setDoubleValue(index++, overall.probabilityNorm());
+            dataBlock.setDoubleValue(index, overall.probabilityThreat());
+        } else {
+            String defaultType = "RELEASE".equalsIgnoreCase(results.result()) ? "NonEmitting" : "NONE";
+            dataBlock.setStringValue(index++, defaultType);
+            dataBlock.setStringValue(index++, results.modelId());
+            dataBlock.setDoubleValue(index++, 0.0);
+            dataBlock.setDoubleValue(index++, 0.0);
+            dataBlock.setDoubleValue(index++, 0.0);
+            dataBlock.setDoubleValue(index++, 0.0);
+            dataBlock.setDoubleValue(index++, results.releaseProbability());
+            dataBlock.setDoubleValue(index++, 0.0);
+            dataBlock.setDoubleValue(index, results.investigateProbability());
         }
 
         latestRecord = dataBlock;
@@ -145,5 +160,4 @@ public class EMLAnalysisOutput extends AbstractSensorOutput<RapiscanSensor> {
     public double getAverageSamplingPeriod() {
         return 0;
     }
-
 }

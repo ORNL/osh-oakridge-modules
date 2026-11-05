@@ -10,6 +10,18 @@ import java.util.List;
 
 public class Adjudication {
 
+    /** Reserved automated disposition code for EML Non-Threat releases. */
+    public static final int EML_NON_THREAT_CODE = 9999;
+
+    /** Marker stored in Occupancy.adjudicatedIds prior to publication for zero-flash Dashboard suppression and CQL filtering. */
+    public static final String EML_NON_THREAT_MARKER = "eml-non-threat";
+
+    /** Sender/username recorded on automated EML Non-Threat adjudication commands. */
+    public static final String EML_AUTO_ADJUDICATOR_USERNAME = "EML";
+
+    /** Prefix separating human-readable adjudication summary text from structured EML JSON metadata in feedback. */
+    public static final String EML_METADATA_PREFIX = "EML_METADATA:";
+
     private String feedback;
     private int adjudicationCode;
     private List<String> isotopes;
