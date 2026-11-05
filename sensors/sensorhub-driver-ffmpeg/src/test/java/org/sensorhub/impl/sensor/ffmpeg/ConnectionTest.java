@@ -101,6 +101,9 @@ public abstract class ConnectionTest {
             hub.start();
             reg = hub.getModuleRegistry();
             var httpModule = new HttpServerConfig();
+            try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+                httpModule.httpPort = socket.getLocalPort();
+            }
             httpModule.autoStart = true;
             reg.loadModule(httpModule);
         }

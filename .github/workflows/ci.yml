@@ -64,6 +64,11 @@ jobs:
             --tests com.botts.impl.sensor.aspect.MessageHandlerJournalTest \
             :sensorhub-driver-ffmpeg:test \
             --tests org.sensorhub.impl.sensor.ffmpeg.controls.FileControlPublicationTest \
+            --tests org.sensorhub.impl.sensor.ffmpeg.MediaMtxSidecarManagerTest \
+            --tests org.sensorhub.impl.sensor.ffmpeg.FFMPEGSensorReconnectTest \
+            --tests org.sensorhub.impl.sensor.ffmpeg.controls.hls.HlsStreamHandlerTest \
+            --tests org.sensorhub.impl.sensor.ffmpeg.outputs.FileOutputTimestampNormalizerTest \
+            --tests org.sensorhub.mpegts.MpegTsProcessorTranscodeTimingTest \
             :sensorhub-driver-rapiscan:test \
             --tests com.botts.impl.sensor.rapiscan.MessageHandlerJournalTest \
             :sensorhub-driver-rs350:test \

@@ -13,6 +13,7 @@ import org.sensorhub.impl.sensor.ffmpeg.controls.HLSControl;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
 import java.util.Objects;
@@ -23,12 +24,23 @@ import java.util.regex.Pattern;
 
 public class HlsStreamHandler extends DefaultObjectHandler {
 
+    public static final String VIEWER_ID_HEADER = "X-OSCAR-HLS-Viewer";
+    public static final String VIEWER_STATE_HEADER = "X-OSCAR-HLS-Viewer-State";
+    public static final String VIEWER_STATE_CLOSING = "closing";
+    public static final String VIEWER_STATE_HEARTBEAT = "heartbeat";
+
     private static final Pattern HLS_PATTERN = Pattern.compile(".*\\.(m3u8|ts)$");
     static final long STREAM_TIMEOUT_MS = 30000;
+    static final long VIEWER_LEASE_TTL_MS = 8_000L;
+    private static final int MAX_VIEWERS_PER_STREAM = 64;
+    private static final int MAX_VIEWER_ID_LENGTH = 128;
     private static final long CLEANUP_INTERVAL_MS = 1000;
     private static final String M3U8_SUFFIX = ".m3u8";
+    private static final String TS_SUFFIX = ".ts";
 
     private final Map<String, ActiveStream> activeStreams = new ConcurrentHashMap<>();
+    private final Map<String, ConcurrentHashMap<String, Long>> viewerLeasesByStream = new ConcurrentHashMap<>();
+    private final Map<String, ConcurrentHashMap<String, Long>> closedViewersByStream = new ConcurrentHashMap<>();
     private final String streamBucketName;
 
     private record ActiveStream(HLSControl<?> control, long lastAccessMillis) {}
@@ -57,11 +69,34 @@ public class HlsStreamHandler extends DefaultObjectHandler {
         var objectKey = Paths.get(ctx.getObjectKey()).toString();
         checkGetPermission(ctx, bucketName);
 
+        long now = System.currentTimeMillis();
+        String viewerId = sanitizeViewerId(extractHeader(ctx, VIEWER_ID_HEADER));
+        String viewerState = extractHeader(ctx, VIEWER_STATE_HEADER);
+        String trimmedViewerState = viewerState != null ? viewerState.trim() : "";
+        if (viewerId != null && VIEWER_STATE_CLOSING.equalsIgnoreCase(trimmedViewerState)) {
+            releaseViewerLease(bucketName, objectKey, viewerId, now);
+            ctx.getResponse().setHeader("Cache-Control", "no-store");
+            ctx.getResponse().setStatus(204);
+            return;
+        }
+        if (viewerId != null && VIEWER_STATE_HEARTBEAT.equalsIgnoreCase(trimmedViewerState)) {
+            if (objectKey.endsWith(M3U8_SUFFIX)) {
+                refreshManifestActivity(bucketName, objectKey, now);
+            }
+            recordViewerLease(bucketName, objectKey, viewerId, now);
+            ctx.getResponse().setHeader("Cache-Control", "no-store");
+            ctx.getResponse().setStatus(204);
+            return;
+        }
+
         boolean manifestRequest = objectKey.endsWith(M3U8_SUFFIX);
         if (manifestRequest) {
             // A client polling while FFmpeg waits for its first keyframe is active even though
             // there is intentionally no placeholder manifest to serve yet.
-            refreshManifestActivity(bucketName, objectKey, System.currentTimeMillis());
+            refreshManifestActivity(bucketName, objectKey, now);
+        }
+        if (viewerId != null) {
+            recordViewerLease(bucketName, objectKey, viewerId, now);
         }
 
         boolean objectExists = bucketStore.objectExists(bucketName, objectKey);
@@ -90,6 +125,9 @@ public class HlsStreamHandler extends DefaultObjectHandler {
             throw ServiceErrors.internalError(IBucketStore.UNABLE_DETERMINE_MIME_TYPE + objectKey);
 
         try {
+            if (manifestRequest) {
+                ctx.getResponse().setHeader("Cache-Control", "no-store");
+            }
             ctx.getResponse().setContentType(mimeType);
             try (InputStream objectData = bucketStore.getObject(bucketName, objectKey)) {
                 objectData.transferTo(ctx.getResponse().getOutputStream());
@@ -97,6 +135,111 @@ public class HlsStreamHandler extends DefaultObjectHandler {
         } catch (DataStoreException e) {
             throw ServiceErrors.internalError(IBucketStore.FAILED_GET_OBJECT + bucketName);
         }
+    }
+
+    private static String extractHeader(RequestContext ctx, String headerName) {
+        if (ctx == null || headerName == null) {
+            return null;
+        }
+        if (ctx.getRequest() != null) {
+            String direct = ctx.getRequest().getHeader(headerName);
+            if (direct != null) {
+                return direct;
+            }
+        }
+        Map<String, String> headers = ctx.getHeaders();
+        if (headers == null || headers.isEmpty()) {
+            return null;
+        }
+        for (Map.Entry<String, String> entry : headers.entrySet()) {
+            if (headerName.equalsIgnoreCase(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    private static String sanitizeViewerId(String rawViewerId) {
+        if (rawViewerId == null) {
+            return null;
+        }
+        String trimmed = rawViewerId.trim();
+        if (trimmed.isEmpty() || trimmed.length() > MAX_VIEWER_ID_LENGTH) {
+            return null;
+        }
+        return trimmed;
+    }
+
+    private String resolveStreamKey(String bucketName, String objectKey) {
+        if (!streamBucketName.equals(bucketName) || objectKey == null || objectKey.isEmpty()) {
+            return null;
+        }
+        if (objectKey.endsWith(M3U8_SUFFIX)) {
+            return objectKey;
+        }
+        if (objectKey.endsWith(TS_SUFFIX)) {
+            Path parent = Paths.get(objectKey).getParent();
+            if (parent != null) {
+                String candidate = parent.resolve("live.m3u8").toString();
+                if (activeStreams.containsKey(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
+
+    void recordViewerLease(String bucketName, String objectKey, String viewerId, long now) {
+        String streamKey = resolveStreamKey(bucketName, objectKey);
+        if (streamKey == null || viewerId == null || !activeStreams.containsKey(streamKey)) {
+            return;
+        }
+        ConcurrentHashMap<String, Long> closedViewers = closedViewersByStream.get(streamKey);
+        if (closedViewers != null) {
+            closedViewers.entrySet().removeIf(entry -> now - entry.getValue() >= VIEWER_LEASE_TTL_MS);
+            if (closedViewers.containsKey(viewerId)) {
+                return;
+            }
+        }
+        ConcurrentHashMap<String, Long> leases = viewerLeasesByStream.computeIfAbsent(
+                streamKey, ignored -> new ConcurrentHashMap<>());
+        leases.entrySet().removeIf(entry -> now - entry.getValue() >= VIEWER_LEASE_TTL_MS);
+        if (leases.containsKey(viewerId) || leases.size() < MAX_VIEWERS_PER_STREAM) {
+            leases.put(viewerId, now);
+        }
+    }
+
+    void releaseViewerLease(String bucketName, String objectKey, String viewerId, long now) {
+        String streamKey = resolveStreamKey(bucketName, objectKey);
+        if (streamKey == null || viewerId == null) {
+            return;
+        }
+        ConcurrentHashMap<String, Long> closedViewers = closedViewersByStream.computeIfAbsent(
+                streamKey, ignored -> new ConcurrentHashMap<>());
+        closedViewers.entrySet().removeIf(entry -> now - entry.getValue() >= VIEWER_LEASE_TTL_MS);
+        if (closedViewers.size() < MAX_VIEWERS_PER_STREAM * 2) {
+            closedViewers.put(viewerId, now);
+        }
+        ConcurrentHashMap<String, Long> leases = viewerLeasesByStream.get(streamKey);
+        if (leases != null) {
+            leases.remove(viewerId);
+        }
+    }
+
+    public boolean hasActiveViewers(String streamName) {
+        return hasActiveViewers(streamName, System.currentTimeMillis());
+    }
+
+    public boolean hasActiveViewers(String streamName, long now) {
+        if (streamName == null || streamName.isBlank() || !activeStreams.containsKey(streamName)) {
+            return false;
+        }
+        ConcurrentHashMap<String, Long> leases = viewerLeasesByStream.get(streamName);
+        if (leases == null || leases.isEmpty()) {
+            return false;
+        }
+        leases.entrySet().removeIf(entry -> now - entry.getValue() >= VIEWER_LEASE_TTL_MS);
+        return !leases.isEmpty();
     }
 
     protected void checkGetPermission(RequestContext ctx, String bucketName) {
@@ -117,16 +260,23 @@ public class HlsStreamHandler extends DefaultObjectHandler {
     public void addControl(String streamName, HLSControl<?> control) {
         // Start the timeout at stream creation. A stream that is never requested must not run
         // forever, while authorized manifest polling (including pre-manifest 404s) refreshes it.
+        viewerLeasesByStream.remove(streamName);
+        closedViewersByStream.remove(streamName);
         activeStreams.put(streamName, new ActiveStream(control, System.currentTimeMillis()));
     }
 
     public void removeControl(String stream, HLSControl<?> control) {
-        activeStreams.computeIfPresent(stream,
+        ActiveStream updated = activeStreams.computeIfPresent(stream,
                 (key, activeStream) -> activeStream.control() == control ? null : activeStream);
+        if (updated == null) {
+            viewerLeasesByStream.remove(stream);
+            closedViewersByStream.remove(stream);
+        }
     }
 
     private void stopStream(HLSControl<?> control) {
         if (control != null) {
+            control.prepareForceStop();
             var command = control.getCommandDescription().clone();
             command.renewDataBlock();
             ((Category)command.getComponent(0)).setValue(HLSControl.CMD_END_STREAM);
@@ -138,6 +288,8 @@ public class HlsStreamHandler extends DefaultObjectHandler {
         for (var entry : activeStreams.entrySet()) {
             if (now - entry.getValue().lastAccessMillis() >= STREAM_TIMEOUT_MS
                     && activeStreams.remove(entry.getKey(), entry.getValue())) {
+                viewerLeasesByStream.remove(entry.getKey());
+                closedViewersByStream.remove(entry.getKey());
                 // Conditional removal ensures a manifest request racing this cleanup pass can
                 // atomically replace the activity record without having its stream stopped.
                 stopStream(entry.getValue().control());

@@ -54,4 +54,23 @@ public class FileOutputTimestampNormalizerTest {
     public void rejectsPacketWithoutAnyTimestamp() throws Exception {
         new FileOutput.TimestampNormalizer().normalize(AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
     }
+
+    @Test
+    public void usesConfiguredNominalStepTicksWhenDiscontinuityHasZeroPacketDuration() throws Exception {
+        assertEquals(3_000L, FileOutput.resolveNominalFrameStepTicks(30, 1, 1, 90_000));
+        assertEquals(6_000L, FileOutput.resolveNominalFrameStepTicks(15, 1, 1, 90_000));
+        assertEquals(3_000L, FileOutput.resolveNominalFrameStepTicks(0, 0, 1, 90_000));
+
+        var normalizer = new FileOutput.TimestampNormalizer();
+        normalizer.reset(3_000L);
+
+        var first = normalizer.normalize(0, 0, 0);
+        assertEquals(0L, first.pts());
+        assertEquals(0L, first.dts());
+
+        var duplicateZero = normalizer.normalize(0, 0, 0);
+        assertTrue(duplicateZero.discontinuity());
+        assertEquals(3_000L, duplicateZero.pts());
+        assertEquals(3_000L, duplicateZero.dts());
+    }
 }

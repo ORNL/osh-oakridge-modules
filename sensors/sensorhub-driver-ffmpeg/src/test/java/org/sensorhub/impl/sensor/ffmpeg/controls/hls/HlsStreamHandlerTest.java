@@ -131,6 +131,51 @@ public class HlsStreamHandlerTest {
                 0, service.scheduledTaskCount());
     }
 
+    @Test
+    public void retainsSharedStreamAcrossMultipleViewerLeasesUntilLastViewerClosesOrAgesOut() throws Exception {
+        TestStore store = new TestStore();
+        store.exists = true;
+        store.data = new CloseTrackingInputStream("#EXTM3U\n".getBytes());
+        TestBucketService service = service(store);
+        TestableHlsStreamHandler handler = new TestableHlsStreamHandler(service, "videos");
+        service.shutdown();
+        handler.addControl(STREAM_KEY, null);
+
+        assertFalse(handler.hasActiveViewers(STREAM_KEY, 1_000L));
+
+        handler.doGet(contextWithHeaders("videos", STREAM_KEY, acceptingResponse(),
+                java.util.Map.of(HlsStreamHandler.VIEWER_ID_HEADER, "viewer-a",
+                        HlsStreamHandler.VIEWER_STATE_HEADER, HlsStreamHandler.VIEWER_STATE_HEARTBEAT)));
+        handler.doGet(contextWithHeaders("videos", STREAM_KEY, acceptingResponse(),
+                java.util.Map.of(HlsStreamHandler.VIEWER_ID_HEADER, "viewer-b",
+                        HlsStreamHandler.VIEWER_STATE_HEADER, HlsStreamHandler.VIEWER_STATE_HEARTBEAT)));
+
+        long now = System.currentTimeMillis();
+        assertTrue(handler.hasActiveViewers(STREAM_KEY, now));
+
+        // Viewer A navigates away; Viewer B must keep the shared stream active.
+        handler.doGet(contextWithHeaders("videos", STREAM_KEY, acceptingResponse(),
+                java.util.Map.of(HlsStreamHandler.VIEWER_ID_HEADER, "viewer-a",
+                        HlsStreamHandler.VIEWER_STATE_HEADER, HlsStreamHandler.VIEWER_STATE_CLOSING)));
+        assertTrue("Stream must remain active while viewer-b still holds a lease",
+                handler.hasActiveViewers(STREAM_KEY, now + 100L));
+
+        // Out-of-order segment/manifest request from closed viewer-a must not resurrect its lease.
+        handler.recordViewerLease("videos", STREAM_KEY, "viewer-a", now + 200L);
+
+        // Viewer B navigates away; active viewers must drop to zero immediately.
+        handler.doGet(contextWithHeaders("videos", STREAM_KEY, acceptingResponse(),
+                java.util.Map.of(HlsStreamHandler.VIEWER_ID_HEADER, "viewer-b",
+                        HlsStreamHandler.VIEWER_STATE_HEADER, HlsStreamHandler.VIEWER_STATE_CLOSING)));
+        assertFalse("Stream must report zero active viewers once the last viewer closes",
+                handler.hasActiveViewers(STREAM_KEY, now + 300L));
+
+        // Unclosed viewer leases must also expire after VIEWER_LEASE_TTL_MS.
+        handler.recordViewerLease("videos", STREAM_KEY, "viewer-c", 10_000L);
+        assertTrue(handler.hasActiveViewers(STREAM_KEY, 10_000L + HlsStreamHandler.VIEWER_LEASE_TTL_MS - 1));
+        assertFalse(handler.hasActiveViewers(STREAM_KEY, 10_000L + HlsStreamHandler.VIEWER_LEASE_TTL_MS));
+    }
+
     private TestBucketService service(TestStore store) {
         TestBucketService service = new TestBucketService(store.proxy());
         services.add(service);
@@ -139,12 +184,27 @@ public class HlsStreamHandlerTest {
 
     private static RequestContext context(String bucket, String key,
                                           HttpServletResponse response) throws IOException {
+        return contextWithHeaders(bucket, key, response, Collections.emptyMap());
+    }
+
+    private static RequestContext contextWithHeaders(String bucket, String key,
+                                                     HttpServletResponse response,
+                                                     java.util.Map<String, String> headers) throws IOException {
         HttpServletRequest request = (HttpServletRequest) Proxy.newProxyInstance(
                 HttpServletRequest.class.getClassLoader(),
                 new Class<?>[]{HttpServletRequest.class},
                 (proxy, method, args) -> {
                     if ("getHeaderNames".equals(method.getName())) {
-                        return Collections.emptyEnumeration();
+                        return Collections.enumeration(headers.keySet());
+                    }
+                    if ("getHeader".equals(method.getName()) && args != null && args.length == 1) {
+                        String requested = String.valueOf(args[0]);
+                        for (var entry : headers.entrySet()) {
+                            if (entry.getKey().equalsIgnoreCase(requested)) {
+                                return entry.getValue();
+                            }
+                        }
+                        return null;
                     }
                     if ("getPathInfo".equals(method.getName())) {
                         return "/" + bucket + "/" + key;
