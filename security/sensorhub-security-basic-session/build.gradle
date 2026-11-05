@@ -4,6 +4,11 @@ version = '1.0.0'
 
 dependencies {
     implementation 'org.sensorhub:sensorhub-core:' + oshCoreVersion
+    testImplementation 'junit:junit:4.13.2'
+}
+
+test {
+    useJUnit()
 }
 
 // add info to OSGi manifest

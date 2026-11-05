@@ -37,6 +37,10 @@ dependencies {
     testImplementation(project(':sensorhub-driver-zooz-zse18-800lr')) { transitive = false }
     testImplementation(project(':sensorhub-driver-zw100-multisensor-6')) { transitive = false }
     testImplementation(project(':sensorhub-zwave-comms')) { transitive = false }
+    testImplementation project(':sensorhub-security-basic-session')
+    testImplementation project(':sensorhub-service-dailyfile-journal')
+    testImplementation project(':sensorhub-process-occupancy')
+    testImplementation project(':sensorhub-process-rs350-occupancy')
     implementation('junit:junit:4.13.1')
 }
 

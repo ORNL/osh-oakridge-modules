@@ -22,6 +22,8 @@ import java.security.Principal;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -51,6 +53,8 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
     private static final String LOGIN_PATH = "/login";
     private static final String LOGOUT_PATH = "/logout";
     private static final String SESSION_PATH = "/session";
+    private static final String LANGUAGE_COOKIE_NAME = "osh-language";
+    private static final int LANGUAGE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
     private static final int MAX_AUTH_HEADER_LENGTH = 16 * 1024;
     private static final long PRUNE_INTERVAL_MILLIS = 60_000L;
 
@@ -237,8 +241,12 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
 
     private void handleLogin(HttpServletRequest request, HttpServletResponse response) throws IOException {
         String redirectTarget = redirectTarget(request.getParameter("continue"));
+        String explicitLang = normalizeSupportedLanguage(request.getParameter("lang"));
+        String lang = explicitLang != null ? explicitLang : resolveLoginLanguage(request);
         if ("GET".equalsIgnoreCase(request.getMethod())) {
-            renderLogin(response, false, redirectTarget);
+            if (explicitLang != null)
+                setLanguageCookie(response, explicitLang);
+            renderLogin(response, false, redirectTarget, lang);
             return;
         }
         if (!"POST".equalsIgnoreCase(request.getMethod())) {
@@ -246,17 +254,19 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             return;
         }
 
+        if (explicitLang != null)
+            setLanguageCookie(response, explicitLang);
         String username = request.getParameter("username");
         String password = request.getParameter("password");
         if (username == null || password == null || username.length() > 256 || password.length() > 4096) {
-            renderLogin(response, true, redirectTarget);
+            renderLogin(response, true, redirectTarget, lang);
             return;
         }
 
         UserIdentity identity = login(username, password, request);
         if (identity == null) {
             log.warn("Failed form authentication for user '{}'", username);
-            renderLogin(response, true, redirectTarget);
+            renderLogin(response, true, redirectTarget, lang);
             return;
         }
 
@@ -291,22 +301,45 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             response.setStatus(HttpServletResponse.SC_NO_CONTENT);
     }
 
-    private void renderLogin(HttpServletResponse response, boolean failed, String redirectTarget) throws IOException {
-        String error = failed ? "<p class=\"error\">Invalid username or password.</p>" : "";
+    private void renderLogin(HttpServletResponse response, boolean failed, String redirectTarget, String lang)
+            throws IOException {
+        LoginCopy copy = LoginCopy.forLanguage(lang);
+        String error = failed ? "<p class=\"error\" role=\"alert\">" + escapeHtml(copy.error) + "</p>" : "";
         String continueInput = "<input type=\"hidden\" name=\"continue\" value=\""
                 + escapeHtml(redirectTarget) + "\">";
-        String page = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        String langInput = "<input type=\"hidden\" name=\"lang\" value=\""
+                + escapeHtml(copy.lang) + "\">";
+        String encodedContinue = URLEncoder.encode(redirectTarget, StandardCharsets.UTF_8.name());
+        String langNav = "<nav class=\"langs\" aria-label=\"" + escapeHtml(copy.languageAria) + "\">"
+                + renderLanguageLink("en", "English", copy.lang, encodedContinue)
+                + "<span aria-hidden=\"true\">&middot;</span>"
+                + renderLanguageLink("es", "Espa\u00f1ol", copy.lang, encodedContinue)
+                + "<span aria-hidden=\"true\">&middot;</span>"
+                + renderLanguageLink("fr", "Fran\u00e7ais", copy.lang, encodedContinue)
+                + "<span aria-hidden=\"true\">&middot;</span>"
+                + renderLanguageLink("el", "\u0395\u03bb\u03bb\u03b7\u03bd\u03b9\u03ba\u03ac", copy.lang, encodedContinue)
+                + "</nav>";
+        String page = "<!doctype html><html lang=\"" + escapeHtml(copy.lang) + "\"><head><meta charset=\"utf-8\">"
                 + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-                + "<title>OSCAR sign in</title><style>body{font:16px system-ui,sans-serif;background:#f4f6f8;"
+                + "<title>" + escapeHtml(copy.title) + "</title><style>body{font:16px system-ui,sans-serif;background:#f4f6f8;"
                 + "display:grid;place-items:center;min-height:100vh;margin:0}main{background:white;padding:2rem;"
-                + "border-radius:.5rem;box-shadow:0 4px 18px #0002;width:min(22rem,calc(100% - 3rem))}"
+                + "border-radius:.5rem;box-shadow:0 4px 18px #0002;width:min(24rem,calc(100% - 3rem))}"
                 + "label,input,button{display:block;width:100%;box-sizing:border-box}label{margin-top:1rem}"
                 + "input,button{font:inherit;padding:.65rem;margin-top:.35rem}button{margin-top:1.5rem;cursor:pointer}"
-                + ".error{color:#a40000}</style></head><body><main><h1>OSCAR</h1><p>Sign in to continue.</p>"
-                + error + "<form method=\"post\" autocomplete=\"off\">"
-                + continueInput + "<label>Username<input name=\"username\" required maxlength=\"256\" autofocus autocomplete=\"off\"></label>"
-                + "<label>Password<input name=\"password\" type=\"password\" required maxlength=\"4096\" autocomplete=\"off\"></label>"
-                + "<button type=\"submit\">Sign in</button></form></main></body></html>";
+                + ".error{color:#a40000}.langs{margin-top:1.25rem;padding-top:.85rem;border-top:1px solid #e2e8f0;"
+                + "display:flex;flex-wrap:wrap;justify-content:center;gap:.45rem;font-size:.875rem;color:#475569}"
+                + ".langs a{color:#0f4c81;text-decoration:none}.langs a[aria-current=\"true\"]{font-weight:700;color:#0f172a;text-decoration:underline}"
+                + "</style></head><body><main><h1>OSCAR</h1><p>" + escapeHtml(copy.subtitle) + "</p>"
+                + error + "<form method=\"post\">"
+                + continueInput + langInput
+                + "<label for=\"username\">" + escapeHtml(copy.username) + "</label>"
+                + "<input id=\"username\" name=\"username\" type=\"text\" required maxlength=\"256\" autofocus"
+                + " autocomplete=\"username\" spellcheck=\"false\" autocapitalize=\"off\" enterkeyhint=\"next\">"
+                + "<label for=\"current-password\">" + escapeHtml(copy.password) + "</label>"
+                + "<input id=\"current-password\" name=\"password\" type=\"password\" required maxlength=\"4096\""
+                + " autocomplete=\"current-password\" enterkeyhint=\"done\">"
+                + "<button type=\"submit\">" + escapeHtml(copy.submit) + "</button></form>"
+                + langNav + "</main></body></html>";
         byte[] body = page.getBytes(StandardCharsets.UTF_8);
         response.setStatus(failed ? HttpServletResponse.SC_UNAUTHORIZED : HttpServletResponse.SC_OK);
         response.setContentType("text/html; charset=UTF-8");
@@ -315,6 +348,67 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
         response.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'");
         response.setHeader("Referrer-Policy", "no-referrer");
         response.getOutputStream().write(body);
+    }
+
+    private static String renderLanguageLink(String code, String label, String activeLang, String encodedContinue) {
+        String currentAttr = code.equals(activeLang) ? " aria-current=\"true\"" : "";
+        return "<a href=\"" + LOGIN_PATH + "?lang=" + code + "&amp;continue=" + escapeHtml(encodedContinue)
+                + "\" lang=\"" + code + "\"" + currentAttr + ">" + escapeHtml(label) + "</a>";
+    }
+
+    private String resolveLoginLanguage(HttpServletRequest request) {
+        String fromCookie = normalizeSupportedLanguage(readCookie(request, LANGUAGE_COOKIE_NAME));
+        if (fromCookie != null)
+            return fromCookie;
+        String acceptLanguage = request.getHeader("Accept-Language");
+        if (acceptLanguage != null && !acceptLanguage.trim().isEmpty()) {
+            try {
+                List<Locale.LanguageRange> ranges = Locale.LanguageRange.parse(acceptLanguage);
+                for (Locale.LanguageRange range : ranges) {
+                    String candidate = normalizeSupportedLanguage(range.getRange());
+                    if (candidate != null)
+                        return candidate;
+                }
+            } catch (IllegalArgumentException ignored) {
+                for (String token : acceptLanguage.split(",")) {
+                    int semi = token.indexOf(';');
+                    String tag = semi >= 0 ? token.substring(0, semi) : token;
+                    String candidate = normalizeSupportedLanguage(tag);
+                    if (candidate != null)
+                        return candidate;
+                }
+            }
+        }
+        return "en";
+    }
+
+    static String normalizeSupportedLanguage(String raw) {
+        if (raw == null)
+            return null;
+        String cleaned = raw.trim().toLowerCase(Locale.ROOT);
+        if (cleaned.isEmpty() || "*".equals(cleaned))
+            return null;
+        int dash = cleaned.indexOf('-');
+        if (dash >= 0)
+            cleaned = cleaned.substring(0, dash);
+        int underscore = cleaned.indexOf('_');
+        if (underscore >= 0)
+            cleaned = cleaned.substring(0, underscore);
+        switch (cleaned) {
+            case "en":
+            case "es":
+            case "fr":
+            case "el":
+                return cleaned;
+            default:
+                return null;
+        }
+    }
+
+    private void setLanguageCookie(HttpServletResponse response, String lang) {
+        response.addHeader("Set-Cookie", LANGUAGE_COOKIE_NAME + "=" + lang
+                + "; Path=/; Max-Age=" + LANGUAGE_COOKIE_MAX_AGE
+                + "; SameSite=Lax" + (secureCookie ? "; Secure" : ""));
     }
 
     private void renderSession(HttpServletResponse response, String username) throws IOException {
@@ -399,11 +493,15 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
     }
 
     private String readSessionCookie(HttpServletRequest request) {
+        return readCookie(request, cookieName);
+    }
+
+    private static String readCookie(HttpServletRequest request, String name) {
         Cookie[] cookies = request.getCookies();
         if (cookies == null)
             return null;
         for (Cookie cookie : cookies) {
-            if (cookieName.equals(cookie.getName()))
+            if (name.equals(cookie.getName()))
                 return cookie.getValue();
         }
         return null;
@@ -497,6 +595,79 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
         @Override
         public boolean isUserInRole(String role, Scope scope) {
             return roles.contains(role);
+        }
+    }
+
+    private static final class LoginCopy {
+        final String lang;
+        final String title;
+        final String subtitle;
+        final String error;
+        final String username;
+        final String password;
+        final String submit;
+        final String languageAria;
+
+        private LoginCopy(String lang, String title, String subtitle, String error,
+                          String username, String password, String submit, String languageAria) {
+            this.lang = lang;
+            this.title = title;
+            this.subtitle = subtitle;
+            this.error = error;
+            this.username = username;
+            this.password = password;
+            this.submit = submit;
+            this.languageAria = languageAria;
+        }
+
+        private static final LoginCopy EN = new LoginCopy(
+                "en",
+                "OSCAR sign in",
+                "Sign in to continue.",
+                "Invalid username or password.",
+                "Username",
+                "Password",
+                "Sign in",
+                "Language");
+
+        private static final LoginCopy ES = new LoginCopy(
+                "es",
+                "Iniciar sesi\u00f3n en OSCAR",
+                "Inicie sesi\u00f3n para continuar.",
+                "Usuario o contrase\u00f1a no v\u00e1lidos.",
+                "Usuario",
+                "Contrase\u00f1a",
+                "Iniciar sesi\u00f3n",
+                "Idioma");
+
+        private static final LoginCopy FR = new LoginCopy(
+                "fr",
+                "Connexion OSCAR",
+                "Connectez-vous pour continuer.",
+                "Nom d\u2019utilisateur ou mot de passe incorrect.",
+                "Utilisateur",
+                "Mot de passe",
+                "Se connecter",
+                "Langue");
+
+        private static final LoginCopy EL = new LoginCopy(
+                "el",
+                "\u03a3\u03cd\u03bd\u03b4\u03b5\u03c3\u03b7 OSCAR",
+                "\u03a3\u03c5\u03bd\u03b4\u03b5\u03b8\u03b5\u03af\u03c4\u03b5 \u03b3\u03b9\u03b1 \u03c3\u03c5\u03bd\u03ad\u03c7\u03b5\u03b9\u03b1.",
+                "\u039c\u03b7 \u03ad\u03b3\u03ba\u03c5\u03c1\u03bf \u03cc\u03bd\u03bf\u03bc\u03b1 \u03c7\u03c1\u03ae\u03c3\u03c4\u03b7 \u03ae \u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2.",
+                "\u038c\u03bd\u03bf\u03bc\u03b1 \u03c7\u03c1\u03ae\u03c3\u03c4\u03b7",
+                "\u039a\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03cc\u03c3\u03b2\u03b1\u03c3\u03b7\u03c2",
+                "\u03a3\u03cd\u03bd\u03b4\u03b5\u03c3\u03b7",
+                "\u0393\u03bb\u03ce\u03c3\u03c3\u03b1");
+
+        static LoginCopy forLanguage(String lang) {
+            if ("es".equals(lang))
+                return ES;
+            if ("fr".equals(lang))
+                return FR;
+            if ("el".equals(lang))
+                return EL;
+            return EN;
         }
     }
 
