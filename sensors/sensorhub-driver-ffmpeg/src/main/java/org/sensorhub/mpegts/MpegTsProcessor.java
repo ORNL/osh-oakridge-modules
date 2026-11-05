@@ -1282,6 +1282,10 @@ public class MpegTsProcessor extends Thread {
         }
     }
 
+    static boolean hasUsablePacketTimestamp(long pts, long dts) {
+        return pts != AV_NOPTS_VALUE || dts != AV_NOPTS_VALUE;
+    }
+
     static double presentationTimestamp(long pts, long dts, double timeBaseUnits) {
         long presentationTime = pts != AV_NOPTS_VALUE ? pts : dts;
         return presentationTime == AV_NOPTS_VALUE
@@ -1553,7 +1557,9 @@ public class MpegTsProcessor extends Thread {
         AVPacket packet;
         while ((packet = encoder.getOutQueue().poll()) != null) {
             try {
-                deliverVideoPacket(packet);
+                if (hasUsablePacketTimestamp(packet.pts(), packet.dts())) {
+                    deliverVideoPacket(packet);
+                }
             } finally {
                 av_packet_free(packet);
             }
@@ -1678,6 +1684,11 @@ public class MpegTsProcessor extends Thread {
                             throwIfTranscoderFailed();
                             continue;
                         }
+                    }
+
+                    if (!hasUsablePacketTimestamp(deliveryPacket.pts(), deliveryPacket.dts())) {
+                        logger.debug("Skipping video packet without usable PTS/DTS timestamps");
+                        continue;
                     }
 
                     deliverVideoPacket(deliveryPacket);

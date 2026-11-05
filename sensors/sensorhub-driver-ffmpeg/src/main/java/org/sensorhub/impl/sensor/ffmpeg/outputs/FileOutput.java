@@ -286,6 +286,11 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
                     throw new IOException("Output muxer did not provide a valid video time base");
                 }
                 timeBase = av_make_q(muxerTimeBase.num(), muxerTimeBase.den());
+                timestampNormalizer.reset(resolveNominalFrameStepTicks(
+                        streamSnapshot.averageFrameRateNumerator(),
+                        streamSnapshot.averageFrameRateDenominator(),
+                        muxerTimeBase.num(),
+                        muxerTimeBase.den()));
 
                 // FFmpeg's log level is process-wide. Do not change it for one recording and
                 // inadvertently hide (or amplify) diagnostics from the other camera streams.
@@ -430,6 +435,31 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
         }
     }
 
+    /** True when an asynchronous packet-write failure has been recorded for the active output. */
+    public boolean hasWriteFailure() {
+        synchronized (contextLock) {
+            return writeFailure != null;
+        }
+    }
+
+    static long resolveNominalFrameStepTicks(int frameRateNumerator, int frameRateDenominator,
+                                             int timeBaseNumerator, int timeBaseDenominator) {
+        if (timeBaseNumerator <= 0 || timeBaseDenominator <= 0) {
+            return 1L;
+        }
+        double fps = frameRateDenominator > 0
+                ? (double) frameRateNumerator / (double) frameRateDenominator
+                : Double.NaN;
+        if (!Double.isFinite(fps) || fps < 1.0 || fps > 240.0) {
+            fps = 30.0;
+        }
+        double ticks = (double) timeBaseDenominator / (fps * (double) timeBaseNumerator);
+        if (!Double.isFinite(ticks) || ticks < 1.0) {
+            return 1L;
+        }
+        return Math.max(1L, Math.round(ticks));
+    }
+
     private AVRational populatePacketTiming(AVPacket avPacket, DataBufferRecord record) throws IOException {
         if (record.hasPacketTiming()) {
             avPacket.pts(record.getPacketPts());
@@ -488,11 +518,17 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
         private long timestampOffset;
         private long lastDecodeTimestamp = AV_NOPTS_VALUE;
         private long lastDuration;
+        private long defaultStepTicks = 1L;
 
         void reset() {
+            reset(1L);
+        }
+
+        void reset(long nominalStepTicks) {
             timestampOffset = 0;
             lastDecodeTimestamp = AV_NOPTS_VALUE;
             lastDuration = 0;
+            defaultStepTicks = Math.max(1L, nominalStepTicks);
         }
 
         NormalizedTimestamps normalize(long pts, long dts, long duration) throws IOException {
@@ -510,7 +546,7 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
                 boolean discontinuity = lastDecodeTimestamp != AV_NOPTS_VALUE
                         && normalizedOrderingTimestamp <= lastDecodeTimestamp;
                 if (discontinuity) {
-                    long step = duration > 0 ? duration : (lastDuration > 0 ? lastDuration : 1L);
+                    long step = duration > 0 ? duration : (lastDuration > 0 ? lastDuration : defaultStepTicks);
                     long desiredTimestamp = Math.addExact(lastDecodeTimestamp, step);
                     timestampOffset = Math.addExact(
                             timestampOffset,

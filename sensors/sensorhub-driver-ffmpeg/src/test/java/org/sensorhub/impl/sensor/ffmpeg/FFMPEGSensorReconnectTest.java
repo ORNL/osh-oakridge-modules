@@ -170,6 +170,30 @@ public class FFMPEGSensorReconnectTest {
         assertTrue("Disabling reconnect must cancel the heartbeat task", scheduledHeartbeat.isCancelled());
     }
 
+    @Test
+    public void scheduledReconnectRecoversStreamInPlaceWithoutModuleRestart() throws Exception {
+        initializeWithUnavailableSource();
+        sensor.getConfiguration().connectionConfig.reconnectPeriod = 25;
+        sensor.failOpen = true;
+        sensor.doStart();
+        assertConnectionStatus(false);
+        assertTrue(sensor.isReconnectPending());
+
+        sensor.failOpen = false;
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+        while (System.nanoTime() < deadline) {
+            DataBlock latest = sensor.getOutputs().get(CONNECTION_STATUS_OUTPUT).getLatestRecord();
+            if (latest != null && latest.getBooleanValue(1)) {
+                break;
+            }
+            Thread.sleep(15L);
+        }
+
+        assertConnectionStatus(true);
+        assertEquals(0, sensor.getReconnectAttemptCount());
+        assertTrue(sensor.recoveredInterfacesRegistered);
+    }
+
     private void initializeWithUnavailableSource() throws SensorHubException {
         sensor.failOpen = true;
         sensor.doInit();

@@ -36,6 +36,8 @@ public class FFMPEGSensor extends FFMPEGSensorBase<FFMPEGConfig> {
     /** Debug logger */
     private static final Logger logger = LoggerFactory.getLogger(FFMPEGSensor.class);
 
+    static final long DEFAULT_RECONNECT_PERIOD_MS = 2_000L;
+
     private final Object reconnectLock = new Object();
     private Thread streamMonitorThread;
     private ScheduledExecutorService reconnectExecutor;
@@ -150,7 +152,9 @@ public class FFMPEGSensor extends FFMPEGSensorBase<FFMPEGConfig> {
             }
 
             attempt = ++currentReconnect;
-            delayMillis = Math.max(0, config.connectionConfig.reconnectPeriod);
+            delayMillis = config.connectionConfig.reconnectPeriod > 0
+                    ? config.connectionConfig.reconnectPeriod
+                    : DEFAULT_RECONNECT_PERIOD_MS;
             String attemptLimit = maxAttempts < 0 ? "unlimited" : Integer.toString(maxAttempts);
             reportStatus("Reconnect attempt " + attempt + "/" + attemptLimit
                     + " in " + delayMillis + " ms");
@@ -162,13 +166,54 @@ public class FFMPEGSensor extends FFMPEGSensorBase<FFMPEGConfig> {
                         return;
                 }
 
-                try {
-                    getParentHub().getModuleRegistry().restartModuleAsync(this);
-                } catch (SensorHubException e) {
-                    logger.error("Unable to schedule FFmpeg module restart", e);
-                    scheduleReconnect(e);
-                }
+                attemptStreamReconnect();
             }, delayMillis, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    void attemptStreamReconnect() {
+        synchronized (reconnectLock) {
+            if (!reconnectEnabled)
+                return;
+        }
+
+        try {
+            stopStream();
+            synchronized (reconnectLock) {
+                if (!reconnectEnabled)
+                    return;
+            }
+            setupExecutor();
+            openStream();
+            configureVideoOutputAfterOpen();
+            configureStreamControlsAfterOpen();
+            if (streamInterfacesDeferred) {
+                registerRecoveredInterfaces();
+                streamInterfacesDeferred = false;
+            }
+            startStream();
+        } catch (Exception e) {
+            discardFailedStream();
+            scheduleReconnect(e);
+            return;
+        }
+
+        synchronized (reconnectLock) {
+            if (!reconnectEnabled) {
+                discardFailedStream();
+                return;
+            }
+            currentReconnect = 0;
+        }
+        publishConnectionStatus(true);
+        reportStatus("Connected to video input stream.");
+        startStreamMonitor(mpegTsProcessor);
+    }
+
+    @Override
+    protected boolean shouldRetainStreamLeaseOnFailure() {
+        synchronized (reconnectLock) {
+            return reconnectEnabled;
         }
     }
 

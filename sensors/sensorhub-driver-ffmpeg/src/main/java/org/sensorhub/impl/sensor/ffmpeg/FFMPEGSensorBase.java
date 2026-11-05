@@ -1,5 +1,6 @@
 package org.sensorhub.impl.sensor.ffmpeg;
 
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -70,6 +71,9 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
     /** Last state published by the connection-status output. Guarded by {@link #connectionStatusLock}. */
     private boolean lastConnectionStatus;
 
+    /** Per-instance lease key used to reference-count upstream RTSP streams in MediaMTX. */
+    private final String mediaMtxLeaseId = UUID.randomUUID().toString();
+
     protected FileControl<FFMPEGconfigType> fileControl;
 
     protected HLSControl<FFMPEGconfigType> hlsControl;
@@ -121,6 +125,7 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
         		mpegTsProcessor = null;
         	}
         }
+        releaseStreamLease();
         // We also have to clear out the video output since its settings may have changed (based on having a new input
         // video, for example).
         removeAllOutputs();
@@ -170,9 +175,13 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
     @Override
     protected void doStop() throws SensorHubException {
         publishConnectionStatus(false);
-        super.doStop();
-        stopStream();
-        shutdownExecutor();
+        try {
+            super.doStop();
+            stopStream();
+        } finally {
+            releaseStreamLease();
+            shutdownExecutor();
+        }
     }
 
     @Override
@@ -187,6 +196,7 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
                 this.fileControl.submitCommand(new CommandData.Builder().withCommandStream(BigId.NONE).withId(BigId.NONE).withParams(command.getData()).build()).join();
             }
             if (hlsControl != null) {
+                hlsControl.prepareForceStop();
                 var command = hlsControl.getCommandDescription().copy();
                 command.renewDataBlock();
                 var cat = (Category) command.getComponent(0);
@@ -293,16 +303,32 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
     }
 
     protected void discardFailedStream() {
-        if (mpegTsProcessor == null)
-            return;
-
         try {
-            mpegTsProcessor.closeStream();
+            if (mpegTsProcessor != null) {
+                mpegTsProcessor.closeStream();
+            }
         } catch (Exception e) {
             logger.debug("Could not close failed video input stream", e);
         } finally {
             mpegTsProcessor = null;
+            if (!shouldRetainStreamLeaseOnFailure()) {
+                releaseStreamLease();
+            }
         }
+    }
+
+    protected boolean shouldRetainStreamLeaseOnFailure() {
+        return false;
+    }
+
+    protected void releaseStreamLease() {
+        MediaMtxSidecarManager.getInstance().releaseStream(mediaMtxLeaseId);
+    }
+
+    protected String resolveConnectionSource(String rawConnectionString) throws SensorHubException {
+        long timeoutMs = config != null && config.connectionConfig != null
+                ? config.connectionConfig.connectTimeout : 0L;
+        return MediaMtxSidecarManager.getInstance().acquireStream(mediaMtxLeaseId, rawConnectionString, timeoutMs);
     }
 
     private boolean hasConfiguredSource() {
@@ -433,7 +459,10 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
 	            Asserts.checkArgument(config.connection.fps >= 0, "FPS must be >= 0");
 	            mpegTsProcessor = new MpegTsProcessor(config.connection.transportStreamPath, config.connection.fps, config.connection.loop, config.connection.useTCP);
 	        } else if ((null != config.connection.connectionString) && (!config.connection.connectionString.isBlank())) {
-	            mpegTsProcessor = new MpegTsProcessor(config.connection.connectionString, config.connection.fps, false, config.connection.useTCP);
+	            String resolvedConnection = resolveConnectionSource(config.connection.connectionString);
+	            // Live network streams are paced by the upstream camera/proxy; passing a positive
+	            // FPS here sleeps the demux thread and throttles >24 fps cameras.
+	            mpegTsProcessor = new MpegTsProcessor(resolvedConnection, 0, false, config.connection.useTCP);
 	        } else {
 	        	throw new SensorHubException("Either the input file path or the connection string must be set");
 	        }

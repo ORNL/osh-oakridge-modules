@@ -40,6 +40,7 @@ public class HLSControl<FFmpegConfigType extends FFMPEGConfig> extends AbstractS
     String fileName = "";
     Path filePath = Paths.get(VIDEO_BUCKET);
     private final FileOutput<?> fileOutput;
+    private volatile boolean forceStopPending = false;
 
     private static final Logger logger = LoggerFactory.getLogger(HLSControl.class);
 
@@ -107,6 +108,14 @@ public class HLSControl<FFmpegConfigType extends FFMPEGConfig> extends AbstractS
         return commandData;
     }
 
+    /**
+     * Marks the current HLS output for unconditional teardown on the next {@link #CMD_END_STREAM},
+     * bypassing active-viewer retention during module shutdown or inactivity timeout cleanup.
+     */
+    public void prepareForceStop() {
+        this.forceStopPending = true;
+    }
+
     @Override
     public CompletableFuture<ICommandStatus> submitCommand(ICommandData command) {
         return CompletableFuture.supplyAsync(() -> executeCommand(command));
@@ -126,73 +135,86 @@ public class HLSControl<FFmpegConfigType extends FFMPEGConfig> extends AbstractS
             }
 
             else if (selected.equals(CMD_START_STREAM)) {
-                if (fileOutput.isWriting()) {
+                if (fileOutput.isWriting() && !fileOutput.hasWriteFailure()) {
                     commandStatus = true;
                     reportFileName = true;
                 }
-                else if (!parentSensor.isStreamReady()) {
-                    commandStatus = false;
-                    failureMessage = "Video input stream is not available";
-                }
                 else {
-                    filePath = Paths.get("streams", parentSensor.getUniqueIdentifier().replace(':', '-'), "live.m3u8");
-                    fileName = filePath.toString();
-                    try {
-                        // Remove artifacts left by an interrupted prior stream, then prepare a
-                        // validated filesystem target without creating a zero-byte manifest.
-                        // The HLS muxer publishes its first real playlist atomically after it has
-                        // completed a keyframe-aligned media segment.
-                        cleanupHlsResources(fileName);
-                        String uri = bucketStore.getWritableResourceURI(VIDEO_BUCKET, fileName);
-                        this.fileOutput.openFile(uri);
-                        hlsHandler.addControl(fileName, this);
-                        this.parentSensor.reportStatus("Writing video stream: " + fileName);
-                        reportFileName = true;
-                        commandStatus = true;
-                        //fileOutput.publish(uri);
-                    } catch (Exception e) {
-                        logger.error("Exception while opening HLS output", e);
-                        cleanupHlsResources(fileName);
-                        fileName = "";
+                    if (fileOutput.isWriting() && fileOutput.hasWriteFailure()) {
+                        try {
+                            closeActiveHlsOutput();
+                        } catch (Exception ignored) {
+                            // Best-effort cleanup of broken output before attempting a fresh start.
+                        } finally {
+                            cleanupHlsResources(fileName);
+                            fileName = "";
+                            forceStopPending = false;
+                        }
+                    }
+                    if (!parentSensor.isStreamReady()) {
                         commandStatus = false;
-                        failureMessage = "Unable to start HLS stream: " + e.getMessage();
+                        failureMessage = "Video input stream is not available";
+                    } else {
+                        filePath = Paths.get("streams", parentSensor.getUniqueIdentifier().replace(':', '-'), "live.m3u8");
+                        fileName = filePath.toString();
+                        forceStopPending = false;
+                        try {
+                            // Remove artifacts left by an interrupted prior stream, then prepare a
+                            // validated filesystem target without creating a zero-byte manifest.
+                            // The HLS muxer publishes its first real playlist atomically after it has
+                            // completed a keyframe-aligned media segment.
+                            cleanupHlsResources(fileName);
+                            String uri = bucketStore.getWritableResourceURI(VIDEO_BUCKET, fileName);
+                            this.fileOutput.openFile(uri);
+                            hlsHandler.addControl(fileName, this);
+                            this.parentSensor.reportStatus("Writing video stream: " + fileName);
+                            reportFileName = true;
+                            commandStatus = true;
+                            //fileOutput.publish(uri);
+                        } catch (Exception e) {
+                            logger.error("Exception while opening HLS output", e);
+                            cleanupHlsResources(fileName);
+                            fileName = "";
+                            commandStatus = false;
+                            failureMessage = "Unable to start HLS stream: " + e.getMessage();
+                        }
                     }
                 }
             } else if (selected.equals(CMD_END_STREAM)) {
                 String closingFileName = fileName;
-                try {
-                    if (!fileOutput.isWriting()) {
-                        commandStatus = false;
-                        failureMessage = "HLS stream is not active";
-                    } else {
+                boolean forced = forceStopPending;
+                if (!fileOutput.isWriting()) {
+                    forceStopPending = false;
+                    commandStatus = false;
+                    failureMessage = "HLS stream is not active";
+                } else if (!forced && !fileOutput.hasWriteFailure() && hlsHandler.hasActiveViewers(closingFileName)) {
+                    // Another operator still holds an active viewer lease on this shared HLS
+                    // playlist; keep FFmpeg muxing until the last viewer leaves or ages out.
+                    commandStatus = true;
+                    reportFileName = false;
+                } else {
+                    try {
                         // A user can navigate away before the first keyframe reaches the HLS
                         // muxer. That is a successful cancellation, not an empty-recording
                         // failure. Close at the listener's generation boundary so callbacks
                         // accepted by this stream cannot leak into a rapid restart. Real write,
                         // trailer, and native cleanup failures still propagate from cancelFile.
-                        var processor = this.parentSensor.getProcessor();
-                        if (processor == null) {
-                            this.fileOutput.cancelFile();
-                        } else {
-                            processor.executeAfterPendingVideoData(fileOutput, () -> {
-                                fileOutput.cancelFile();
-                                return null;
-                            });
-                        }
+                        closeActiveHlsOutput();
                         this.parentSensor.reportStatus("Closing video stream: " + closingFileName);
                         commandStatus = true;
                         reportFileName = false;
+                    } catch (Exception e) {
+                        logger.error("Exception while closing HLS output", e);
+                        commandStatus = false;
+                        failureMessage = "Unable to stop HLS stream: " + e.getMessage();
+                    } finally {
+                        // FileOutput has already stopped writing even when trailer/close reports an
+                        // error. Always unregister the handler and remove manifest/segments so a
+                        // failed close cannot leave a stale active stream or partial artifacts.
+                        cleanupHlsResources(closingFileName);
+                        fileName = "";
+                        forceStopPending = false;
                     }
-                } catch (Exception e) {
-                    logger.error("Exception while closing HLS output", e);
-                    commandStatus = false;
-                    failureMessage = "Unable to stop HLS stream: " + e.getMessage();
-                } finally {
-                    // FileOutput has already stopped writing even when trailer/close reports an
-                    // error. Always unregister the handler and remove manifest/segments so a
-                    // failed close cannot leave a stale active stream or partial artifacts.
-                    cleanupHlsResources(closingFileName);
-                    fileName = "";
                 }
             } else {
                 commandStatus = false;
@@ -214,6 +236,18 @@ public class HLSControl<FFmpegConfigType extends FFMPEGConfig> extends AbstractS
                 status.withResult(result);
             }
             return status.build();
+    }
+
+    private void closeActiveHlsOutput() throws Exception {
+        var processor = this.parentSensor.getProcessor();
+        if (processor == null) {
+            this.fileOutput.cancelFile();
+        } else {
+            processor.executeAfterPendingVideoData(fileOutput, () -> {
+                fileOutput.cancelFile();
+                return null;
+            });
+        }
     }
 
     private void cleanupHlsResources(String streamName) {

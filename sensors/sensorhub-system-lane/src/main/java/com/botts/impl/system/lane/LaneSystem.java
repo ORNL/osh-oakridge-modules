@@ -748,7 +748,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
              path = !customVideoConfig.streamPath.isEmpty() ? customVideoConfig.streamPath : defaultAxis;
         }
 
-        endpoint.append(path);
+        endpoint.append(normalizeStreamPath(path, defaultAxis));
 
         config.connection.useTCP = true;
         config.connection.fps = 24;
@@ -763,6 +763,18 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         config.output.useVideoFrames = false;
         config.connection.bufferSize = ffmpegConfig.bufferSize;
         return config;
+    }
+
+    static String normalizeStreamPath(String path, String fallbackPath) {
+        String candidate = (path == null || path.isBlank()) ? fallbackPath : path.trim();
+        if (candidate == null || candidate.isEmpty()) {
+            return "/";
+        }
+        int index = 0;
+        while (index < candidate.length() && candidate.charAt(index) == '/') {
+            index++;
+        }
+        return "/" + candidate.substring(index);
     }
 
     @Override

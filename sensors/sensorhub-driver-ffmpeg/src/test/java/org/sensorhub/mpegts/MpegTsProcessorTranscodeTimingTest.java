@@ -20,6 +20,17 @@ public class MpegTsProcessorTranscodeTimingTest {
     }
 
     @Test
+    public void rejectsOnlyPacketsMissingBothPtsAndDts() {
+        assertFalse(MpegTsProcessor.hasUsablePacketTimestamp(
+                org.bytedeco.ffmpeg.global.avutil.AV_NOPTS_VALUE,
+                org.bytedeco.ffmpeg.global.avutil.AV_NOPTS_VALUE));
+        assertTrue(MpegTsProcessor.hasUsablePacketTimestamp(
+                0L, org.bytedeco.ffmpeg.global.avutil.AV_NOPTS_VALUE));
+        assertTrue(MpegTsProcessor.hasUsablePacketTimestamp(
+                org.bytedeco.ffmpeg.global.avutil.AV_NOPTS_VALUE, 0L));
+    }
+
+    @Test
     public void mjpegTranscodePublishesConstantFrameRateTimestampsAndStops() throws Exception {
         String fixture = System.getenv("MJPEG_TRANSCODE_TEST_FILE");
         Assume.assumeTrue("Set MJPEG_TRANSCODE_TEST_FILE for native transcode regression",
