@@ -27,6 +27,7 @@ import com.botts.impl.sensor.rapiscan.RapiscanConfig;
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
 import com.botts.impl.sensor.rs350.RS350Config;
 import com.botts.impl.sensor.rs350.RS350Sensor;
+import com.botts.impl.system.lane.helpers.eml.EmlAutoAdjudicationHelper;
 import com.botts.impl.system.lane.helpers.webid.WebIdHelper;
 import org.sensorhub.impl.utils.rad.output.N42Output;
 import com.botts.impl.system.lane.config.*;
@@ -95,6 +96,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     OccupancyWrapper occupancyWrapper;
     OccupancyStatusOutput occupancyStatusOutput;
     WebIdHelper webIdHelper;
+    EmlAutoAdjudicationHelper emlAutoAdjudicationHelper;
 
     AdjudicationControl adjudicationControl;
     WebIdOutput webIdOutput;
@@ -369,6 +371,14 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         }
         adjudicationControl.setObsStore(obsStore);
 
+        if (emlAutoAdjudicationHelper != null) {
+            emlAutoAdjudicationHelper.stop();
+            emlAutoAdjudicationHelper = null;
+        }
+        if (occupancyProducer instanceof RapiscanSensor) {
+            emlAutoAdjudicationHelper = new EmlAutoAdjudicationHelper(this, occupancyProducer, obsStore);
+        }
+
         if (webIdHelper != null) {
             webIdHelper.stop();
         }
@@ -382,6 +392,10 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     protected void doStop() throws SensorHubException {
         cancelLaneEventSubscription();
         shutdownThreadPool();
+        if (emlAutoAdjudicationHelper != null) {
+            emlAutoAdjudicationHelper.stop();
+            emlAutoAdjudicationHelper = null;
+        }
         super.doStop();
         if (webIdHelper != null) {
             webIdHelper.stop();
@@ -398,6 +412,10 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     public void cleanup() throws SensorHubException {
         cancelLaneEventSubscription();
         shutdownThreadPool();
+        if (emlAutoAdjudicationHelper != null) {
+            emlAutoAdjudicationHelper.stop();
+            emlAutoAdjudicationHelper = null;
+        }
         super.cleanup();
 
         // Auto delete lane data if specified

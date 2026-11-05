@@ -21,6 +21,7 @@ import com.botts.impl.service.oscar.video.VideoRetentionConfig;
 import org.sensorhub.api.config.DisplayInfo;
 import org.sensorhub.api.database.IObsSystemDatabaseModule;
 import org.sensorhub.api.service.ServiceConfig;
+import org.sensorhub.impl.utils.rad.model.Adjudication;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -41,6 +42,9 @@ public class OSCARServiceConfig extends ServiceConfig {
         for (var entry : customAdjudicationCodes) {
             if (entry == null || entry.code <= 11)
                 throw new IllegalArgumentException("Custom disposition codes must be greater than 11; codes 0-11 are reserved.");
+            if (entry.code == Adjudication.EML_NON_THREAT_CODE)
+                throw new IllegalArgumentException("Disposition code " + Adjudication.EML_NON_THREAT_CODE
+                        + " is reserved for automated EML Non-Threat adjudications.");
             if (entry.label == null || entry.label.isBlank())
                 throw new IllegalArgumentException("Custom disposition code " + entry.code + " must have a label.");
             if (!values.add(entry.code))
@@ -51,6 +55,9 @@ public class OSCARServiceConfig extends ServiceConfig {
 
     @DisplayInfo(label = "Spreadsheet Config Path", desc = "CSV configuration used to import or export OSCAR lanes and retention policies")
     public String spreadsheetConfigPath;
+
+    @DisplayInfo(label = "EML Plugin Path", desc = "External LLNL EML plugin archive (.jar, .tar.gz, .tgz, or .zip) uploaded by an administrator for Rapiscan lanes with EML enabled")
+    public String emlPluginPath;
 
     @DisplayInfo(label = "Site Diagram Config", desc = "Site diagram image and geographic bounds used by this OSCAR node")
     public SiteDiagramConfig siteDiagramConfig;

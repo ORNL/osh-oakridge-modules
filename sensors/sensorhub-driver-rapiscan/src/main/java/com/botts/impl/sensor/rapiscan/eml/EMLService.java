@@ -2,59 +2,67 @@ package com.botts.impl.sensor.rapiscan.eml;
 
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
 import com.botts.impl.sensor.rapiscan.RepetitiveWarningFilter;
-import gov.llnl.ernie.analysis.AnalysisException;
-import gov.llnl.ernie.api.ERNIE_lane;
-import gov.llnl.ernie.api.Results;
-import gov.llnl.utility.io.ReaderException;
 import org.sensorhub.api.data.DataEvent;
 import org.sensorhub.api.event.Event;
 import org.sensorhub.api.event.IEventListener;
+import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
+import org.sensorhub.impl.utils.rad.eml.EmlLaneParameters;
+import org.sensorhub.impl.utils.rad.eml.EmlRuntimeRegistry;
+import org.sensorhub.impl.utils.rad.eml.EmlRuntimeStatus;
 
-import javax.xml.bind.JAXBException;
-import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+public class EMLService implements IEventListener, AutoCloseable {
 
-public class EMLService implements IEventListener {
-
-    /**
-     * LLNL's legacy XML binding registry is process-global and is not safe to
-     * populate concurrently. A 50-lane restart otherwise lets multiple ERNIE
-     * constructors race while registering the VM250 schema, leaving some
-     * analyzers uninitialized even though their RPM modules report Started.
-     */
     private static final Object ERNIE_INITIALIZATION_LOCK = new Object();
 
-    private ERNIE_lane ernieLane;
-    RapiscanSensor parentSensor;
-    List<String> scanDataList;
-    String latestGammaBackground;
-    String latestNeutronBackground;
+    private final RapiscanSensor parentSensor;
+    private final EmlRuntimeRegistry runtimeRegistry;
+    private final Consumer<EmlRuntimeStatus> statusListener;
+    private final List<String> scanDataList;
+    private String latestGammaBackground;
+    private String latestNeutronBackground;
+    private volatile EmlLaneParameters laneParameters;
 
     public EMLService(RapiscanSensor parentSensor) {
         this.parentSensor = parentSensor;
-        this.ernieLane = createErnieLane(
-                parentSensor.getConfiguration().setupGammaConfig.intervals,
-                parentSensor.getConfiguration().setupGammaConfig.occupancyHoldin);
+        this.runtimeRegistry = EmlRuntimeRegistry.forHub(parentSensor.getParentHub());
         this.scanDataList = new ArrayList<>();
+        this.laneParameters = initializeErnie(() -> buildLaneParameters(
+                parentSensor.getConfiguration().setupGammaConfig.intervals,
+                parentSensor.getConfiguration().setupGammaConfig.occupancyHoldin));
+
+        this.statusListener = status -> {
+            if (status.loaded()) {
+                parentSensor.getLogger().info("EML runtime activated on lane {} ({} {})",
+                        parentSensor.getConfiguration().name,
+                        status.fileName(),
+                        status.collimatedModelId());
+            }
+        };
+        this.runtimeRegistry.addStatusListener(this.statusListener);
+
+        if (!runtimeRegistry.isLoaded()) {
+            parentSensor.getLogger().info(
+                    "EML enabled on lane {}; awaiting EML plugin upload in OSCAR Service",
+                    parentSensor.getConfiguration().name);
+        }
+    }
+
+    private EmlLaneParameters buildLaneParameters(int intervals, int holdin) {
+        var cfg = parentSensor.getConfiguration();
+        boolean collimated = cfg.emlConfig == null || cfg.emlConfig.isCollimated;
+        double width = cfg.emlConfig != null ? cfg.emlConfig.laneWidth : 4.82;
+        return new EmlLaneParameters(cfg.name, cfg.laneID, collimated, width, intervals, holdin);
     }
 
     private void updateErnieSetup(int intervals, int holdin) {
-        this.ernieLane = createErnieLane(intervals, holdin);
-    }
-
-    private ERNIE_lane createErnieLane(int intervals, int holdin) {
-        return initializeErnie(() -> new ERNIE_lane(
-                parentSensor.getConfiguration().name,
-                parentSensor.getConfiguration().laneID,
-                parentSensor.getConfiguration().emlConfig.isCollimated,
-                parentSensor.getConfiguration().emlConfig.laneWidth,
-                intervals,
-                holdin
-        ));
+        this.laneParameters = initializeErnie(() -> buildLaneParameters(intervals, holdin));
     }
 
     static <T> T initializeErnie(Supplier<T> initializer) {
@@ -63,68 +71,66 @@ public class EMLService implements IEventListener {
         }
     }
 
-    public void setLatestGammaBackground(String [] scanData) {
-        String scanJoined = String.join(",", scanData);
-        this.latestGammaBackground = scanJoined;
+    public synchronized void setLatestGammaBackground(String[] scanData) {
+        this.latestGammaBackground = String.join(",", scanData);
     }
 
-    public void setLatestNeutronBackground(String [] scanData) {
-        String scanJoined = String.join(",", scanData);
-        this.latestNeutronBackground = scanJoined;
+    public synchronized void setLatestNeutronBackground(String[] scanData) {
+        this.latestNeutronBackground = String.join(",", scanData);
     }
 
-    public void addScanDataLine(String[] scanData) {
-        String scanJoined = String.join(",", scanData);
-        this.scanDataList.add(scanJoined);
+    public synchronized void addScanDataLine(String[] scanData) {
+        this.scanDataList.add(String.join(",", scanData));
     }
 
-    public Results processCurrentOccupancy() {
-        Results results;
+    public Optional<EmlEvaluationResult> processCurrentOccupancy() {
+        List<String> snapshot;
+        EmlLaneParameters params = this.laneParameters;
 
         synchronized (this) {
-            try {
-                if(this.latestGammaBackground != null)
-                    this.scanDataList.add(0, this.latestGammaBackground);
-                if(this.latestNeutronBackground != null)
-                    this.scanDataList.add(0, this.latestNeutronBackground);
-
-                String[] streamArray = new String[this.scanDataList.size()];
-                for(int i = 0; i < streamArray.length; i++) {
-                    streamArray[i] = this.scanDataList.get(i);
-                }
-
-
-                Stream<String> stream = Stream.of(streamArray);
-                // SensorHub may reload JUL configuration after module initialization,
-                // clearing programmatic filters. Reassert the lightweight filter at
-                // the call site so the per-occupancy EML fallback warning cannot flood
-                // production logs after a runtime logging reconfiguration.
-                RepetitiveWarningFilter.install();
-                results = ernieLane.process(stream);
-            } catch (ReaderException | AnalysisException | IOException e) {
-                throw new RuntimeException(e);
+            if (this.scanDataList.isEmpty()) {
+                return Optional.empty();
             }
+            snapshot = new ArrayList<>(this.scanDataList.size() + 2);
+            if (this.latestNeutronBackground != null)
+                snapshot.add(this.latestNeutronBackground);
+            if (this.latestGammaBackground != null)
+                snapshot.add(this.latestGammaBackground);
+            snapshot.addAll(this.scanDataList);
+            this.scanDataList.clear();
         }
 
-        //purge data occupancy for next occupancy!
-        clearOccupancyList();
+        if (!runtimeRegistry.isLoaded()) {
+            return Optional.empty();
+        }
 
-        return results;
+        try {
+            RepetitiveWarningFilter.install();
+            Stream<String> stream = snapshot.stream();
+            return Optional.ofNullable(runtimeRegistry.evaluate(params, stream));
+        } catch (Exception e) {
+            parentSensor.getLogger().warn("EML occupancy evaluation failed on lane {}: {}",
+                    parentSensor.getConfiguration().name, e.getMessage(), e);
+            return Optional.empty();
+        }
     }
-    public void clearOccupancyList(){
+
+    public synchronized void clearOccupancyList() {
         this.scanDataList.clear();
     }
 
     @Override
     public void handleEvent(Event e) {
-        // On setup data received, change ernie lane to have new setup values
-        if(e instanceof DataEvent) {
-            DataEvent dataEvent = (DataEvent) e;
-
-            // Get setup values, then update ERNIE_lane with new setup values
+        if (e instanceof DataEvent dataEvent) {
             int intervals = dataEvent.getSource().getLatestRecord().getIntValue(3);
             int holdin = dataEvent.getSource().getLatestRecord().getIntValue(4);
             updateErnieSetup(intervals, holdin);
         }
+    }
+
+    @Override
+    public void close() {
+        runtimeRegistry.removeStatusListener(statusListener);
+        clearOccupancyList();
     }
 }

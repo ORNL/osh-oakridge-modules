@@ -2,8 +2,6 @@ import com.botts.impl.sensor.rapiscan.EMLConfig;
 import com.botts.impl.sensor.rapiscan.RapiscanConfig;
 import com.botts.impl.sensor.rapiscan.RapiscanDescriptor;
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
-import gov.llnl.ernie.api.ERNIE_lane;
-import gov.llnl.ernie.api.Results;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;

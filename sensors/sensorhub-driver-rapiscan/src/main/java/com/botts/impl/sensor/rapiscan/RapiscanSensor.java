@@ -25,6 +25,7 @@ import org.sensorhub.impl.comm.RobustIPConnection;
 import org.sensorhub.impl.module.RobustConnection;
 import org.sensorhub.impl.sensor.AbstractSensorModule;
 import org.sensorhub.impl.utils.rad.dailyfile.DailyFileJournalConnection;
+import org.sensorhub.impl.utils.rad.eml.PendingEmlAutoAdjudicationRegistry;
 import org.sensorhub.impl.utils.rad.output.OccupancyOutput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -369,10 +370,24 @@ public class RapiscanSensor extends AbstractSensorModule<RapiscanConfig> {
                 stopFailure.addSuppressed(unregisterFailure);
         }
 
+        PendingEmlAutoAdjudicationRegistry.clearProducer(getUniqueIdentifier());
+        if (emlService != null) {
+            emlService.clearOccupancyList();
+        }
+
         if (stopFailure != null)
             throw stopFailure;
 
         logger.info("RapiscanSensor {} stopped successfully", getUniqueIdentifier());
+    }
+
+    @Override
+    public void cleanup() throws SensorHubException {
+        if (emlService != null) {
+            emlService.close();
+            emlService = null;
+        }
+        super.cleanup();
     }
 
 

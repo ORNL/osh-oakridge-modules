@@ -17,6 +17,7 @@ package com.botts.impl.service.oscar;
 
 import com.botts.api.service.bucket.IBucketService;
 import com.botts.api.service.bucket.IBucketStore;
+import com.botts.impl.service.oscar.eml.EmlPluginHandler;
 import com.botts.impl.service.oscar.purge.DatabasePurger;
 import com.botts.impl.service.oscar.retention.StoragePressureRetention;
 import com.botts.impl.service.oscar.reports.RequestReportControl;
@@ -61,6 +62,7 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     IBucketStore bucketStore;
 
     SpreadsheetHandler spreadsheetHandler;
+    EmlPluginHandler emlPluginHandler;
     VideoRetention videoRetention;
     DatabasePurger databasePurger;
     StoragePressureRetention storagePressureRetention;
@@ -89,6 +91,9 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
             reportError("Could not find this OSH node's Bucket Service", new IllegalStateException(e));
         }
+
+        emlPluginHandler = new EmlPluginHandler(getParentHub(), getLogger(), config);
+        emlPluginHandler.restoreConfiguredOrActivePlugin(config.emlPluginPath);
 
         spreadsheetHandler = new SpreadsheetHandler(getParentHub().getModuleRegistry(), bucketStore, getLogger(), config);
         if (config.spreadsheetConfigPath != null && !config.spreadsheetConfigPath.isEmpty())
@@ -453,6 +458,16 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
 
     public SpreadsheetHandler getSpreadsheetHandler() {
         return spreadsheetHandler;
+    }
+
+    public synchronized EmlPluginHandler getEmlPluginHandler() {
+        if (emlPluginHandler == null && getParentHub() != null) {
+            emlPluginHandler = new EmlPluginHandler(getParentHub(), getLogger(), config);
+            if (config != null) {
+                emlPluginHandler.restoreConfiguredOrActivePlugin(config.emlPluginPath);
+            }
+        }
+        return emlPluginHandler;
     }
 
     public WebIdResourceHandler getWebIdResourceHandler() { return webIdResourceHandler; }

@@ -11,3 +11,7 @@
 **/*.iml
 **/tmp/files
 *.pdf
+*eml*.jar
+*EML*.jar
+EML-VM250*
+eml-plugin/

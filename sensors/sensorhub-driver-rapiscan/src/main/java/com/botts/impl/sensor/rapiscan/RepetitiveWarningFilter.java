@@ -1,8 +1,5 @@
 package com.botts.impl.sensor.rapiscan;
 
-import gov.llnl.ernie.vm250.ErnieVM250Package;
-import gov.llnl.ernie.vm250.VM250MotionProfiler;
-
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Filter;
@@ -12,6 +9,8 @@ import java.util.logging.Logger;
 
 /** Rate-limits expected per-scan fallback warnings without hiding other EML diagnostics. */
 public final class RepetitiveWarningFilter implements Filter {
+    private static final String ERNIE_VM250_LOGGER_NAME = "gov.llnl.ernie.vm250";
+    private static final String ERNIE_MOTION_PROFILER_LOGGER_NAME = "gov.llnl.ernie.vm250.VM250MotionProfiler";
     private static final long INTERVAL_NANOS = TimeUnit.MINUTES.toNanos(10);
     private static final String MISSING_SETUP = "No setup information found";
     private static final String MISSING_VELOCITY = "No velocity reading for scan, assuming ";
@@ -26,8 +25,8 @@ public final class RepetitiveWarningFilter implements Filter {
     }
 
     public static void install() {
-        install(ErnieVM250Package.LOGGER);
-        install(Logger.getLogger(VM250MotionProfiler.class.getName()));
+        install(Logger.getLogger(ERNIE_VM250_LOGGER_NAME));
+        install(Logger.getLogger(ERNIE_MOTION_PROFILER_LOGGER_NAME));
         installHandlers(Logger.getLogger(""));
     }
 

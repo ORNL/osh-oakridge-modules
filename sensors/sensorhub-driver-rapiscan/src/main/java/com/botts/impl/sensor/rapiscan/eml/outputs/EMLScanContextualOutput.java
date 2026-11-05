@@ -2,7 +2,6 @@ package com.botts.impl.sensor.rapiscan.eml.outputs;
 
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
 import com.botts.impl.sensor.rapiscan.eml.EMLFieldFactory;
-import gov.llnl.ernie.api.Results;
 import net.opengis.swe.v20.DataBlock;
 import net.opengis.swe.v20.DataComponent;
 import net.opengis.swe.v20.DataEncoding;
@@ -10,13 +9,13 @@ import net.opengis.swe.v20.DataRecord;
 import org.sensorhub.api.data.DataEvent;
 import org.sensorhub.impl.sensor.AbstractSensorOutput;
 import org.sensorhub.impl.utils.rad.RADHelper;
+import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
 import org.vast.data.TextEncodingImpl;
 import org.vast.swe.SWEBuilders;
 
 import static com.botts.impl.sensor.rapiscan.eml.EMLFieldFactory.*;
 
 public class EMLScanContextualOutput extends AbstractSensorOutput<RapiscanSensor> {
-
 
     private static final String SENSOR_OUTPUT_NAME = "emlScanContextual";
     private static final String SENSOR_OUTPUT_LABEL = "EML Scan Contextual";
@@ -25,7 +24,7 @@ public class EMLScanContextualOutput extends AbstractSensorOutput<RapiscanSensor
     protected DataRecord dataStruct;
     protected DataEncoding dataEncoding;
 
-    int portIdIndex, laneIdIndex, dateTimeIndex, rpmGammaAlertIndex, rpmNeutronAlertIndex,segmentIdIndex,rpmResultIndex, rpmScanErrorIndex;
+    int portIdIndex, laneIdIndex, dateTimeIndex, rpmGammaAlertIndex, rpmNeutronAlertIndex, segmentIdIndex, rpmResultIndex, rpmScanErrorIndex;
 
     public EMLScanContextualOutput(RapiscanSensor parentSensor) {
         super(SENSOR_OUTPUT_NAME, parentSensor);
@@ -36,8 +35,7 @@ public class EMLScanContextualOutput extends AbstractSensorOutput<RapiscanSensor
         dataEncoding = new TextEncodingImpl(",", "\n");
     }
 
-    DataRecord getDataRecord(){
-
+    DataRecord getDataRecord() {
         var emlFieldFactory = new EMLFieldFactory();
 
         SWEBuilders.DataRecordBuilder dataRecordBuilder = emlFieldFactory.createRecord()
@@ -49,33 +47,33 @@ public class EMLScanContextualOutput extends AbstractSensorOutput<RapiscanSensor
         int fieldIndex = 0;
 
         dataRecordBuilder.addField(PORT_ID_FIELD_NAME, emlFieldFactory.createPortIdField());
-        portIdIndex= fieldIndex++;
+        portIdIndex = fieldIndex++;
 
         dataRecordBuilder.addField(LANE_ID_FIELD_NAME, emlFieldFactory.createLaneIdField());
-        laneIdIndex= fieldIndex++;
+        laneIdIndex = fieldIndex++;
 
         dataRecordBuilder.addField(TIME_DATE_FIELD_NAME, emlFieldFactory.createDateTimeField());
-        dateTimeIndex= fieldIndex++;
+        dateTimeIndex = fieldIndex++;
 
         dataRecordBuilder.addField(SEGMENT_ID_FIELD_NAME, emlFieldFactory.createSegmentIdField());
-        segmentIdIndex= fieldIndex++;
+        segmentIdIndex = fieldIndex++;
 
         dataRecordBuilder.addField(RPM_RESULT_FIELD_NAME, emlFieldFactory.createRpmResultField());
-        rpmResultIndex= fieldIndex++;
+        rpmResultIndex = fieldIndex++;
 
         dataRecordBuilder.addField(RPM_GAMMA_ALERT_FIELD_NAME, emlFieldFactory.createRpmGammaAlertField());
-        rpmGammaAlertIndex= fieldIndex++;
+        rpmGammaAlertIndex = fieldIndex++;
 
         dataRecordBuilder.addField(RPM_NEUTRON_ALERT_FIELD_NAME, emlFieldFactory.createRpmNeutronAlertField());
-        rpmNeutronAlertIndex= fieldIndex++;
+        rpmNeutronAlertIndex = fieldIndex++;
 
         dataRecordBuilder.addField(RPM_SCAN_ERROR_FIELD_NAME, emlFieldFactory.createRpmScanErrorField());
-        rpmScanErrorIndex= fieldIndex;
+        rpmScanErrorIndex = fieldIndex;
 
         return dataRecordBuilder.build();
     }
 
-    public void handleScanContextualMessage(Results results){
+    public void handleScanContextualMessage(EmlEvaluationResult results) {
         DataBlock dataBlock;
         if (latestRecord == null) {
             dataBlock = dataStruct.createDataBlock();
@@ -83,15 +81,14 @@ public class EMLScanContextualOutput extends AbstractSensorOutput<RapiscanSensor
             dataBlock = latestRecord.renew();
         }
 
-        //todo possible combine port and lane for location?
-        dataBlock.setStringValue(portIdIndex, results.getPortID());
-        dataBlock.setLongValue(laneIdIndex, results.getLaneID());
-        dataBlock.setLongValue(dateTimeIndex, results.getDateTime().toEpochMilli());
-        dataBlock.setLongValue(segmentIdIndex, results.getSegmentId());
-        dataBlock.setStringValue(rpmResultIndex, results.getRPMResult().toString());
-        dataBlock.setBooleanValue(rpmGammaAlertIndex, results.getRPMGammaAlert());
-        dataBlock.setBooleanValue(rpmNeutronAlertIndex, results.getRPMNeutronAlert());
-        dataBlock.setBooleanValue(rpmScanErrorIndex, results.getRPMScanError());
+        dataBlock.setStringValue(portIdIndex, results.portId());
+        dataBlock.setLongValue(laneIdIndex, results.laneId());
+        dataBlock.setLongValue(dateTimeIndex, results.dateTimeEpochMillis());
+        dataBlock.setLongValue(segmentIdIndex, results.segmentId());
+        dataBlock.setStringValue(rpmResultIndex, results.rpmResult());
+        dataBlock.setBooleanValue(rpmGammaAlertIndex, results.rpmGammaAlert());
+        dataBlock.setBooleanValue(rpmNeutronAlertIndex, results.rpmNeutronAlert());
+        dataBlock.setBooleanValue(rpmScanErrorIndex, results.rpmScanError());
 
         latestRecord = dataBlock;
         eventHandler.publish(new DataEvent(System.currentTimeMillis(), EMLScanContextualOutput.this, dataBlock));
