@@ -26,12 +26,15 @@ import org.sensorhub.impl.utils.rad.output.OccupancyOutput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 
 /**
  * Listens for persisted Rapiscan Occupancy observations that were pre-marked
@@ -168,44 +171,94 @@ public final class EmlAutoAdjudicationHelper implements AutoCloseable {
         }
     }
 
-    private BigId resolvePersistedObsId(String producerUid, IObsData eventObs, Occupancy targetOccupancy) {
-        ObsFilter filter = new ObsFilter.Builder()
+    static final int PERSISTED_OBS_MAX_ATTEMPTS = 60;
+    static final long PERSISTED_OBS_INITIAL_RETRY_MS = 100L;
+    static final long PERSISTED_OBS_RETRY_MS = 250L;
+    static final long PHENOMENON_TIME_TOLERANCE_MS = 5L;
+
+    BigId resolvePersistedObsId(String producerUid, IObsData eventObs, Occupancy targetOccupancy) {
+        return resolvePersistedObsId(
+                occupancyObsStore,
+                producerUid,
+                eventObs,
+                targetOccupancy,
+                PERSISTED_OBS_MAX_ATTEMPTS,
+                PERSISTED_OBS_INITIAL_RETRY_MS,
+                PERSISTED_OBS_RETRY_MS,
+                () -> stopped);
+    }
+
+    static BigId resolvePersistedObsId(
+            IObsStore obsStore,
+            String producerUid,
+            IObsData eventObs,
+            Occupancy targetOccupancy,
+            int maxAttempts,
+            long initialRetryMs,
+            long retryMs,
+            BooleanSupplier isStopped) {
+        Instant phenomenonTime = eventObs.getPhenomenonTime();
+        var timeFilter = new ObsFilter.Builder()
                 .withSystems()
                     .withUniqueIDs(producerUid)
                     .done()
                 .withDataStreams()
                     .withOutputNames(OccupancyOutput.NAME)
                     .done()
-                .withPhenomenonTime()
-                    .withSingleValue(eventObs.getPhenomenonTime())
-                    .done()
+                .withPhenomenonTime();
+        ObsFilter filter = (phenomenonTime != null
+                ? timeFilter.withRange(
+                        phenomenonTime.minusMillis(PHENOMENON_TIME_TOLERANCE_MS),
+                        phenomenonTime.plusMillis(PHENOMENON_TIME_TOLERANCE_MS))
+                : timeFilter.withAllTimes())
+                .done()
                 .build();
 
-        for (int attempt = 0; attempt < 3; attempt++) {
-            var entries = occupancyObsStore.selectEntries(filter).toList();
+        for (int attempt = 0; attempt < maxAttempts && !isStopped.getAsBoolean(); attempt++) {
+            if (attempt > 0) {
+                // DataStreamTransactionHandler publishes ObsEvent prior to calling
+                // obsStore.add(obs), and PostgisBatchObsStoreImpl buffers queued
+                // observations in memory until commit() or autoCommitPeriod.
+                try {
+                    obsStore.commit();
+                } catch (Exception e) {
+                    logger.debug("Batch commit while resolving persisted occupancy on {} failed (will retry)",
+                            producerUid, e);
+                }
+            }
+
+            List<Map.Entry<BigId, IObsData>> entries;
+            try (var stream = obsStore.selectEntries(filter)) {
+                entries = stream.toList();
+            }
             if (!entries.isEmpty()) {
                 for (var entry : entries) {
-                    DataComponent struct = resolveRecordStructure(entry.getValue());
+                    DataComponent struct = resolveRecordStructure(obsStore, entry.getValue());
                     Occupancy candidate = OccupancyExtended.readOccupancy(struct, entry.getValue().getResult());
                     if (candidate.getOccupancyCount() == targetOccupancy.getOccupancyCount()) {
                         return entry.getKey();
                     }
                 }
-                return entries.get(0).getKey();
             }
-            try {
-                Thread.sleep(50L);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return null;
+            if (attempt + 1 < maxAttempts && !isStopped.getAsBoolean()) {
+                try {
+                    Thread.sleep(attempt == 0 ? initialRetryMs : retryMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
             }
         }
         return null;
     }
 
     private DataComponent resolveRecordStructure(IObsData obs) {
+        return resolveRecordStructure(occupancyObsStore, obs);
+    }
+
+    private static DataComponent resolveRecordStructure(IObsStore obsStore, IObsData obs) {
         try {
-            var ds = occupancyObsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
+            var ds = obsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
             return ds != null ? ds.getRecordStructure() : null;
         } catch (Exception e) {
             return null;
