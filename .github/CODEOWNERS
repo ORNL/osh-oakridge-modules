@@ -1,14 +1,1 @@
-# Day-to-day sensor drivers, lane workflows, and operator manuals can be approved by ORNL or Botts lead
-* @tyronechrisharris @earocorn
-
-# Governance, CI workflows, daily-file journal durability, and retained-media lifecycle require ORNL sign-off
-/.github/ @tyronechrisharris
-/docs/daily-file-journal-v1.md @tyronechrisharris
-/docs/retained-media-v1.md @tyronechrisharris
-/sensors/sensorhub-utils-rad/src/main/java/org/sensorhub/impl/utils/rad/dailyfile/ @tyronechrisharris
-/sensors/sensorhub-utils-rad/src/test/java/org/sensorhub/impl/utils/rad/dailyfile/ @tyronechrisharris
-/services/sensorhub-service-dailyfile-journal/ @tyronechrisharris
-/services/sensorhub-service-oscar/src/main/java/com/botts/impl/service/oscar/media/ @tyronechrisharris
-/services/sensorhub-service-oscar/src/main/java/com/botts/impl/service/oscar/retention/ @tyronechrisharris
-/services/sensorhub-service-oscar/src/main/java/com/botts/impl/service/oscar/video/ @tyronechrisharris
-/services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/retention/ @tyronechrisharris
+* @tyronechrisharris
