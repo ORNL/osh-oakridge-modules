@@ -65,6 +65,7 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     EmlPluginHandler emlPluginHandler;
     VideoRetention videoRetention;
     DatabasePurger databasePurger;
+    AdjudicationCodeMarkerBackfill adjudicationCodeBackfill;
     StoragePressureRetention storagePressureRetention;
     WebIdResourceHandler webIdResourceHandler;
     MediaResourceHandler mediaResourceHandler;
@@ -202,6 +203,14 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                         config.dailyFilePurgeWorkLimit,
                         config.connectionStatusRetentionHours);
             databasePurger.start();
+
+            if (adjudicationCodeBackfill == null) {
+                adjudicationCodeBackfill = new AdjudicationCodeMarkerBackfill(
+                        (IObsSystemDatabase) module,
+                        getParentHub().getIdEncoders().getObsIdEncoder(),
+                        getLogger());
+            }
+            adjudicationCodeBackfill.start();
         }
 
         WebIdClient webIdClient = (config.webIdApiRoot != null && !config.webIdApiRoot.isBlank())
@@ -251,6 +260,8 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                 this::requestStatisticsOutputStop);
         failure = runStopStep(failure, "database purger stop request",
                 this::requestDatabasePurgerStop);
+        failure = runStopStep(failure, "adjudication code backfill stop request",
+                this::requestAdjudicationCodeBackfillStop);
         failure = runStopStep(failure, "video retention stop request",
                 this::requestVideoRetentionStop);
         failure = runStopStep(failure, "storage-pressure retention stop request",
@@ -260,6 +271,8 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                 () -> awaitStatisticsOutputStop(deadline));
         failure = runStopStep(failure, "database purger",
                 () -> awaitDatabasePurgerStop(deadline));
+        failure = runStopStep(failure, "adjudication code backfill",
+                () -> awaitAdjudicationCodeBackfillStop(deadline));
         failure = runStopStep(failure, "video retention",
                 () -> awaitVideoRetentionStop(deadline));
         failure = runStopStep(failure, "storage-pressure retention",
@@ -358,6 +371,11 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
             databasePurger.requestStop();
     }
 
+    void requestAdjudicationCodeBackfillStop() {
+        if (adjudicationCodeBackfill != null)
+            adjudicationCodeBackfill.requestStop();
+    }
+
     void requestVideoRetentionStop() {
         if (videoRetention != null)
             videoRetention.requestStop();
@@ -378,6 +396,13 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
             return;
         databasePurger.awaitStop(remainingStopNanos(deadline), TimeUnit.NANOSECONDS);
         databasePurger = null;
+    }
+
+    void awaitAdjudicationCodeBackfillStop(long deadline) {
+        if (adjudicationCodeBackfill == null)
+            return;
+        adjudicationCodeBackfill.awaitStop(remainingStopNanos(deadline), TimeUnit.NANOSECONDS);
+        adjudicationCodeBackfill = null;
     }
 
     void awaitVideoRetentionStop(long deadline) {

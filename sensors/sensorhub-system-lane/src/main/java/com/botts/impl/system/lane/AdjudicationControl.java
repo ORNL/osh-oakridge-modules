@@ -22,9 +22,12 @@ import org.vast.util.TimeExtent;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 public class AdjudicationControl extends AbstractSensorControl<LaneSystem> implements IStreamingControlInterfaceWithResult {
+
+    public record AdjudicationResultSummary(String occupancyObsId, int adjudicationCode) {}
 
     public static final String NAME = "adjudicationControl";
     public static final String LABEL = "Adjudication Control";
@@ -125,7 +128,10 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
                var occupancyRecord = ds.getRecordStructure();
                var occupancy = OccupancyExtended.readOccupancy(occupancyRecord, result);
 
-               occupancy.addAdjudicatedId(commandId);
+               if (!occupancy.getAdjudicatedIds().contains(commandId)) {
+                   occupancy.addAdjudicatedId(commandId);
+               }
+               occupancy.recordAdjudicationCode(adj.getAdjudicationCode());
                DataBlock newOccupancyResult = OccupancyExtended.writeOccupancy(occupancyRecord, occupancy);
                obs.getResult().setUnderlyingObject(newOccupancyResult.getUnderlyingObject());
                obs.getResult().updateAtomCount();
@@ -215,5 +221,44 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
         dataBlock.setStringValue(index, adjudication.getVehicleId());
 
         return dataBlock;
+    }
+
+    /**
+     * Parses {@code occupancyObsId} and {@code adjudicationCode} from a completed
+     * {@link AdjudicationControl} command status inline result record.
+     */
+    public static Optional<AdjudicationResultSummary> extractCompletedResultSummary(ICommandStatus status) {
+        if (status == null || status.getStatusCode() != ICommandStatus.CommandStatusCode.COMPLETED)
+            return Optional.empty();
+        var result = status.getResult();
+        if (result == null || result.getInlineRecords() == null)
+            return Optional.empty();
+        var records = result.getInlineRecords().stream().toList();
+        if (records.isEmpty() || records.get(0) == null)
+            return Optional.empty();
+
+        try {
+            DataBlock block = records.get(0);
+            // Layout written by createResultData(Adjudication, String):
+            // 0: username, 1: feedback, 2: adjudicationCode, 3: isotopeCount,
+            // 4..3+isotopeCount: isotopes, 4+isotopeCount: secondaryInspectionStatus,
+            // 5+isotopeCount: filePathCount, 6+isotopeCount..5+isotopeCount+filePathCount: filePaths,
+            // 6+isotopeCount+filePathCount: occupancyObsId, 7+isotopeCount+filePathCount: vehicleId
+            int code = block.getIntValue(2);
+            int isotopeCount = block.getIntValue(3);
+            if (isotopeCount < 0)
+                return Optional.empty();
+            int filePathCountIndex = 5 + isotopeCount;
+            int filePathCount = block.getIntValue(filePathCountIndex);
+            if (filePathCount < 0)
+                return Optional.empty();
+            int occupancyObsIdIndex = 6 + isotopeCount + filePathCount;
+            String occupancyObsId = block.getStringValue(occupancyObsIdIndex);
+            if (occupancyObsId == null || occupancyObsId.isBlank() || code < 0)
+                return Optional.empty();
+            return Optional.of(new AdjudicationResultSummary(occupancyObsId, code));
+        } catch (Exception e) {
+            return Optional.empty();
+        }
     }
 }

@@ -7,6 +7,7 @@ import org.vast.data.DataArrayImpl;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalInt;
 
 public class Adjudication {
 
@@ -16,11 +17,41 @@ public class Adjudication {
     /** Marker stored in Occupancy.adjudicatedIds prior to publication for zero-flash Dashboard suppression and CQL filtering. */
     public static final String EML_NON_THREAT_MARKER = "eml-non-threat";
 
+    /** Prefix for synthetic adjudication code markers stored in Occupancy.adjudicatedIds (e.g. "code:4") for indexed CQL filtering. */
+    public static final String ADJUDICATION_CODE_MARKER_PREFIX = "code:";
+
     /** Sender/username recorded on automated EML Non-Threat adjudication commands. */
     public static final String EML_AUTO_ADJUDICATOR_USERNAME = "EML";
 
     /** Prefix separating human-readable adjudication summary text from structured EML JSON metadata in feedback. */
     public static final String EML_METADATA_PREFIX = "EML_METADATA:";
+
+    public static String adjudicationCodeMarker(int code) {
+        if (code < 0)
+            throw new IllegalArgumentException("Adjudication code must be non-negative: " + code);
+        return ADJUDICATION_CODE_MARKER_PREFIX + code;
+    }
+
+    public static OptionalInt parseAdjudicationCodeMarker(String value) {
+        if (value == null)
+            return OptionalInt.empty();
+        String trimmed = value.trim();
+        if (!trimmed.startsWith(ADJUDICATION_CODE_MARKER_PREFIX))
+            return OptionalInt.empty();
+        String digits = trimmed.substring(ADJUDICATION_CODE_MARKER_PREFIX.length());
+        if (digits.isEmpty())
+            return OptionalInt.empty();
+        for (int i = 0; i < digits.length(); i++) {
+            if (!Character.isDigit(digits.charAt(i)))
+                return OptionalInt.empty();
+        }
+        try {
+            int parsed = Integer.parseInt(digits);
+            return parsed >= 0 ? OptionalInt.of(parsed) : OptionalInt.empty();
+        } catch (NumberFormatException e) {
+            return OptionalInt.empty();
+        }
+    }
 
     private String feedback;
     private int adjudicationCode;
