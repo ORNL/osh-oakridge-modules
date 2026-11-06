@@ -322,7 +322,7 @@ CameraType0,CameraHost0,CameraPath0,Codec0,Username0,Password0
 CameraType1,CameraHost1,CameraPath1,Codec1,Username1,Password1
 ```
 
-El código no fija un máximo de grupos secuenciales, pero el despliegue debe soportar el número total de flujos. Cada fila debe tener el mismo número de celdas que el encabezado. El analizador usa una separación simple por comas: no incluya comas ni saltos de línea dentro de valores, aunque estén entre comillas. Use celdas vacías sin comillas.
+El analizador CSV no fija un máximo de grupos secuenciales, aunque la galería de medios retenidos de cinco fotogramas limita cada evento a `8` cámaras, `120` megapíxeles y `64 MiB` en el conjunto de los cinco fotogramas por cámara (hasta `8` cámaras por carril en `1080p`, `4` en `5 MP` `3072×1728` o `2` en `4K` `3840×2160`), y el servidor debe dimensionarse para el número total de flujos del sitio. Cada fila debe tener el mismo número de celdas que el encabezado. El analizador usa una separación simple por comas: no incluya comas ni saltos de línea dentro de valores, aunque estén entre comillas. Use celdas vacías sin comillas.
 
 ### 6.3 Columnas de carril y RPM
 

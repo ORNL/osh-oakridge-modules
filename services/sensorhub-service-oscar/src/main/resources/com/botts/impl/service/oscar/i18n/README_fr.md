@@ -322,7 +322,7 @@ CameraType0,CameraHost0,CameraPath0,Codec0,Username0,Password0
 CameraType1,CameraHost1,CameraPath1,Codec1,Username1,Password1
 ```
 
-Le code n'impose pas de nombre maximal de groupes séquentiels, mais le déploiement doit être dimensionné pour tous les flux. Chaque ligne doit comporter exactement autant de cellules que l'en-tête. L'analyseur sépare simplement sur les virgules : n'insérez ni virgule ni saut de ligne dans une valeur, même entre guillemets. Utilisez des cellules vides non citées.
+L'analyseur CSV n'impose pas de nombre maximal de groupes séquentiels, mais la galerie de médias conservés à cinq images plafonne chaque événement à `8` caméras, `120` mégapixels et `64 MiB` sur l'ensemble des cinq images par caméra (jusqu'à `8` caméras par voie en `1080p`, `4` en `5 MP` `3072×1728` ou `2` en `4K` `3840×2160`), et l'hôte doit être dimensionné pour le total des flux du site. Chaque ligne doit comporter exactement autant de cellules que l'en-tête. L'analyseur sépare simplement sur les virgules : n'insérez ni virgule ni saut de ligne dans une valeur, même entre guillemets. Utilisez des cellules vides non citées.
 
 ### 6.3 Colonnes de voie et RPM
 

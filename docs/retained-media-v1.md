@@ -254,7 +254,11 @@ GET /buckets/videos/media/{eventId}/{cameraToken}/frame-05.jpg
 ```
 
 `cameraToken` is the URL-safe Base64 encoding returned in the event response paths. The event
-response may contain more than one camera set. JSON and JPEG responses carry `nosniff`; JPEGs are
+response may contain up to eight camera sets (`MAX_MEDIA_SETS_PER_EVENT = 8`), bounded to a `1 MiB`
+JSON catalog, `12 MiB` / `20 MP` / `6,000 px` per frame, and `64 MiB` / `120,000,000` total pixels
+across all published frames in the event (`cameras × 5` frames before secondary pruning — i.e., up
+to `8` cameras per lane at `1080p` `1920×1080`, `4` at `5 MP` `3072×1728`, or `2` at `4K`
+`3840×2160`). JSON and JPEG responses carry `nosniff`; JPEGs are
 served with a private cache policy. `POST`, `PUT`, and `DELETE` return `405`. Requests for internal
 catalog paths return `404`.
 

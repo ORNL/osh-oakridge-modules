@@ -322,7 +322,7 @@ CameraType0,CameraHost0,CameraPath0,Codec0,Username0,Password0
 CameraType1,CameraHost1,CameraPath1,Codec1,Username1,Password1
 ```
 
-There is no fixed code limit on the number of sequential camera groups, although the deployment must be sized for the total stream count. Each data row must have exactly the same number of cells as the header. The importer uses a simple comma delimiter: do not put commas or line breaks inside values, even inside quotes. Use unquoted empty cells.
+The CSV parser imposes no fixed limit on sequential camera groups, although the five-frame retained-media gallery caps each event at `8` cameras, `120` megapixels, and `64 MiB` across all five frames per camera (supporting up to `8` cameras per lane at `1080p`, `4` at `5 MP` `3072×1728`, or `2` at `4K` `3840×2160`), and the host must be sized for the total site stream count. Each data row must have exactly the same number of cells as the header. The importer uses a simple comma delimiter: do not put commas or line breaks inside values, even inside quotes. Use unquoted empty cells.
 
 ### 6.3 Lane and RPM columns
 
