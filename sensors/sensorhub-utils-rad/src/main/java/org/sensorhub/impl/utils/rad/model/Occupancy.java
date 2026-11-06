@@ -9,6 +9,7 @@ import org.vast.data.DataArrayImpl;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalInt;
 
 public class Occupancy {
 
@@ -127,17 +128,17 @@ public class Occupancy {
         }
 
         public Builder adjudicatedIds(List<String> adjudicatedIds) {
-            instance.adjudicatedIds = adjudicatedIds;
+            instance.adjudicatedIds = adjudicatedIds == null ? new ArrayList<>() : new ArrayList<>(adjudicatedIds);
             return this;
         }
 
         public Builder videoPaths(List<String> videoPaths) {
-            instance.videoPaths = videoPaths;
+            instance.videoPaths = videoPaths == null ? new ArrayList<>() : new ArrayList<>(videoPaths);
             return this;
         }
 
         public Builder webIdObsIds(List<String> webIdObsIds) {
-            instance.webIdObsIds = webIdObsIds;
+            instance.webIdObsIds = webIdObsIds == null ? new ArrayList<>() : new ArrayList<>(webIdObsIds);
             return this;
         }
 
@@ -147,8 +148,56 @@ public class Occupancy {
 
     }
 
+    private List<String> mutableAdjudicatedIds() {
+        if (this.adjudicatedIds == null) {
+            this.adjudicatedIds = new ArrayList<>();
+        } else if (!(this.adjudicatedIds instanceof ArrayList)) {
+            this.adjudicatedIds = new ArrayList<>(this.adjudicatedIds);
+        }
+        return this.adjudicatedIds;
+    }
+
     public void addAdjudicatedId(String adjudicatedId) {
-        this.adjudicatedIds.add(adjudicatedId);
+        mutableAdjudicatedIds().add(adjudicatedId);
+    }
+
+    public boolean hasAdjudicationCodeMarker() {
+        return adjudicatedIds != null && adjudicatedIds.stream()
+                .anyMatch(id -> Adjudication.parseAdjudicationCodeMarker(id).isPresent());
+    }
+
+    public OptionalInt getLatestAdjudicationCode() {
+        if (adjudicatedIds == null)
+            return OptionalInt.empty();
+        for (int i = adjudicatedIds.size() - 1; i >= 0; i--) {
+            OptionalInt parsed = Adjudication.parseAdjudicationCodeMarker(adjudicatedIds.get(i));
+            if (parsed.isPresent())
+                return parsed;
+        }
+        return OptionalInt.empty();
+    }
+
+    /**
+     * Records the effective adjudication code marker ({@code "code:<n>"}) on this
+     * occupancy, replacing any prior {@code "code:*"} marker so equality and
+     * inequality CQL predicates stay mutually exclusive across re-adjudications.
+     *
+     * @return {@code true} if {@code adjudicatedIds} was modified
+     */
+    public boolean recordAdjudicationCode(int code) {
+        if (code < 0)
+            return false;
+        List<String> ids = mutableAdjudicatedIds();
+        String marker = Adjudication.adjudicationCodeMarker(code);
+        long existingCodeMarkers = ids.stream()
+                .filter(id -> Adjudication.parseAdjudicationCodeMarker(id).isPresent())
+                .count();
+        if (existingCodeMarkers == 1L && !ids.isEmpty() && marker.equals(ids.get(ids.size() - 1))) {
+            return false;
+        }
+        ids.removeIf(id -> Adjudication.parseAdjudicationCodeMarker(id).isPresent());
+        ids.add(marker);
+        return true;
     }
 
     public void addVideoPath(String videoPath) {

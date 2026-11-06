@@ -409,6 +409,7 @@ public class MessageHandler {
                         EmlEvaluationResult eval = emlEvaluation.get();
                         if ((hadGammaAlarm || hadNeutronAlarm) && eval.isAutoReleaseNonThreat()) {
                             occupancy.addAdjudicatedId(Adjudication.EML_NON_THREAT_MARKER);
+                            occupancy.recordAdjudicationCode(Adjudication.EML_NON_THREAT_CODE);
                             PendingEmlAutoAdjudicationRegistry.register(
                                     parentSensor.getUniqueIdentifier(),
                                     occupancy.getSamplingTime(),
