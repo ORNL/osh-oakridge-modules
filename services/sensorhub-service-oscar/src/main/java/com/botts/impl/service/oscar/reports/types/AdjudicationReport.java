@@ -57,7 +57,6 @@ public class AdjudicationReport extends Report {
 
         List<String> targetLanes = ReportDataAggregator.resolveTargetLaneUIDs(module, laneUIDs);
         Map<String, String> inlineLaneLabels = ReportDataAggregator.resolveLaneDisplayLabels(module, targetLanes, false);
-        Map<String, String> multilineLaneLabels = ReportDataAggregator.resolveLaneDisplayLabels(module, targetLanes, true);
 
         // Single-pass aggregation per lane
         Map<String, ReportDataAggregator.AdjudicationLaneSummary> summariesByLane = new LinkedHashMap<>();
@@ -66,13 +65,11 @@ public class AdjudicationReport extends Report {
         long innocentOrAutoCount = 0L;
         long falseAlarmCount = 0L;
         Set<String> activeIsotopesAcrossScope = new LinkedHashSet<>();
-        Map<String, List<Map<String, String>>> detailsByLane = new LinkedHashMap<>();
 
         for (String laneUid : targetLanes) {
             ReportDataAggregator.AdjudicationLaneSummary summary =
                     ReportDataAggregator.aggregateAdjudicationsForLane(module, laneUid, start, end);
             summariesByLane.put(laneUid, summary);
-            detailsByLane.put(laneUid, summary.detailRows());
             grandTotalRecords += summary.totalRecords();
 
             for (ReportDataAggregator.DispositionCodeSpec spec : summary.dispositionSpecs()) {
@@ -150,21 +147,9 @@ public class AdjudicationReport extends Report {
                 String friendlyLane = inlineLaneLabels.getOrDefault(laneUid, laneUid);
                 ReportDataAggregator.AdjudicationLaneSummary summary = summariesByLane.get(laneUid);
                 renderLaneDispositionSection(pdf, friendlyLane, summary, intFmt);
-                renderLaneIsotopeSection(pdf, friendlyLane, summary, intFmt);
-            }
-
-            // Wide 12-column Adjudication Details section on Landscape pages when records exist
-            if (grandTotalRecords > 0L) {
-                pdf.switchOrientationIfNeeded(PdfDocumentBuilder.Orientation.LANDSCAPE, 140f);
-                pdf.drawSectionHeader(
-                        "Adjudication Details",
-                        "Complete operator and automated EML adjudication records (Landscape view)",
-                        90f
-                );
-                tableGenerator.drawAdjudicationDetailsTable(pdf, detailsByLane, multilineLaneLabels);
-            } else {
-                pdf.drawSectionHeader("Adjudication Details", "Complete operator and automated EML adjudication records", 60f);
-                pdf.drawCalloutBox("No completed adjudication records exist for the selected lanes and time period.");
+                if (summary != null && summary.totalRecords() > 0L) {
+                    renderLaneIsotopeSection(pdf, friendlyLane, summary, intFmt);
+                }
             }
 
             pdf.finishAndSave(out);
@@ -260,25 +245,37 @@ public class AdjudicationReport extends Report {
     ) throws IOException {
         pdf.drawSectionHeader(
                 "Isotope Results - " + friendlyLane,
-                "Identification counts across all 31 standard SNM, industrial, medical, and NORM isotopes",
+                "Non-zero isotope identification counts recorded in completed adjudications",
                 80f
         );
 
         Map<String, Long> isoCounts = summary != null ? summary.isotopeCountsBySymbol() : Map.of();
-        List<ChartGenerator.HorizontalBarItem> barItems = new ArrayList<>(ReportDataAggregator.STANDARD_ISOTOPES.size());
+        Map<String, Long> nonZeroIsoCounts = new LinkedHashMap<>();
+        List<ChartGenerator.HorizontalBarItem> barItems = new ArrayList<>();
 
-        for (Map.Entry<String, String> std : ReportDataAggregator.STANDARD_ISOTOPES.entrySet()) {
-            String symbol = std.getKey();
-            String fullName = std.getValue();
-            long count = Math.max(0L, isoCounts.getOrDefault(symbol, 0L));
-            String catLabel = symbol + " (" + fullName + ")";
+        for (Map.Entry<String, Long> entry : isoCounts.entrySet()) {
+            long count = entry.getValue() != null ? entry.getValue() : 0L;
+            if (count <= 0L) {
+                continue;
+            }
+            String symbol = entry.getKey();
+            String fullName = ReportDataAggregator.STANDARD_ISOTOPES.get(symbol);
+            String catLabel = (fullName != null && !fullName.equalsIgnoreCase(symbol))
+                    ? symbol + " (" + fullName + ")"
+                    : symbol;
+            nonZeroIsoCounts.put(symbol, count);
             barItems.add(new ChartGenerator.HorizontalBarItem(
                     catLabel,
                     count,
                     intFmt.format(count),
                     ChartGenerator.COLOR_NEUTRON,
-                    count > 0L
+                    true
             ));
+        }
+
+        if (barItems.isEmpty()) {
+            pdf.drawCalloutBox("No isotopes were identified in the completed adjudications for " + friendlyLane + ".");
+            return;
         }
 
         chartGenerator.drawHorizontalBarChart(
@@ -291,6 +288,6 @@ public class AdjudicationReport extends Report {
                 true
         );
 
-        tableGenerator.drawIsotopeGridTable(pdf, isoCounts, ReportDataAggregator.STANDARD_ISOTOPES);
+        tableGenerator.drawIsotopeGridTable(pdf, nonZeroIsoCounts, ReportDataAggregator.STANDARD_ISOTOPES);
     }
 }

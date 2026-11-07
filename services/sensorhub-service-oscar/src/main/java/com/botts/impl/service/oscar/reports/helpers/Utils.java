@@ -60,7 +60,10 @@ public class Utils {
     }
 
     public static double calcEMLAlarmRatePct(long emlSuppCount, long alarmCount) {
-        long denom = emlSuppCount + alarmCount;
+        if (emlSuppCount <= 0) {
+            return 0.0;
+        }
+        long denom = Math.max(alarmCount, emlSuppCount);
         if (denom <= 0) {
             return 0.0;
         }

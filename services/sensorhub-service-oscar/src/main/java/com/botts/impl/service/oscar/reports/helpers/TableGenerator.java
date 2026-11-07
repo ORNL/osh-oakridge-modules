@@ -441,7 +441,7 @@ public class TableGenerator {
     }
 
     /**
-     * Draws the 31-isotope summary counts as a clean 4-pair (8-column) grid instead of a squashed 31-column strip.
+     * Draws non-zero isotope summary counts as a compact multi-pair grid (up to 4 isotope/count pairs per row).
      */
     public void drawIsotopeGridTable(
             PdfDocumentBuilder pdf,
@@ -451,7 +451,16 @@ public class TableGenerator {
         if (isotopeCountsBySymbol == null || isotopeCountsBySymbol.isEmpty()) {
             return;
         }
-        int pairsPerRow = 4;
+        List<Map.Entry<String, Long>> entries = new ArrayList<>();
+        for (Map.Entry<String, Long> e : isotopeCountsBySymbol.entrySet()) {
+            if (e.getValue() != null && e.getValue() > 0L) {
+                entries.add(e);
+            }
+        }
+        if (entries.isEmpty()) {
+            return;
+        }
+        int pairsPerRow = Math.min(4, entries.size());
         List<ColumnSpec> cols = new ArrayList<>(pairsPerRow * 2);
         for (int p = 0; p < pairsPerRow; p++) {
             cols.add(new ColumnSpec("Isotope", 1.75f, Align.LEFT, false));
@@ -459,7 +468,6 @@ public class TableGenerator {
         }
 
         NumberFormat intFmt = NumberFormat.getIntegerInstance(Locale.US);
-        List<Map.Entry<String, Long>> entries = new ArrayList<>(isotopeCountsBySymbol.entrySet());
         int totalRows = (int) Math.ceil(entries.size() / (double) pairsPerRow);
         List<List<String>> rows = new ArrayList<>(totalRows);
 

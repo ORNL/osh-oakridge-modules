@@ -49,12 +49,38 @@ public class DefaultObjectHandler implements IObjectHandler {
 
         try {
             ctx.getResponse().setContentType(mimeType);
-            InputStream objectData = bucketStore.getObject(bucketName, objectKey);
-            objectData.transferTo(ctx.getResponse().getOutputStream());
-            objectData.close();
+            if (isAttachmentRequested(ctx, objectKey)) {
+                ctx.getResponse().setHeader("Content-Disposition",
+                        "attachment; filename=\"" + safeDownloadFileName(objectKey) + "\"");
+            }
+            try (InputStream objectData = bucketStore.getObject(bucketName, objectKey)) {
+                objectData.transferTo(ctx.getResponse().getOutputStream());
+            }
         } catch (DataStoreException e) {
             throw ServiceErrors.internalError(IBucketStore.FAILED_GET_OBJECT + bucketName);
         }
+    }
+
+    private static boolean isAttachmentRequested(RequestContext ctx, String objectKey) {
+        if (objectKey != null && objectKey.toLowerCase().endsWith(".xlsx")) {
+            return true;
+        }
+        if (ctx == null || ctx.getRequest() == null) {
+            return false;
+        }
+        String dl = ctx.getRequest().getParameter("download");
+        return "1".equals(dl) || "true".equalsIgnoreCase(dl);
+    }
+
+    private static String safeDownloadFileName(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) {
+            return "download";
+        }
+        String normalized = objectKey.replace('\\', '/');
+        int slashIdx = normalized.lastIndexOf('/');
+        String base = slashIdx >= 0 ? normalized.substring(slashIdx + 1) : normalized;
+        String sanitized = base.replaceAll("[^A-Za-z0-9._-]", "_");
+        return sanitized.isBlank() ? "download" : sanitized;
     }
 
     @Override

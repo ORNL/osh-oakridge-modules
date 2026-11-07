@@ -18,6 +18,9 @@ package com.botts.impl.service.oscar.reports.helpers;
 import com.botts.impl.service.oscar.AdjudicationCodeConfig;
 import com.botts.impl.service.oscar.OSCARServiceModule;
 import com.botts.impl.system.lane.LaneSystem;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.opengis.swe.v20.DataArray;
 import net.opengis.swe.v20.DataBlock;
 import net.opengis.swe.v20.DataComponent;
@@ -45,6 +48,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -165,16 +169,42 @@ public final class ReportDataAggregator {
         }
     }
 
+    public record AdjudicationDetailRecord(
+            String laneUid,
+            int sequenceNumber,
+            String timeUtcIso,
+            String timeUtcDisplay,
+            String username,
+            int adjudicationCode,
+            String dispositionLabel,
+            String dispositionGroup,
+            List<String> isotopes,
+            String secondaryInspectionStatus,
+            String vehicleId,
+            String occupancyObsId,
+            String operatorFeedback,
+            String formattedSummary,
+            String emlDecision,
+            String emlSourceType,
+            Double emlNormProbPct,
+            Double emlNonEmittingProbPct,
+            Double emlThreatProbPct,
+            Integer emlVehicleClass,
+            Double emlVehicleLengthMeters,
+            List<String> filePaths
+    ) {}
+
     public record AdjudicationLaneSummary(
             String laneUid,
             long totalRecords,
             List<DispositionCodeSpec> dispositionSpecs,
             Map<Integer, Long> countsByCode,
             Map<String, Long> isotopeCountsBySymbol,
-            List<Map<String, String>> detailRows
+            List<Map<String, String>> detailRows,
+            List<AdjudicationDetailRecord> structuredRecords
     ) {}
 
-    private record OccupancyIndices(int gammaIdx, int neutronIdx) {}
+    private record OccupancyIndices(int gammaIdx, int neutronIdx, int adjCountIdx) {}
 
     private ReportDataAggregator() {}
 
@@ -264,12 +294,18 @@ public final class ReportDataAggregator {
         }
         String[] scopedLanes = Utils.parseLaneUIDs(laneUIDs);
 
-        // 1. Occupancy single pass (Total Occupancies + Gamma / Neutron / Gamma-Neutron alarms)
+        // 1. Occupancy indexed total count + single pass over alarming occupancies only
         DataStreamFilter occDsFilter = buildScopedDataStreamFilter(scopedLanes, RADHelper.DEF_OCCUPANCY);
+        metrics.totalOccupancies = countOccupancies(module, db, new ObsFilter.Builder()
+                .withResultTimeDuring(start, end)
+                .withDataStreams(occDsFilter)
+                .build());
+
         Map<BigId, OccupancyIndices> occIndicesCache = new HashMap<>();
         try (Stream<IObsData> stream = db.getObservationStore().select(new ObsFilter.Builder()
                 .withResultTimeDuring(start, end)
                 .withDataStreams(occDsFilter)
+                .withCQLFilter(Utils.anyOccupancyAlarmCQL)
                 .build())) {
             stream.forEach(obs -> {
                 if (obs == null || obs.getResult() == null) {
@@ -278,7 +314,6 @@ public final class ReportDataAggregator {
                 OccupancyIndices idx = occIndicesCache.computeIfAbsent(
                         obs.getDataStreamID(), dsId -> resolveOccupancyIndices(db, dsId));
                 DataBlock block = obs.getResult();
-                metrics.totalOccupancies++;
                 boolean g = safeBoolean(block, idx.gammaIdx());
                 boolean n = safeBoolean(block, idx.neutronIdx());
                 if (g && n) {
@@ -288,16 +323,21 @@ public final class ReportDataAggregator {
                 } else if (n) {
                     metrics.neutronAlarm++;
                 }
+                if ((g || n) && hasEmlNonThreatMarker(block, idx)) {
+                    metrics.emlSuppressed++;
+                }
             });
         }
 
-        // 2. EML Suppressed single pass with CQL predicate pushdown
-        DataStreamFilter emlDsFilter = buildScopedDataStreamFilter(scopedLanes, RADHelper.DEF_EML_ANALYSIS);
-        metrics.emlSuppressed = db.getObservationStore().countMatchingEntries(new ObsFilter.Builder()
-                .withResultTimeDuring(start, end)
-                .withDataStreams(emlDsFilter)
-                .withCQLFilter(Utils.emlSuppressedCQL)
-                .build());
+        // 2. Fallback for standalone legacy DEF_EML_ANALYSIS streams when occupancy markers are absent
+        if (metrics.emlSuppressed == 0L) {
+            DataStreamFilter emlDsFilter = buildScopedDataStreamFilter(scopedLanes, RADHelper.DEF_EML_ANALYSIS);
+            metrics.emlSuppressed = db.getObservationStore().countMatchingEntries(new ObsFilter.Builder()
+                    .withResultTimeDuring(start, end)
+                    .withDataStreams(emlDsFilter)
+                    .withCQLFilter(Utils.emlSuppressedCQL)
+                    .build());
+        }
 
         // 3. Tamper single pass with CQL predicate pushdown
         DataStreamFilter tamperDsFilter = buildScopedDataStreamFilter(scopedLanes, RADHelper.DEF_TAMPER);
@@ -402,11 +442,22 @@ public final class ReportDataAggregator {
             }
         }
 
-        // 1. Occupancy pass across all target lanes combined
+        // 1. Occupancy indexed per-stream totals + single pass over alarming occupancies across all lanes
         if (!occStreamToLane.isEmpty()) {
+            for (Map.Entry<BigId, String> occDs : occStreamToLane.entrySet()) {
+                ObservationMetrics m = perLane.get(occDs.getValue());
+                if (m != null) {
+                    m.totalOccupancies += countOccupancies(module, db, new ObsFilter.Builder()
+                            .withResultTimeDuring(start, end)
+                            .withDataStreams(occDs.getKey())
+                            .build());
+                }
+            }
+
             try (Stream<IObsData> stream = db.getObservationStore().select(new ObsFilter.Builder()
                     .withResultTimeDuring(start, end)
                     .withDataStreams(occStreamToLane.keySet())
+                    .withCQLFilter(Utils.anyOccupancyAlarmCQL)
                     .build())) {
                 stream.forEach(obs -> {
                     if (obs == null || obs.getResult() == null) {
@@ -417,9 +468,8 @@ public final class ReportDataAggregator {
                     if (m == null) {
                         return;
                     }
-                    OccupancyIndices idx = occIndices.getOrDefault(obs.getDataStreamID(), new OccupancyIndices(5, 6));
+                    OccupancyIndices idx = occIndices.getOrDefault(obs.getDataStreamID(), new OccupancyIndices(5, 6, 9));
                     DataBlock block = obs.getResult();
-                    m.totalOccupancies++;
                     boolean g = safeBoolean(block, idx.gammaIdx());
                     boolean n = safeBoolean(block, idx.neutronIdx());
                     if (g && n) {
@@ -429,12 +479,21 @@ public final class ReportDataAggregator {
                     } else if (n) {
                         m.neutronAlarm++;
                     }
+                    if ((g || n) && hasEmlNonThreatMarker(block, idx)) {
+                        m.emlSuppressed++;
+                    }
                 });
             }
         }
 
-        // 2. EML Suppressed pass across all target lanes combined
+        // 2. Legacy EML Suppressed fallback across lanes that have standalone DEF_EML_ANALYSIS streams
         if (!emlStreamToLane.isEmpty()) {
+            Set<String> lanesAlreadyWithOccEml = new java.util.HashSet<>();
+            for (Map.Entry<String, ObservationMetrics> e : perLane.entrySet()) {
+                if (e.getValue().emlSuppressed > 0L) {
+                    lanesAlreadyWithOccEml.add(e.getKey());
+                }
+            }
             try (Stream<IObsData> stream = db.getObservationStore().select(new ObsFilter.Builder()
                     .withResultTimeDuring(start, end)
                     .withDataStreams(emlStreamToLane.keySet())
@@ -445,6 +504,9 @@ public final class ReportDataAggregator {
                         return;
                     }
                     String laneUid = emlStreamToLane.get(obs.getDataStreamID());
+                    if (lanesAlreadyWithOccEml.contains(laneUid)) {
+                        return;
+                    }
                     ObservationMetrics m = perLane.get(laneUid);
                     if (m != null) {
                         int rIdx = emlResultIdx.getOrDefault(obs.getDataStreamID(), 0);
@@ -522,15 +584,53 @@ public final class ReportDataAggregator {
             if (eventType == EventReportType.ALARMS || eventType == EventReportType.ALARMS_OCCUPANCIES) {
                 boolean includeAllOccupancies = (eventType == EventReportType.ALARMS_OCCUPANCIES);
                 DataStreamFilter occDsFilter = buildScopedDataStreamFilter(scopedLanes, RADHelper.DEF_OCCUPANCY);
-                ObsFilter.Builder occFilter = new ObsFilter.Builder()
-                        .withResultTimeDuring(start, end)
-                        .withDataStreams(occDsFilter);
-                if (!includeAllOccupancies) {
-                    occFilter.withCQLFilter(Utils.anyOccupancyAlarmCQL);
+
+                if (includeAllOccupancies && start != null && end != null) {
+                    for (Map.Entry<LocalDate, ObservationMetrics> dayEntry : byUtcDate.entrySet()) {
+                        LocalDate day = dayEntry.getKey();
+                        Instant bucketMin = day.atStartOfDay(ZoneOffset.UTC).toInstant();
+                        if (bucketMin.isBefore(start)) {
+                            bucketMin = start;
+                        }
+                        Instant bucketMax = day.plusDays(1L).atStartOfDay(ZoneOffset.UTC).toInstant().minusNanos(1L);
+                        if (bucketMax.isAfter(end)) {
+                            bucketMax = end;
+                        }
+                        if (!bucketMin.isAfter(bucketMax)) {
+                            dayEntry.getValue().totalOccupancies += countOccupancies(
+                                    module,
+                                    db,
+                                    new ObsFilter.Builder()
+                                            .withResultTimeDuring(bucketMin, bucketMax)
+                                            .withDataStreams(occDsFilter)
+                                            .build()
+                            );
+                        }
+                    }
+                    LocalDate endDay = LocalDate.ofInstant(end, ZoneOffset.UTC);
+                    if (end.isAfter(start) && end.equals(endDay.atStartOfDay(ZoneOffset.UTC).toInstant())) {
+                        long exactBoundaryCount = countOccupancies(
+                                module,
+                                db,
+                                new ObsFilter.Builder()
+                                        .withResultTimeDuring(end, end)
+                                        .withDataStreams(occDsFilter)
+                                        .build()
+                        );
+                        if (exactBoundaryCount > 0L) {
+                            byUtcDate.computeIfAbsent(endDay, d -> new ObservationMetrics()).totalOccupancies += exactBoundaryCount;
+                        }
+                    }
                 }
 
+                long occEmlSuppressedTotal = 0L;
+                long[] occEmlHolder = {0L};
                 Map<BigId, OccupancyIndices> occIndicesCache = new HashMap<>();
-                try (Stream<IObsData> stream = db.getObservationStore().select(occFilter.build())) {
+                try (Stream<IObsData> stream = db.getObservationStore().select(new ObsFilter.Builder()
+                        .withResultTimeDuring(start, end)
+                        .withDataStreams(occDsFilter)
+                        .withCQLFilter(Utils.anyOccupancyAlarmCQL)
+                        .build())) {
                     stream.forEach(obs -> {
                         if (obs == null || obs.getResult() == null || obs.getResultTime() == null) {
                             return;
@@ -540,9 +640,6 @@ public final class ReportDataAggregator {
                         OccupancyIndices idx = occIndicesCache.computeIfAbsent(
                                 obs.getDataStreamID(), dsId -> resolveOccupancyIndices(db, dsId));
                         DataBlock block = obs.getResult();
-                        if (includeAllOccupancies) {
-                            m.totalOccupancies++;
-                        }
                         boolean g = safeBoolean(block, idx.gammaIdx());
                         boolean n = safeBoolean(block, idx.neutronIdx());
                         if (g && n) {
@@ -552,30 +649,37 @@ public final class ReportDataAggregator {
                         } else if (n) {
                             m.neutronAlarm++;
                         }
+                        if ((g || n) && hasEmlNonThreatMarker(block, idx)) {
+                            m.emlSuppressed++;
+                            occEmlHolder[0]++;
+                        }
                     });
                 }
+                occEmlSuppressedTotal = occEmlHolder[0];
 
-                DataStreamFilter emlDsFilter = buildScopedDataStreamFilter(scopedLanes, RADHelper.DEF_EML_ANALYSIS);
-                Map<BigId, Integer> emlIdxCache = new HashMap<>();
-                try (Stream<IObsData> stream = db.getObservationStore().select(new ObsFilter.Builder()
-                        .withResultTimeDuring(start, end)
-                        .withDataStreams(emlDsFilter)
-                        .withCQLFilter(Utils.emlSuppressedCQL)
-                        .build())) {
-                    stream.forEach(obs -> {
-                        if (obs == null || obs.getResult() == null || obs.getResultTime() == null) {
-                            return;
-                        }
-                        int rIdx = emlIdxCache.computeIfAbsent(obs.getDataStreamID(), dsId -> {
-                            DataComponent s = getRecordStructure(db, dsId);
-                            return findLeadingScalarIndex(s, c -> "result".equalsIgnoreCase(c.getName()), 0);
+                if (occEmlSuppressedTotal == 0L) {
+                    DataStreamFilter emlDsFilter = buildScopedDataStreamFilter(scopedLanes, RADHelper.DEF_EML_ANALYSIS);
+                    Map<BigId, Integer> emlIdxCache = new HashMap<>();
+                    try (Stream<IObsData> stream = db.getObservationStore().select(new ObsFilter.Builder()
+                            .withResultTimeDuring(start, end)
+                            .withDataStreams(emlDsFilter)
+                            .withCQLFilter(Utils.emlSuppressedCQL)
+                            .build())) {
+                        stream.forEach(obs -> {
+                            if (obs == null || obs.getResult() == null || obs.getResultTime() == null) {
+                                return;
+                            }
+                            int rIdx = emlIdxCache.computeIfAbsent(obs.getDataStreamID(), dsId -> {
+                                DataComponent s = getRecordStructure(db, dsId);
+                                return findLeadingScalarIndex(s, c -> "result".equalsIgnoreCase(c.getName()), 0);
+                            });
+                            String res = safeString(obs.getResult(), rIdx);
+                            if ("RELEASE".equalsIgnoreCase(res) || "1".equals(res)) {
+                                LocalDate day = LocalDate.ofInstant(obs.getResultTime(), ZoneOffset.UTC);
+                                byUtcDate.computeIfAbsent(day, d -> new ObservationMetrics()).emlSuppressed++;
+                            }
                         });
-                        String res = safeString(obs.getResult(), rIdx);
-                        if ("RELEASE".equalsIgnoreCase(res) || "1".equals(res)) {
-                            LocalDate day = LocalDate.ofInstant(obs.getResultTime(), ZoneOffset.UTC);
-                            byUtcDate.computeIfAbsent(day, d -> new ObservationMetrics()).emlSuppressed++;
-                        }
-                    });
+                    }
                 }
             } else if (eventType == EventReportType.SOH) {
                 DataStreamFilter faultDsFilter = buildScopedDataStreamFilter(
@@ -679,6 +783,7 @@ public final class ReportDataAggregator {
         }
 
         List<Map<String, String>> detailRows = new ArrayList<>();
+        List<AdjudicationDetailRecord> structuredRecords = new ArrayList<>();
         long totalRecords = 0L;
 
         if (module != null && module.getParentHub() != null && laneUid != null && !laneUid.isBlank()) {
@@ -733,11 +838,16 @@ public final class ReportDataAggregator {
 
                     for (String recordedIso : recordIsotopes) {
                         String trimmedIso = recordedIso.trim();
+                        boolean matchedStandard = false;
                         for (Map.Entry<String, String> std : STANDARD_ISOTOPES.entrySet()) {
                             if (trimmedIso.equalsIgnoreCase(std.getValue()) || trimmedIso.equalsIgnoreCase(std.getKey())) {
                                 isotopeCounts.merge(std.getKey(), 1L, Long::sum);
+                                matchedStandard = true;
                                 break;
                             }
+                        }
+                        if (!matchedStandard && !trimmedIso.isEmpty()) {
+                            isotopeCounts.merge(trimmedIso, 1L, Long::sum);
                         }
                     }
 
@@ -751,6 +861,9 @@ public final class ReportDataAggregator {
                     String reportTimeStr = entry.getReportTime() != null
                             ? UTC_DATETIME_SHORT_FMT.format(entry.getReportTime())
                             : "-";
+                    String reportTimeIso = entry.getReportTime() != null
+                            ? DateTimeFormatter.ISO_INSTANT.format(entry.getReportTime())
+                            : "";
 
                     String formattedIsotopes = recordIsotopes.isEmpty()
                             ? "None (0)"
@@ -759,8 +872,11 @@ public final class ReportDataAggregator {
                             ? "None (0)"
                             : String.join(", ", filePaths) + " (" + fileCount + ")";
 
+                    int currentSeq = seq++;
+                    ParsedEmlFeedback parsedEml = parseEmlFeedback(feedback);
+
                     Map<String, String> row = new LinkedHashMap<>();
-                    row.put("#", String.valueOf(seq++));
+                    row.put("#", String.valueOf(currentSeq));
                     row.put("Time (UTC)", reportTimeStr);
                     row.put("Username", username.isEmpty() ? "-" : username);
                     row.put("Feedback", feedback);
@@ -773,6 +889,31 @@ public final class ReportDataAggregator {
                     row.put("Occupancy Obs ID", occupancyObsId.isEmpty() ? "-" : occupancyObsId);
                     row.put("Vehicle ID", vehicleId.isEmpty() ? "-" : vehicleId);
                     detailRows.add(row);
+
+                    structuredRecords.add(new AdjudicationDetailRecord(
+                            laneUid,
+                            currentSeq,
+                            reportTimeIso,
+                            reportTimeStr,
+                            username.isEmpty() ? "-" : username,
+                            code,
+                            formattedCode,
+                            matchedSpec != null ? matchedSpec.group() : "Other",
+                            List.copyOf(recordIsotopes),
+                            secondaryStatus.isEmpty() ? "-" : secondaryStatus,
+                            vehicleId.isEmpty() ? "-" : vehicleId,
+                            occupancyObsId.isEmpty() ? "-" : occupancyObsId,
+                            parsedEml.operatorNotes(),
+                            TableGenerator.formatAdjudicationFeedback(feedback),
+                            parsedEml.emlDecision(),
+                            parsedEml.emlSourceType(),
+                            parsedEml.normProbPct(),
+                            parsedEml.nonEmittingProbPct(),
+                            parsedEml.threatProbPct(),
+                            parsedEml.vehicleClass(),
+                            parsedEml.vehicleLengthMeters(),
+                            List.copyOf(filePaths)
+                    ));
                 } catch (Exception ignored) {
                     // Skip malformed command status records safely without aborting the report
                 }
@@ -785,8 +926,91 @@ public final class ReportDataAggregator {
                 new ArrayList<>(specByCode.values()),
                 countsByCode,
                 isotopeCounts,
-                detailRows
+                detailRows,
+                structuredRecords
         );
+    }
+
+    private record ParsedEmlFeedback(
+            String operatorNotes,
+            String emlDecision,
+            String emlSourceType,
+            Double normProbPct,
+            Double nonEmittingProbPct,
+            Double threatProbPct,
+            Integer vehicleClass,
+            Double vehicleLengthMeters
+    ) {}
+
+    private static ParsedEmlFeedback parseEmlFeedback(String rawFeedback) {
+        if (rawFeedback == null || rawFeedback.isBlank()) {
+            return new ParsedEmlFeedback("", "", "", null, null, null, null, null);
+        }
+        int markerIdx = rawFeedback.indexOf(Adjudication.EML_METADATA_PREFIX);
+        if (markerIdx < 0) {
+            return new ParsedEmlFeedback(rawFeedback.trim(), "", "", null, null, null, null, null);
+        }
+        String notes = rawFeedback.substring(0, markerIdx).trim();
+        String jsonPart = rawFeedback.substring(markerIdx + Adjudication.EML_METADATA_PREFIX.length()).trim();
+        try {
+            JsonElement parsed = JsonParser.parseString(jsonPart);
+            if (!parsed.isJsonObject()) {
+                return new ParsedEmlFeedback(notes, "", "", null, null, null, null, null);
+            }
+            JsonObject obj = parsed.getAsJsonObject();
+            String decision = getJsonString(obj, "result");
+            if (decision.isEmpty()) {
+                decision = getJsonString(obj, "emlDecision");
+            }
+            String sourceType = getJsonString(obj, "overallSourceType");
+            Double pNorm = getJsonPct(obj, "probabilityNORM");
+            Double pNonEmit = getJsonPct(obj, "probabilityNonEmitting");
+            Double pThreat = getJsonPct(obj, "probabilityThreat");
+            Integer vClass = getJsonInt(obj, "vehicleClass");
+            Double vLen = getJsonDouble(obj, "vehicleLength");
+            return new ParsedEmlFeedback(notes, decision, sourceType, pNorm, pNonEmit, pThreat, vClass, vLen);
+        } catch (Exception e) {
+            return new ParsedEmlFeedback(notes, "", "", null, null, null, null, null);
+        }
+    }
+
+    private static String getJsonString(JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) {
+            return "";
+        }
+        try {
+            return obj.get(key).getAsString().trim();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static Double getJsonDouble(JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) {
+            return null;
+        }
+        try {
+            double v = obj.get(key).getAsDouble();
+            return Double.isFinite(v) ? v : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static Double getJsonPct(JsonObject obj, String key) {
+        Double v = getJsonDouble(obj, key);
+        return v == null ? null : v * 100.0;
+    }
+
+    private static Integer getJsonInt(JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) {
+            return null;
+        }
+        try {
+            return obj.get(key).getAsInt();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static Map<LocalDate, ObservationMetrics> seedUtcDayBuckets(Instant start, Instant end) {
@@ -839,6 +1063,31 @@ public final class ReportDataAggregator {
         return module.getParentHub().getDatabaseRegistry().getFederatedDatabase();
     }
 
+    private static long countOccupancies(OSCARServiceModule module, IObsSystemDatabase db, ObsFilter filter) {
+        if (db == null || db.getObservationStore() == null) {
+            return 0L;
+        }
+        if (hasMvObsStore(module)) {
+            try (var keys = db.getObservationStore().selectKeys(filter)) {
+                return keys.count();
+            }
+        }
+        return db.getObservationStore().countMatchingEntries(filter);
+    }
+
+    private static boolean hasMvObsStore(OSCARServiceModule module) {
+        if (module == null || module.getParentHub() == null || module.getParentHub().getDatabaseRegistry() == null) {
+            return false;
+        }
+        for (var database : module.getParentHub().getDatabaseRegistry().getObsSystemDatabases()) {
+            if (database != null && database.getObservationStore() != null
+                    && database.getObservationStore().getClass().getSimpleName().startsWith("MV")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static DataComponent getRecordStructure(IObsSystemDatabase db, BigId dataStreamId) {
         if (db == null || dataStreamId == null || db.getDataStreamStore() == null) {
             return null;
@@ -854,7 +1103,31 @@ public final class ReportDataAggregator {
     private static OccupancyIndices extractOccupancyIndices(DataComponent struct) {
         int gIdx = findLeadingScalarIndex(struct, c -> "gammaAlarm".equalsIgnoreCase(c.getName()), 5);
         int nIdx = findLeadingScalarIndex(struct, c -> "neutronAlarm".equalsIgnoreCase(c.getName()), 6);
-        return new OccupancyIndices(gIdx, nIdx);
+        int adjCountIdx = findLeadingScalarIndex(
+                struct,
+                c -> c.getName() != null
+                        && c.getName().toLowerCase(Locale.ROOT).contains("adjudicat")
+                        && c.getName().toLowerCase(Locale.ROOT).contains("count"),
+                9
+        );
+        return new OccupancyIndices(gIdx, nIdx, adjCountIdx);
+    }
+
+    private static boolean hasEmlNonThreatMarker(DataBlock block, OccupancyIndices idx) {
+        if (block == null || idx == null || idx.adjCountIdx() < 0) {
+            return false;
+        }
+        int count = safeInt(block, idx.adjCountIdx());
+        if (count <= 0 || count > 256) {
+            return false;
+        }
+        for (int i = 0; i < count; i++) {
+            String marker = safeString(block, idx.adjCountIdx() + 1 + i);
+            if (Adjudication.EML_NON_THREAT_MARKER.equalsIgnoreCase(marker)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static int resolveAlarmStateIndex(IObsSystemDatabase db, BigId dsId) {
@@ -918,6 +1191,14 @@ public final class ReportDataAggregator {
             return block != null && idx >= 0 && block.getBooleanValue(idx);
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private static int safeInt(DataBlock block, int idx) {
+        try {
+            return block != null && idx >= 0 && idx < block.getAtomCount() ? block.getIntValue(idx) : 0;
+        } catch (Exception e) {
+            return 0;
         }
     }
 
