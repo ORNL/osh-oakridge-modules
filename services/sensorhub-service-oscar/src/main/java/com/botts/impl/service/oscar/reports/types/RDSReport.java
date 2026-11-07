@@ -21,19 +21,27 @@ import com.botts.impl.service.oscar.reports.helpers.ChartGenerator;
 import com.botts.impl.service.oscar.reports.helpers.PdfDocumentBuilder;
 import com.botts.impl.service.oscar.reports.helpers.ReportCmdType;
 import com.botts.impl.service.oscar.reports.helpers.ReportDataAggregator;
+import com.botts.impl.service.oscar.reports.helpers.ReportFormat;
 import com.botts.impl.service.oscar.reports.helpers.TableGenerator;
 import com.botts.impl.service.oscar.reports.helpers.Utils;
+import com.botts.impl.service.oscar.reports.helpers.XlsxWorkbookWriter;
+import com.botts.impl.service.oscar.reports.helpers.XlsxWorkbookWriter.CellValue;
+import com.google.gson.stream.JsonWriter;
 import org.sensorhub.api.datastore.DataStoreException;
 import org.sensorhub.api.module.IModule;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -48,16 +56,38 @@ public class RDSReport extends Report {
 
     private final String siteId;
     private final String laneUIDs;
+    private final ReportFormat format;
     private final TableGenerator tableGenerator;
 
     private record StorageCandidate(String label, Path path) {}
 
+    private record StorageVolumeRow(
+            String label,
+            double usedGb,
+            double usedPct,
+            double usableGb,
+            double freeGb,
+            double totalGb
+    ) {}
+
     public RDSReport(OutputStream out, Instant startTime, Instant endTime, String laneUIDs, OSCARServiceModule module) {
+        this(out, startTime, endTime, laneUIDs, ReportFormat.PDF, module);
+    }
+
+    public RDSReport(
+            OutputStream out,
+            Instant startTime,
+            Instant endTime,
+            String laneUIDs,
+            ReportFormat format,
+            OSCARServiceModule module
+    ) {
         super(out, startTime, endTime, module);
         this.siteId = (module != null && module.getConfiguration() != null && module.getConfiguration().nodeId != null)
                 ? module.getConfiguration().nodeId
                 : "oscar-node";
         this.laneUIDs = laneUIDs;
+        this.format = format != null ? format : ReportFormat.PDF;
         this.tableGenerator = new TableGenerator();
     }
 
@@ -65,9 +95,27 @@ public class RDSReport extends Report {
     public void generate() throws DataStoreException {
         ReportDataAggregator.ObservationMetrics metrics =
                 ReportDataAggregator.aggregateScopeMetrics(module, laneUIDs, start, end);
-
-        NumberFormat intFmt = NumberFormat.getIntegerInstance(Locale.US);
         String scopeLine = ReportDataAggregator.buildBannerScopeSummary(module, laneUIDs);
+        List<StorageVolumeRow> storageVolumes = collectStorageVolumes();
+
+        try {
+            switch (format) {
+                case CSV -> writeCsv(metrics, storageVolumes);
+                case JSON -> writeJson(scopeLine, metrics, storageVolumes);
+                case XLSX -> writeXlsx(scopeLine, metrics, storageVolumes);
+                case PDF -> writePdf(scopeLine, metrics, storageVolumes);
+            }
+        } catch (IOException e) {
+            throw new DataStoreException("Failed to generate RDS Site Report (" + format + ")", e);
+        }
+    }
+
+    private void writePdf(
+            String scopeLine,
+            ReportDataAggregator.ObservationMetrics metrics,
+            List<StorageVolumeRow> storageVolumes
+    ) throws IOException {
+        NumberFormat intFmt = NumberFormat.getIntegerInstance(Locale.US);
 
         try (PdfDocumentBuilder pdf = new PdfDocumentBuilder("RDS Site Report", siteId)) {
             pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
@@ -83,63 +131,248 @@ public class RDSReport extends Report {
                     new PdfDocumentBuilder.KpiCard(
                             "Total Occupancies",
                             intFmt.format(metrics.totalOccupancies),
-                            "Alarm Rate: " + Utils.formatPercentage(metrics.alarmOccupancyRatePct()),
+                            "Alarm Occupancy Rate: " + Utils.formatPercentage(metrics.alarmOccupancyRatePct()),
                             PdfDocumentBuilder.ACCENT_SKY
                     ),
                     new PdfDocumentBuilder.KpiCard(
                             "Total Alarms",
                             intFmt.format(metrics.totalAlarms()),
-                            String.format(Locale.US, "G: %s | N: %s | G+N: %s",
-                                    intFmt.format(metrics.gammaAlarm),
-                                    intFmt.format(metrics.neutronAlarm),
-                                    intFmt.format(metrics.gammaNeutronAlarm)),
+                            "Occupied Alarm Triggers",
                             ChartGenerator.COLOR_GAMMA
                     ),
                     new PdfDocumentBuilder.KpiCard(
                             "EML Suppressed",
                             intFmt.format(metrics.emlSuppressed),
-                            "EML Rate: " + Utils.formatPercentage(metrics.emlAlarmRatePct()),
+                            "EML Alarm Rate: " + Utils.formatPercentage(metrics.emlAlarmRatePct()),
                             ChartGenerator.COLOR_EML_SUPPRESSED
                     ),
                     new PdfDocumentBuilder.KpiCard(
                             "Faults & Tampers",
                             intFmt.format(metrics.totalFaultsAndTamper()),
-                            String.format(Locale.US, "Tamper: %s | Faults: %s",
-                                    intFmt.format(metrics.tamper),
-                                    intFmt.format(metrics.gammaHighFault + metrics.gammaLowFault + metrics.neutronHighFault)),
+                            "Detector SOH & Tamper Events",
                             ChartGenerator.COLOR_TAMPER
                     )
             ));
 
-            // 1. Alarm Statistics
-            pdf.drawSectionHeader("Alarm Statistics", "Aggregated occupancy, alarm, and EML suppression totals", 70f);
-            Map<String, String> alarmOccCounts = new LinkedHashMap<>();
-            alarmOccCounts.put("Gamma Alarm", intFmt.format(metrics.gammaAlarm));
-            alarmOccCounts.put("Neutron Alarm", intFmt.format(metrics.neutronAlarm));
-            alarmOccCounts.put("Gamma-Neutron Alarm", intFmt.format(metrics.gammaNeutronAlarm));
-            alarmOccCounts.put("EML Suppressed", intFmt.format(metrics.emlSuppressed));
-            alarmOccCounts.put("Total Occupancies", intFmt.format(metrics.totalOccupancies));
-            alarmOccCounts.put("Alarm Occupancy Rate", Utils.formatPercentage(metrics.alarmOccupancyRatePct()));
-            alarmOccCounts.put("EML Alarm Rate", Utils.formatPercentage(metrics.emlAlarmRatePct()));
-            tableGenerator.drawSummaryTable(pdf, alarmOccCounts);
+            // 1. Unified Detector Channel & Fault Breakdown (subtypes only — headline totals/rates are in the KPI cards above)
+            pdf.drawSectionHeader(
+                    "Detector Channel & Fault Breakdown",
+                    "Granular alarm channel triggers, state-of-health faults, and tamper alerts",
+                    70f
+            );
+            Map<String, String> channelBreakdown = new LinkedHashMap<>();
+            channelBreakdown.put("Gamma Alarm", intFmt.format(metrics.gammaAlarm));
+            channelBreakdown.put("Neutron Alarm", intFmt.format(metrics.neutronAlarm));
+            channelBreakdown.put("Gamma-Neutron Alarm", intFmt.format(metrics.gammaNeutronAlarm));
+            channelBreakdown.put("Gamma-High Fault", intFmt.format(metrics.gammaHighFault));
+            channelBreakdown.put("Gamma-Low Fault", intFmt.format(metrics.gammaLowFault));
+            channelBreakdown.put("Neutron-High Fault", intFmt.format(metrics.neutronHighFault));
+            channelBreakdown.put("Tamper", intFmt.format(metrics.tamper));
+            tableGenerator.drawSummaryTable(pdf, channelBreakdown);
 
-            // 2. Fault Statistics
-            pdf.drawSectionHeader("Fault Statistics", "Sensor state-of-health faults and tamper alerts", 70f);
-            Map<String, String> faultCounts = new LinkedHashMap<>();
-            faultCounts.put("Tamper", intFmt.format(metrics.tamper));
-            faultCounts.put("Gamma-High", intFmt.format(metrics.gammaHighFault));
-            faultCounts.put("Gamma-Low", intFmt.format(metrics.gammaLowFault));
-            faultCounts.put("Neutron-High", intFmt.format(metrics.neutronHighFault));
-            tableGenerator.drawSummaryTable(pdf, faultCounts);
-
-            // 3. Drive Storage Availability
+            // 2. Drive Storage Availability
             pdf.drawSectionHeader("Drive Storage Availability", "Filesystem capacity across active OSCAR data and system volumes", 80f);
-            drawDriveStorageTable(pdf);
+            drawDriveStorageTable(pdf, storageVolumes);
 
             pdf.finishAndSave(out);
-        } catch (IOException e) {
-            throw new DataStoreException("Failed to generate RDS Site Report PDF", e);
         }
+    }
+
+    private void writeCsv(
+            ReportDataAggregator.ObservationMetrics metrics,
+            List<StorageVolumeRow> storageVolumes
+    ) throws IOException {
+        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of(
+                    "Category",
+                    "Metric / Volume",
+                    "Value / Used",
+                    "Unit / Usable",
+                    "Free",
+                    "Total Capacity"
+            ));
+
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Alarm Statistics", "Gamma Alarm", String.valueOf(metrics.gammaAlarm), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Alarm Statistics", "Neutron Alarm", String.valueOf(metrics.neutronAlarm), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Alarm Statistics", "Gamma-Neutron Alarm", String.valueOf(metrics.gammaNeutronAlarm), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Alarm Statistics", "Total Alarms", String.valueOf(metrics.totalAlarms()), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Alarm Statistics", "EML Suppressed", String.valueOf(metrics.emlSuppressed), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Alarm Statistics", "Total Occupancies", String.valueOf(metrics.totalOccupancies), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Alarm Statistics", "Alarm Occupancy Rate", String.format(Locale.US, "%.2f", metrics.alarmOccupancyRatePct()), "%", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Alarm Statistics", "EML Alarm Rate", String.format(Locale.US, "%.2f", metrics.emlAlarmRatePct()), "%", "", ""));
+
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Tamper", String.valueOf(metrics.tamper), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Gamma-High", String.valueOf(metrics.gammaHighFault), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Gamma-Low", String.valueOf(metrics.gammaLowFault), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Neutron-High", String.valueOf(metrics.neutronHighFault), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Total Faults & Tampers", String.valueOf(metrics.totalFaultsAndTamper()), "count", "", ""));
+
+            for (StorageVolumeRow vol : storageVolumes) {
+                XlsxWorkbookWriter.writeCsvRow(writer, List.of(
+                        "Drive Storage",
+                        XlsxWorkbookWriter.guardSpreadsheetFormulaPrefix(vol.label()),
+                        String.format(Locale.US, "%.1f GB (%.1f%%)", vol.usedGb(), vol.usedPct()),
+                        String.format(Locale.US, "%.1f GB", vol.usableGb()),
+                        String.format(Locale.US, "%.1f GB", vol.freeGb()),
+                        String.format(Locale.US, "%.1f GB", vol.totalGb())
+                ));
+            }
+            writer.flush();
+        }
+    }
+
+    private void writeJson(
+            String scopeLine,
+            ReportDataAggregator.ObservationMetrics metrics,
+            List<StorageVolumeRow> storageVolumes
+    ) throws IOException {
+        try (JsonWriter jw = new JsonWriter(new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8)))) {
+            jw.setIndent("  ");
+            jw.setHtmlSafe(false);
+            jw.beginObject();
+            jw.name("reportType").value(ReportCmdType.RDS_SITE.name());
+            jw.name("reportTitle").value("RDS Site Report");
+            jw.name("nodeId").value(siteId);
+            jw.name("scope").value(scopeLine);
+            jw.name("startDateTime").value(start != null ? DateTimeFormatter.ISO_INSTANT.format(start) : "");
+            jw.name("endDateTime").value(end != null ? DateTimeFormatter.ISO_INSTANT.format(end) : "");
+            jw.name("generatedAt").value(DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
+
+            jw.name("summary").beginObject();
+            jw.name("totalOccupancies").value(metrics.totalOccupancies);
+            jw.name("totalAlarms").value(metrics.totalAlarms());
+            jw.name("gammaAlarm").value(metrics.gammaAlarm);
+            jw.name("neutronAlarm").value(metrics.neutronAlarm);
+            jw.name("gammaNeutronAlarm").value(metrics.gammaNeutronAlarm);
+            jw.name("emlSuppressed").value(metrics.emlSuppressed);
+            jw.name("alarmOccupancyRatePct").value(XlsxWorkbookWriter.roundTwoDecimals(metrics.alarmOccupancyRatePct()));
+            jw.name("emlAlarmRatePct").value(XlsxWorkbookWriter.roundTwoDecimals(metrics.emlAlarmRatePct()));
+            jw.name("totalFaultsAndTamper").value(metrics.totalFaultsAndTamper());
+            jw.name("tamper").value(metrics.tamper);
+            jw.name("gammaHighFault").value(metrics.gammaHighFault);
+            jw.name("gammaLowFault").value(metrics.gammaLowFault);
+            jw.name("neutronHighFault").value(metrics.neutronHighFault);
+            jw.name("storageVolumeCount").value(storageVolumes.size());
+            jw.endObject();
+
+            jw.name("records").beginArray();
+            writeJsonMetricRecord(jw, "Alarm Statistics", "Gamma Alarm", String.valueOf(metrics.gammaAlarm), "count", "");
+            writeJsonMetricRecord(jw, "Alarm Statistics", "Neutron Alarm", String.valueOf(metrics.neutronAlarm), "count", "");
+            writeJsonMetricRecord(jw, "Alarm Statistics", "Gamma-Neutron Alarm", String.valueOf(metrics.gammaNeutronAlarm), "count", "");
+            writeJsonMetricRecord(jw, "Alarm Statistics", "Total Alarms", String.valueOf(metrics.totalAlarms()), "count", "");
+            writeJsonMetricRecord(jw, "Alarm Statistics", "EML Suppressed", String.valueOf(metrics.emlSuppressed), "count", "");
+            writeJsonMetricRecord(jw, "Alarm Statistics", "Total Occupancies", String.valueOf(metrics.totalOccupancies), "count", "");
+            writeJsonMetricRecord(jw, "Alarm Statistics", "Alarm Occupancy Rate", Utils.formatPercentage(metrics.alarmOccupancyRatePct()), "%", "");
+            writeJsonMetricRecord(jw, "Alarm Statistics", "EML Alarm Rate", Utils.formatPercentage(metrics.emlAlarmRatePct()), "%", "");
+            writeJsonMetricRecord(jw, "Fault Statistics", "Tamper", String.valueOf(metrics.tamper), "count", "");
+            writeJsonMetricRecord(jw, "Fault Statistics", "Gamma-High", String.valueOf(metrics.gammaHighFault), "count", "");
+            writeJsonMetricRecord(jw, "Fault Statistics", "Gamma-Low", String.valueOf(metrics.gammaLowFault), "count", "");
+            writeJsonMetricRecord(jw, "Fault Statistics", "Neutron-High", String.valueOf(metrics.neutronHighFault), "count", "");
+            writeJsonMetricRecord(jw, "Fault Statistics", "Total Faults & Tampers", String.valueOf(metrics.totalFaultsAndTamper()), "count", "");
+            for (StorageVolumeRow vol : storageVolumes) {
+                writeJsonMetricRecord(
+                        jw,
+                        "Drive Storage",
+                        vol.label(),
+                        String.format(Locale.US, "%.1f GB (%.1f%%)", vol.usedGb(), vol.usedPct()),
+                        "GB",
+                        String.format(Locale.US, "Usable: %.1f GB | Free: %.1f GB | Total: %.1f GB",
+                                vol.usableGb(), vol.freeGb(), vol.totalGb())
+                );
+            }
+            jw.endArray();
+
+            jw.endObject();
+            jw.flush();
+        }
+    }
+
+    private static void writeJsonMetricRecord(
+            JsonWriter jw,
+            String category,
+            String metric,
+            String value,
+            String unit,
+            String details
+    ) throws IOException {
+        jw.beginObject();
+        jw.name("category").value(category);
+        jw.name("metric").value(metric);
+        jw.name("value").value(value);
+        jw.name("unit").value(unit);
+        jw.name("details").value(details);
+        jw.endObject();
+    }
+
+    private void writeXlsx(
+            String scopeLine,
+            ReportDataAggregator.ObservationMetrics metrics,
+            List<StorageVolumeRow> storageVolumes
+    ) throws IOException {
+        List<List<CellValue>> statRows = List.of(
+                List.of(CellValue.text("Alarm Statistics"), CellValue.text("Gamma Alarm"), CellValue.integer(metrics.gammaAlarm), CellValue.text("count")),
+                List.of(CellValue.text("Alarm Statistics"), CellValue.text("Neutron Alarm"), CellValue.integer(metrics.neutronAlarm), CellValue.text("count")),
+                List.of(CellValue.text("Alarm Statistics"), CellValue.text("Gamma-Neutron Alarm"), CellValue.integer(metrics.gammaNeutronAlarm), CellValue.text("count")),
+                List.of(CellValue.text("Alarm Statistics"), CellValue.text("Total Alarms"), CellValue.integer(metrics.totalAlarms()), CellValue.text("count")),
+                List.of(CellValue.text("Alarm Statistics"), CellValue.text("EML Suppressed"), CellValue.integer(metrics.emlSuppressed), CellValue.text("count")),
+                List.of(CellValue.text("Alarm Statistics"), CellValue.text("Total Occupancies"), CellValue.integer(metrics.totalOccupancies), CellValue.text("count")),
+                List.of(CellValue.text("Alarm Statistics"), CellValue.text("Alarm Occupancy Rate"), CellValue.decimal(metrics.alarmOccupancyRatePct()), CellValue.text("%")),
+                List.of(CellValue.text("Alarm Statistics"), CellValue.text("EML Alarm Rate"), CellValue.decimal(metrics.emlAlarmRatePct()), CellValue.text("%")),
+                List.of(CellValue.text("Fault Statistics"), CellValue.text("Tamper"), CellValue.integer(metrics.tamper), CellValue.text("count")),
+                List.of(CellValue.text("Fault Statistics"), CellValue.text("Gamma-High"), CellValue.integer(metrics.gammaHighFault), CellValue.text("count")),
+                List.of(CellValue.text("Fault Statistics"), CellValue.text("Gamma-Low"), CellValue.integer(metrics.gammaLowFault), CellValue.text("count")),
+                List.of(CellValue.text("Fault Statistics"), CellValue.text("Neutron-High"), CellValue.integer(metrics.neutronHighFault), CellValue.text("count")),
+                List.of(CellValue.text("Fault Statistics"), CellValue.text("Total Faults & Tampers"), CellValue.integer(metrics.totalFaultsAndTamper()), CellValue.text("count"))
+        );
+
+        List<List<CellValue>> storageRows = new ArrayList<>(storageVolumes.size());
+        for (StorageVolumeRow vol : storageVolumes) {
+            storageRows.add(List.of(
+                    CellValue.text(vol.label()),
+                    CellValue.decimal(vol.usedGb()),
+                    CellValue.decimal(vol.usedPct()),
+                    CellValue.decimal(vol.usableGb()),
+                    CellValue.decimal(vol.freeGb()),
+                    CellValue.decimal(vol.totalGb())
+            ));
+        }
+
+        List<List<CellValue>> summaryRows = List.of(
+                List.of(CellValue.text("Report Title"), CellValue.text("RDS Site Report")),
+                List.of(CellValue.text("Node ID"), CellValue.text(siteId)),
+                List.of(CellValue.text("Scope"), CellValue.text(scopeLine)),
+                List.of(CellValue.text("Start (UTC)"), CellValue.text(start != null ? DateTimeFormatter.ISO_INSTANT.format(start) : "")),
+                List.of(CellValue.text("End (UTC)"), CellValue.text(end != null ? DateTimeFormatter.ISO_INSTANT.format(end) : "")),
+                List.of(CellValue.text("Total Occupancies"), CellValue.integer(metrics.totalOccupancies)),
+                List.of(CellValue.text("Total Alarms"), CellValue.integer(metrics.totalAlarms())),
+                List.of(CellValue.text("EML Suppressed"), CellValue.integer(metrics.emlSuppressed)),
+                List.of(CellValue.text("Total Faults & Tampers"), CellValue.integer(metrics.totalFaultsAndTamper())),
+                List.of(CellValue.text("Storage Volumes Reported"), CellValue.integer(storageVolumes.size()))
+        );
+
+        XlsxWorkbookWriter.writeWorkbook(out, List.of(
+                new XlsxWorkbookWriter.SheetSpec(
+                        "Alarm & Fault Statistics",
+                        List.of("Category", "Metric", "Value", "Unit"),
+                        List.of(22.0, 28.0, 16.0, 12.0),
+                        statRows,
+                        true
+                ),
+                new XlsxWorkbookWriter.SheetSpec(
+                        "Drive Storage Availability",
+                        List.of("Volume / Mount", "Used (GB)", "Used (%)", "Usable (GB)", "Free (GB)", "Total Capacity (GB)"),
+                        List.of(38.0, 16.0, 14.0, 16.0, 16.0, 20.0),
+                        storageRows,
+                        true
+                ),
+                new XlsxWorkbookWriter.SheetSpec(
+                        "Summary",
+                        List.of("Metric", "Value"),
+                        List.of(28.0, 46.0),
+                        summaryRows,
+                        false
+                )
+        ));
     }
 
     @Override
@@ -147,7 +380,7 @@ public class RDSReport extends Report {
         return ReportCmdType.RDS_SITE.name();
     }
 
-    private void drawDriveStorageTable(PdfDocumentBuilder pdf) throws IOException {
+    private List<StorageVolumeRow> collectStorageVolumes() {
         List<StorageCandidate> candidates = new ArrayList<>();
 
         if (module != null && module.getBucketService() instanceof IModule<?> bucketMod
@@ -183,7 +416,7 @@ public class RDSReport extends Report {
         }
 
         Set<FileStore> seenStores = new LinkedHashSet<>();
-        List<List<String>> rows = new ArrayList<>();
+        List<StorageVolumeRow> rows = new ArrayList<>();
 
         for (StorageCandidate candidate : candidates) {
             try {
@@ -204,16 +437,31 @@ public class RDSReport extends Report {
                 long usedBytes = Math.max(0L, totalBytes - usableBytes);
                 double usedPct = (usedBytes * 100.0) / totalBytes;
 
-                rows.add(List.of(
+                rows.add(new StorageVolumeRow(
                         candidate.label(),
-                        String.format(Locale.US, "%.1f GB (%.1f%%)", usedBytes / BYTES_PER_GIB, usedPct),
-                        String.format(Locale.US, "%.1f GB", usableBytes / BYTES_PER_GIB),
-                        String.format(Locale.US, "%.1f GB", freeBytes / BYTES_PER_GIB),
-                        String.format(Locale.US, "%.1f GB", totalBytes / BYTES_PER_GIB)
+                        usedBytes / BYTES_PER_GIB,
+                        usedPct,
+                        usableBytes / BYTES_PER_GIB,
+                        freeBytes / BYTES_PER_GIB,
+                        totalBytes / BYTES_PER_GIB
                 ));
             } catch (Exception ignored) {
                 // Skip inaccessible virtual filesystems cleanly
             }
+        }
+        return rows;
+    }
+
+    private void drawDriveStorageTable(PdfDocumentBuilder pdf, List<StorageVolumeRow> storageVolumes) throws IOException {
+        List<List<String>> rows = new ArrayList<>(storageVolumes.size());
+        for (StorageVolumeRow vol : storageVolumes) {
+            rows.add(List.of(
+                    vol.label(),
+                    String.format(Locale.US, "%.1f GB (%.1f%%)", vol.usedGb(), vol.usedPct()),
+                    String.format(Locale.US, "%.1f GB", vol.usableGb()),
+                    String.format(Locale.US, "%.1f GB", vol.freeGb()),
+                    String.format(Locale.US, "%.1f GB", vol.totalGb())
+            ));
         }
 
         List<TableGenerator.ColumnSpec> cols = List.of(

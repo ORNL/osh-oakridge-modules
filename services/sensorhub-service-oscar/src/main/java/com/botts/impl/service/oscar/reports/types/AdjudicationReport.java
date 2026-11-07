@@ -20,15 +20,26 @@ import com.botts.impl.service.oscar.reports.helpers.ChartGenerator;
 import com.botts.impl.service.oscar.reports.helpers.PdfDocumentBuilder;
 import com.botts.impl.service.oscar.reports.helpers.ReportCmdType;
 import com.botts.impl.service.oscar.reports.helpers.ReportDataAggregator;
+import com.botts.impl.service.oscar.reports.helpers.ReportFormat;
 import com.botts.impl.service.oscar.reports.helpers.TableGenerator;
+import com.botts.impl.service.oscar.reports.helpers.XlsxWorkbookWriter;
+import com.botts.impl.service.oscar.reports.helpers.XlsxWorkbookWriter.CellValue;
+import com.botts.impl.system.lane.LaneSystem;
+import com.google.gson.stream.JsonWriter;
 import org.sensorhub.api.datastore.DataStoreException;
+import org.sensorhub.api.module.IModule;
 
 import java.awt.Color;
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.text.NumberFormat;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,12 +50,25 @@ import java.util.Set;
 public class AdjudicationReport extends Report {
 
     private final String laneUIDs;
+    private final ReportFormat format;
     private final TableGenerator tableGenerator;
     private final ChartGenerator chartGenerator;
 
     public AdjudicationReport(OutputStream out, Instant startTime, Instant endTime, String laneUIDs, OSCARServiceModule module) {
+        this(out, startTime, endTime, laneUIDs, ReportFormat.PDF, module);
+    }
+
+    public AdjudicationReport(
+            OutputStream out,
+            Instant startTime,
+            Instant endTime,
+            String laneUIDs,
+            ReportFormat format,
+            OSCARServiceModule module
+    ) {
         super(out, startTime, endTime, module);
         this.laneUIDs = laneUIDs;
+        this.format = format != null ? format : ReportFormat.PDF;
         this.tableGenerator = new TableGenerator();
         this.chartGenerator = new ChartGenerator(module);
     }
@@ -57,6 +81,7 @@ public class AdjudicationReport extends Report {
 
         List<String> targetLanes = ReportDataAggregator.resolveTargetLaneUIDs(module, laneUIDs);
         Map<String, String> inlineLaneLabels = ReportDataAggregator.resolveLaneDisplayLabels(module, targetLanes, false);
+        Map<String, String> laneFriendlyNames = resolveLaneNamesOnly(module, targetLanes);
 
         // Single-pass aggregation per lane
         Map<String, ReportDataAggregator.AdjudicationLaneSummary> summariesByLane = new LinkedHashMap<>();
@@ -93,8 +118,66 @@ public class AdjudicationReport extends Report {
             }
         }
 
-        NumberFormat intFmt = NumberFormat.getIntegerInstance(Locale.US);
         String scopeLine = ReportDataAggregator.buildBannerScopeSummary(module, laneUIDs);
+
+        try {
+            switch (format) {
+                case CSV -> writeCsv(targetLanes, summariesByLane, laneFriendlyNames);
+                case JSON -> writeJson(
+                        nodeId,
+                        scopeLine,
+                        targetLanes,
+                        grandTotalRecords,
+                        realAlarmCount,
+                        innocentOrAutoCount,
+                        falseAlarmCount,
+                        activeIsotopesAcrossScope,
+                        summariesByLane,
+                        laneFriendlyNames
+                );
+                case XLSX -> writeXlsx(
+                        nodeId,
+                        scopeLine,
+                        targetLanes,
+                        grandTotalRecords,
+                        realAlarmCount,
+                        innocentOrAutoCount,
+                        falseAlarmCount,
+                        activeIsotopesAcrossScope,
+                        summariesByLane,
+                        laneFriendlyNames
+                );
+                case PDF -> writePdf(
+                        nodeId,
+                        scopeLine,
+                        targetLanes,
+                        grandTotalRecords,
+                        realAlarmCount,
+                        innocentOrAutoCount,
+                        falseAlarmCount,
+                        activeIsotopesAcrossScope,
+                        summariesByLane,
+                        inlineLaneLabels
+                );
+            }
+        } catch (IOException e) {
+            throw new DataStoreException("Failed to generate Adjudication Report (" + format + ")", e);
+        }
+    }
+
+    private void writePdf(
+            String nodeId,
+            String scopeLine,
+            List<String> targetLanes,
+            long grandTotalRecords,
+            long realAlarmCount,
+            long innocentOrAutoCount,
+            long falseAlarmCount,
+            Set<String> activeIsotopesAcrossScope,
+            Map<String, ReportDataAggregator.AdjudicationLaneSummary> summariesByLane,
+            Map<String, String> inlineLaneLabels
+    ) throws IOException {
+        NumberFormat intFmt = NumberFormat.getIntegerInstance(Locale.US);
 
         try (PdfDocumentBuilder pdf = new PdfDocumentBuilder("Adjudication Report", nodeId)) {
             pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
@@ -153,9 +236,267 @@ public class AdjudicationReport extends Report {
             }
 
             pdf.finishAndSave(out);
-        } catch (IOException e) {
-            throw new DataStoreException("Failed to generate Adjudication Report PDF", e);
         }
+    }
+
+    private void writeCsv(
+            List<String> targetLanes,
+            Map<String, ReportDataAggregator.AdjudicationLaneSummary> summariesByLane,
+            Map<String, String> laneFriendlyNames
+    ) throws IOException {
+        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of(
+                    "Lane Name",
+                    "Lane UID",
+                    "Section",
+                    "Code / Isotope",
+                    "Label",
+                    "Group",
+                    "Count",
+                    "Percent (%)"
+            ));
+            for (String laneUid : targetLanes) {
+                String laneName = laneFriendlyNames.getOrDefault(laneUid, laneUid);
+                ReportDataAggregator.AdjudicationLaneSummary summary = summariesByLane.get(laneUid);
+                if (summary == null) {
+                    continue;
+                }
+                long total = summary.totalRecords();
+                for (ReportDataAggregator.DispositionCodeSpec spec : summary.dispositionSpecs()) {
+                    long count = summary.countsByCode().getOrDefault(spec.code(), 0L);
+                    double pct = total > 0L ? (count * 100.0) / total : 0.0;
+                    String label = (spec.label() == null || spec.label().isBlank()) ? "(None)" : spec.label();
+                    XlsxWorkbookWriter.writeCsvRow(writer, List.of(
+                            XlsxWorkbookWriter.guardSpreadsheetFormulaPrefix(laneName),
+                            laneUid,
+                            "Disposition",
+                            String.valueOf(spec.code()),
+                            XlsxWorkbookWriter.guardSpreadsheetFormulaPrefix(label),
+                            spec.group(),
+                            String.valueOf(count),
+                            String.format(Locale.US, "%.1f", pct)
+                    ));
+                }
+                for (Map.Entry<String, Long> isoEntry : summary.isotopeCountsBySymbol().entrySet()) {
+                    long count = isoEntry.getValue() != null ? isoEntry.getValue() : 0L;
+                    if (count <= 0L) {
+                        continue;
+                    }
+                    String symbol = isoEntry.getKey();
+                    String fullName = ReportDataAggregator.STANDARD_ISOTOPES.getOrDefault(symbol, symbol);
+                    XlsxWorkbookWriter.writeCsvRow(writer, List.of(
+                            XlsxWorkbookWriter.guardSpreadsheetFormulaPrefix(laneName),
+                            laneUid,
+                            "Isotope",
+                            symbol,
+                            fullName,
+                            "Identified Isotope",
+                            String.valueOf(count),
+                            ""
+                    ));
+                }
+            }
+            writer.flush();
+        }
+    }
+
+    private void writeJson(
+            String nodeId,
+            String scopeLine,
+            List<String> targetLanes,
+            long grandTotalRecords,
+            long realAlarmCount,
+            long innocentOrAutoCount,
+            long falseAlarmCount,
+            Set<String> activeIsotopesAcrossScope,
+            Map<String, ReportDataAggregator.AdjudicationLaneSummary> summariesByLane,
+            Map<String, String> laneFriendlyNames
+    ) throws IOException {
+        try (JsonWriter jw = new JsonWriter(new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8)))) {
+            jw.setIndent("  ");
+            jw.setHtmlSafe(false);
+            jw.beginObject();
+            jw.name("reportType").value(ReportCmdType.ADJUDICATION.name());
+            jw.name("reportTitle").value("Adjudication Report");
+            jw.name("nodeId").value(nodeId);
+            jw.name("scope").value(scopeLine);
+            jw.name("startDateTime").value(start != null ? DateTimeFormatter.ISO_INSTANT.format(start) : "");
+            jw.name("endDateTime").value(end != null ? DateTimeFormatter.ISO_INSTANT.format(end) : "");
+            jw.name("generatedAt").value(DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
+
+            jw.name("summary").beginObject();
+            jw.name("totalRecords").value(grandTotalRecords);
+            jw.name("laneCount").value(targetLanes.size());
+            jw.name("realAlarms").value(realAlarmCount);
+            jw.name("innocentAndAutomated").value(innocentOrAutoCount);
+            jw.name("falseAlarms").value(falseAlarmCount);
+            jw.name("identifiedIsotopes").beginArray();
+            for (String iso : activeIsotopesAcrossScope) {
+                jw.value(iso);
+            }
+            jw.endArray();
+            jw.endObject();
+
+            jw.name("records").beginArray();
+            for (String laneUid : targetLanes) {
+                String laneName = laneFriendlyNames.getOrDefault(laneUid, laneUid);
+                ReportDataAggregator.AdjudicationLaneSummary summary = summariesByLane.get(laneUid);
+                if (summary == null) {
+                    continue;
+                }
+                long total = summary.totalRecords();
+                for (ReportDataAggregator.DispositionCodeSpec spec : summary.dispositionSpecs()) {
+                    long count = summary.countsByCode().getOrDefault(spec.code(), 0L);
+                    double pct = total > 0L ? (count * 100.0) / total : 0.0;
+                    String label = (spec.label() == null || spec.label().isBlank()) ? "(None)" : spec.label();
+                    jw.beginObject();
+                    jw.name("laneName").value(laneName);
+                    jw.name("laneUid").value(laneUid);
+                    jw.name("section").value("Disposition");
+                    jw.name("codeOrSymbol").value(String.valueOf(spec.code()));
+                    jw.name("label").value(label);
+                    jw.name("group").value(spec.group());
+                    jw.name("count").value(count);
+                    jw.name("percentPct").value(XlsxWorkbookWriter.roundTwoDecimals(pct));
+                    jw.endObject();
+                }
+                for (Map.Entry<String, Long> isoEntry : summary.isotopeCountsBySymbol().entrySet()) {
+                    long count = isoEntry.getValue() != null ? isoEntry.getValue() : 0L;
+                    if (count <= 0L) {
+                        continue;
+                    }
+                    String symbol = isoEntry.getKey();
+                    String fullName = ReportDataAggregator.STANDARD_ISOTOPES.getOrDefault(symbol, symbol);
+                    jw.beginObject();
+                    jw.name("laneName").value(laneName);
+                    jw.name("laneUid").value(laneUid);
+                    jw.name("section").value("Isotope");
+                    jw.name("codeOrSymbol").value(symbol);
+                    jw.name("label").value(fullName);
+                    jw.name("group").value("Identified Isotope");
+                    jw.name("count").value(count);
+                    jw.name("percentPct").nullValue();
+                    jw.endObject();
+                }
+            }
+            jw.endArray();
+            jw.endObject();
+            jw.flush();
+        }
+    }
+
+    private void writeXlsx(
+            String nodeId,
+            String scopeLine,
+            List<String> targetLanes,
+            long grandTotalRecords,
+            long realAlarmCount,
+            long innocentOrAutoCount,
+            long falseAlarmCount,
+            Set<String> activeIsotopesAcrossScope,
+            Map<String, ReportDataAggregator.AdjudicationLaneSummary> summariesByLane,
+            Map<String, String> laneFriendlyNames
+    ) throws IOException {
+        List<List<CellValue>> dispRows = new ArrayList<>();
+        List<List<CellValue>> isoRows = new ArrayList<>();
+
+        for (String laneUid : targetLanes) {
+            String laneName = laneFriendlyNames.getOrDefault(laneUid, laneUid);
+            ReportDataAggregator.AdjudicationLaneSummary summary = summariesByLane.get(laneUid);
+            if (summary == null) {
+                continue;
+            }
+            long total = summary.totalRecords();
+            for (ReportDataAggregator.DispositionCodeSpec spec : summary.dispositionSpecs()) {
+                long count = summary.countsByCode().getOrDefault(spec.code(), 0L);
+                double pct = total > 0L ? (count * 100.0) / total : 0.0;
+                String label = (spec.label() == null || spec.label().isBlank()) ? "(None)" : spec.label();
+                dispRows.add(List.of(
+                        CellValue.text(laneName),
+                        CellValue.text(laneUid),
+                        CellValue.integer(spec.code()),
+                        CellValue.text(label),
+                        CellValue.text(spec.group()),
+                        CellValue.integer(count),
+                        CellValue.decimal(pct),
+                        CellValue.integer(total)
+                ));
+            }
+            for (Map.Entry<String, Long> isoEntry : summary.isotopeCountsBySymbol().entrySet()) {
+                long count = isoEntry.getValue() != null ? isoEntry.getValue() : 0L;
+                if (count <= 0L) {
+                    continue;
+                }
+                String symbol = isoEntry.getKey();
+                String fullName = ReportDataAggregator.STANDARD_ISOTOPES.getOrDefault(symbol, symbol);
+                isoRows.add(List.of(
+                        CellValue.text(laneName),
+                        CellValue.text(laneUid),
+                        CellValue.text(symbol),
+                        CellValue.text(fullName),
+                        CellValue.integer(count)
+                ));
+            }
+        }
+
+        List<List<CellValue>> summaryRows = List.of(
+                List.of(CellValue.text("Report Title"), CellValue.text("Adjudication Report")),
+                List.of(CellValue.text("Node ID"), CellValue.text(nodeId)),
+                List.of(CellValue.text("Scope"), CellValue.text(scopeLine)),
+                List.of(CellValue.text("Start (UTC)"), CellValue.text(start != null ? DateTimeFormatter.ISO_INSTANT.format(start) : "")),
+                List.of(CellValue.text("End (UTC)"), CellValue.text(end != null ? DateTimeFormatter.ISO_INSTANT.format(end) : "")),
+                List.of(CellValue.text("Configured / Selected Lanes"), CellValue.integer(targetLanes.size())),
+                List.of(CellValue.text("Total Adjudications"), CellValue.integer(grandTotalRecords)),
+                List.of(CellValue.text("Real Alarms (Codes 1-2)"), CellValue.integer(realAlarmCount)),
+                List.of(CellValue.text("Innocent & EML Automated"), CellValue.integer(innocentOrAutoCount)),
+                List.of(CellValue.text("False Alarms (Codes 6-8)"), CellValue.integer(falseAlarmCount)),
+                List.of(CellValue.text("Identified Isotopes"), CellValue.text(activeIsotopesAcrossScope.isEmpty() ? "None" : String.join(", ", activeIsotopesAcrossScope)))
+        );
+
+        XlsxWorkbookWriter.writeWorkbook(out, List.of(
+                new XlsxWorkbookWriter.SheetSpec(
+                        "Disposition Summary",
+                        List.of("Lane Name", "Lane UID", "Disposition Code", "Disposition Label", "Disposition Group", "Count", "Percent (%)", "Lane Total Records"),
+                        List.of(20.0, 28.0, 16.0, 32.0, 18.0, 14.0, 14.0, 18.0),
+                        dispRows,
+                        true
+                ),
+                new XlsxWorkbookWriter.SheetSpec(
+                        "Isotope Summary",
+                        List.of("Lane Name", "Lane UID", "Isotope Symbol", "Isotope Name", "Count"),
+                        List.of(20.0, 28.0, 18.0, 24.0, 14.0),
+                        isoRows,
+                        true
+                ),
+                new XlsxWorkbookWriter.SheetSpec(
+                        "Summary",
+                        List.of("Metric", "Value"),
+                        List.of(28.0, 46.0),
+                        summaryRows,
+                        false
+                )
+        ));
+    }
+
+    private static Map<String, String> resolveLaneNamesOnly(OSCARServiceModule module, List<String> laneUIDs) {
+        Map<String, String> names = new HashMap<>();
+        if (module != null && module.getParentHub() != null && module.getParentHub().getModuleRegistry() != null) {
+            for (IModule<?> mod : module.getParentHub().getModuleRegistry().getLoadedModules()) {
+                if (mod instanceof LaneSystem lane && lane.getUniqueIdentifier() != null && lane.getName() != null && !lane.getName().isBlank()) {
+                    names.put(lane.getUniqueIdentifier().trim(), lane.getName().trim());
+                }
+            }
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        if (laneUIDs != null) {
+            for (String uid : laneUIDs) {
+                if (uid != null && !uid.isBlank()) {
+                    String trimmed = uid.trim();
+                    out.put(trimmed, names.getOrDefault(trimmed, trimmed));
+                }
+            }
+        }
+        return out;
     }
 
     @Override
@@ -182,7 +523,6 @@ public class AdjudicationReport extends Report {
 
         List<ChartGenerator.HorizontalBarItem> barItems = new ArrayList<>();
         Map<String, Color> presentGroups = new LinkedHashMap<>();
-        List<List<String>> dispTableRows = new ArrayList<>();
 
         for (ReportDataAggregator.DispositionCodeSpec spec : summary.dispositionSpecs()) {
             long count = summary.countsByCode().getOrDefault(spec.code(), 0L);
@@ -202,14 +542,6 @@ public class AdjudicationReport extends Report {
                         count > 0L
                 ));
             }
-
-            dispTableRows.add(List.of(
-                    String.valueOf(spec.code()),
-                    (spec.label() == null || spec.label().isBlank()) ? "(None)" : spec.label(),
-                    spec.group(),
-                    intFmt.format(count),
-                    String.format(Locale.US, "%.1f%%", pct)
-            ));
         }
 
         List<ChartGenerator.LegendItem> groupLegend = new ArrayList<>();
@@ -226,15 +558,6 @@ public class AdjudicationReport extends Report {
                 true,
                 false
         );
-
-        List<TableGenerator.ColumnSpec> cols = List.of(
-                new TableGenerator.ColumnSpec("Code", 0.55f, TableGenerator.Align.RIGHT),
-                new TableGenerator.ColumnSpec("Label", 2.85f, TableGenerator.Align.LEFT),
-                new TableGenerator.ColumnSpec("Group", 1.15f, TableGenerator.Align.LEFT),
-                new TableGenerator.ColumnSpec("Count", 0.70f, TableGenerator.Align.RIGHT, true),
-                new TableGenerator.ColumnSpec("Percent", 0.75f, TableGenerator.Align.RIGHT)
-        );
-        tableGenerator.drawTable(pdf, cols, dispTableRows, false, 7.6f);
     }
 
     private void renderLaneIsotopeSection(
@@ -250,7 +573,6 @@ public class AdjudicationReport extends Report {
         );
 
         Map<String, Long> isoCounts = summary != null ? summary.isotopeCountsBySymbol() : Map.of();
-        Map<String, Long> nonZeroIsoCounts = new LinkedHashMap<>();
         List<ChartGenerator.HorizontalBarItem> barItems = new ArrayList<>();
 
         for (Map.Entry<String, Long> entry : isoCounts.entrySet()) {
@@ -263,7 +585,6 @@ public class AdjudicationReport extends Report {
             String catLabel = (fullName != null && !fullName.equalsIgnoreCase(symbol))
                     ? symbol + " (" + fullName + ")"
                     : symbol;
-            nonZeroIsoCounts.put(symbol, count);
             barItems.add(new ChartGenerator.HorizontalBarItem(
                     catLabel,
                     count,
@@ -287,7 +608,5 @@ public class AdjudicationReport extends Report {
                 false,
                 true
         );
-
-        tableGenerator.drawIsotopeGridTable(pdf, nonZeroIsoCounts, ReportDataAggregator.STANDARD_ISOTOPES);
     }
 }

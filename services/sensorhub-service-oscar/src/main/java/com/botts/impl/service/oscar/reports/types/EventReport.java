@@ -21,14 +21,22 @@ import com.botts.impl.service.oscar.reports.helpers.EventReportType;
 import com.botts.impl.service.oscar.reports.helpers.PdfDocumentBuilder;
 import com.botts.impl.service.oscar.reports.helpers.ReportCmdType;
 import com.botts.impl.service.oscar.reports.helpers.ReportDataAggregator;
+import com.botts.impl.service.oscar.reports.helpers.ReportFormat;
 import com.botts.impl.service.oscar.reports.helpers.TableGenerator;
 import com.botts.impl.service.oscar.reports.helpers.Utils;
+import com.botts.impl.service.oscar.reports.helpers.XlsxWorkbookWriter;
+import com.botts.impl.service.oscar.reports.helpers.XlsxWorkbookWriter.CellValue;
+import com.google.gson.stream.JsonWriter;
 import org.sensorhub.api.datastore.DataStoreException;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.text.NumberFormat;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,14 +47,28 @@ public class EventReport extends Report {
 
     private final EventReportType eventType;
     private final String laneUIDs;
+    private final ReportFormat format;
     private final TableGenerator tableGenerator;
     private final ChartGenerator chartGenerator;
 
     public EventReport(OutputStream outputStream, Instant startTime, Instant endTime,
                        EventReportType eventType, String laneUIDs, OSCARServiceModule module) {
+        this(outputStream, startTime, endTime, eventType, laneUIDs, ReportFormat.PDF, module);
+    }
+
+    public EventReport(
+            OutputStream outputStream,
+            Instant startTime,
+            Instant endTime,
+            EventReportType eventType,
+            String laneUIDs,
+            ReportFormat format,
+            OSCARServiceModule module
+    ) {
         super(outputStream, startTime, endTime, module);
         this.eventType = eventType != null ? eventType : EventReportType.ALARMS;
         this.laneUIDs = laneUIDs;
+        this.format = format != null ? format : ReportFormat.PDF;
         this.tableGenerator = new TableGenerator();
         this.chartGenerator = new ChartGenerator(module);
     }
@@ -66,6 +88,24 @@ public class EventReport extends Report {
             totals.add(m);
         }
 
+        try {
+            switch (format) {
+                case CSV -> writeCsv(dailyMetrics);
+                case JSON -> writeJson(nodeId, scopeLine, dailyMetrics, totals);
+                case XLSX -> writeXlsx(nodeId, scopeLine, dailyMetrics, totals);
+                case PDF -> writePdf(nodeId, scopeLine, dailyMetrics, totals);
+            }
+        } catch (IOException e) {
+            throw new DataStoreException("Failed to generate Event Report (" + format + ")", e);
+        }
+    }
+
+    private void writePdf(
+            String nodeId,
+            String scopeLine,
+            Map<String, ReportDataAggregator.ObservationMetrics> dailyMetrics,
+            ReportDataAggregator.ObservationMetrics totals
+    ) throws IOException {
         NumberFormat intFmt = NumberFormat.getIntegerInstance(Locale.US);
 
         try (PdfDocumentBuilder pdf = new PdfDocumentBuilder("Event Report", nodeId)) {
@@ -89,9 +129,275 @@ public class EventReport extends Report {
             }
 
             pdf.finishAndSave(out);
-        } catch (IOException e) {
-            throw new DataStoreException("Failed to generate Event Report PDF", e);
         }
+    }
+
+    private void writeCsv(
+            Map<String, ReportDataAggregator.ObservationMetrics> dailyMetrics
+    ) throws IOException {
+        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
+            XlsxWorkbookWriter.writeCsvRow(writer, eventColumnHeaders());
+            for (Map.Entry<String, ReportDataAggregator.ObservationMetrics> entry : dailyMetrics.entrySet()) {
+                String date = entry.getKey();
+                ReportDataAggregator.ObservationMetrics m = entry.getValue();
+                XlsxWorkbookWriter.writeCsvRow(writer, buildCsvRow(date, m));
+            }
+            writer.flush();
+        }
+    }
+
+    private List<String> eventColumnHeaders() {
+        return switch (eventType) {
+            case ALARMS_OCCUPANCIES -> List.of(
+                    "Date (UTC)",
+                    "Gamma",
+                    "Gamma-Neutron",
+                    "Neutron",
+                    "EML-Suppressed",
+                    "Total Alarms",
+                    "Total Occupancy",
+                    "Alarm Occupancy Rate (%)",
+                    "EML Alarm Rate (%)"
+            );
+            case ALARMS -> List.of(
+                    "Date (UTC)",
+                    "Gamma",
+                    "Gamma-Neutron",
+                    "Neutron",
+                    "EML-Suppressed",
+                    "Total Alarms",
+                    "EML Alarm Rate (%)"
+            );
+            case SOH -> List.of(
+                    "Date (UTC)",
+                    "Gamma High",
+                    "Gamma Low",
+                    "Neutron High",
+                    "Tamper",
+                    "Total SOH Events"
+            );
+            default -> List.of(
+                    "Date (UTC)",
+                    "Total Occupancy",
+                    "Total Alarms",
+                    "Gamma",
+                    "Gamma-Neutron",
+                    "Neutron",
+                    "EML-Suppressed",
+                    "Total SOH Events",
+                    "Gamma High",
+                    "Gamma Low",
+                    "Neutron High",
+                    "Tamper"
+            );
+        };
+    }
+
+    private List<String> buildCsvRow(String date, ReportDataAggregator.ObservationMetrics m) {
+        return switch (eventType) {
+            case ALARMS_OCCUPANCIES -> List.of(
+                    date,
+                    String.valueOf(m.gammaAlarm),
+                    String.valueOf(m.gammaNeutronAlarm),
+                    String.valueOf(m.neutronAlarm),
+                    String.valueOf(m.emlSuppressed),
+                    String.valueOf(m.totalAlarms()),
+                    String.valueOf(m.totalOccupancies),
+                    String.format(Locale.US, "%.2f", m.alarmOccupancyRatePct()),
+                    String.format(Locale.US, "%.2f", m.emlAlarmRatePct())
+            );
+            case ALARMS -> List.of(
+                    date,
+                    String.valueOf(m.gammaAlarm),
+                    String.valueOf(m.gammaNeutronAlarm),
+                    String.valueOf(m.neutronAlarm),
+                    String.valueOf(m.emlSuppressed),
+                    String.valueOf(m.totalAlarms()),
+                    String.format(Locale.US, "%.2f", m.emlAlarmRatePct())
+            );
+            case SOH -> List.of(
+                    date,
+                    String.valueOf(m.gammaHighFault),
+                    String.valueOf(m.gammaLowFault),
+                    String.valueOf(m.neutronHighFault),
+                    String.valueOf(m.tamper),
+                    String.valueOf(m.totalFaultsAndTamper())
+            );
+            default -> List.of(
+                    date,
+                    String.valueOf(m.totalOccupancies),
+                    String.valueOf(m.totalAlarms()),
+                    String.valueOf(m.gammaAlarm),
+                    String.valueOf(m.gammaNeutronAlarm),
+                    String.valueOf(m.neutronAlarm),
+                    String.valueOf(m.emlSuppressed),
+                    String.valueOf(m.totalFaultsAndTamper()),
+                    String.valueOf(m.gammaHighFault),
+                    String.valueOf(m.gammaLowFault),
+                    String.valueOf(m.neutronHighFault),
+                    String.valueOf(m.tamper)
+            );
+        };
+    }
+
+    private void writeJson(
+            String nodeId,
+            String scopeLine,
+            Map<String, ReportDataAggregator.ObservationMetrics> dailyMetrics,
+            ReportDataAggregator.ObservationMetrics totals
+    ) throws IOException {
+        try (JsonWriter jw = new JsonWriter(new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8)))) {
+            jw.setIndent("  ");
+            jw.setHtmlSafe(false);
+            jw.beginObject();
+            jw.name("reportType").value(ReportCmdType.EVENT.name());
+            jw.name("reportTitle").value("Event Report");
+            jw.name("eventType").value(eventType.name());
+            jw.name("nodeId").value(nodeId);
+            jw.name("scope").value(scopeLine);
+            jw.name("startDateTime").value(start != null ? DateTimeFormatter.ISO_INSTANT.format(start) : "");
+            jw.name("endDateTime").value(end != null ? DateTimeFormatter.ISO_INSTANT.format(end) : "");
+            jw.name("generatedAt").value(DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
+
+            jw.name("summary").beginObject();
+            jw.name("eventType").value(eventType.name());
+            jw.name("dayCount").value(dailyMetrics.size());
+            jw.name("totalOccupancies").value(totals.totalOccupancies);
+            jw.name("totalAlarms").value(totals.totalAlarms());
+            jw.name("gammaAlarm").value(totals.gammaAlarm);
+            jw.name("gammaNeutronAlarm").value(totals.gammaNeutronAlarm);
+            jw.name("neutronAlarm").value(totals.neutronAlarm);
+            jw.name("emlSuppressed").value(totals.emlSuppressed);
+            jw.name("alarmOccupancyRatePct").value(XlsxWorkbookWriter.roundTwoDecimals(totals.alarmOccupancyRatePct()));
+            jw.name("emlAlarmRatePct").value(XlsxWorkbookWriter.roundTwoDecimals(totals.emlAlarmRatePct()));
+            jw.name("totalSohEvents").value(totals.totalFaultsAndTamper());
+            jw.name("gammaHighFault").value(totals.gammaHighFault);
+            jw.name("gammaLowFault").value(totals.gammaLowFault);
+            jw.name("neutronHighFault").value(totals.neutronHighFault);
+            jw.name("tamper").value(totals.tamper);
+            jw.endObject();
+
+            jw.name("records").beginArray();
+            for (Map.Entry<String, ReportDataAggregator.ObservationMetrics> entry : dailyMetrics.entrySet()) {
+                String date = entry.getKey();
+                ReportDataAggregator.ObservationMetrics m = entry.getValue();
+                jw.beginObject();
+                jw.name("dateUtc").value(date);
+                if (eventType == EventReportType.SOH) {
+                    jw.name("gammaHighFault").value(m.gammaHighFault);
+                    jw.name("gammaLowFault").value(m.gammaLowFault);
+                    jw.name("neutronHighFault").value(m.neutronHighFault);
+                    jw.name("tamper").value(m.tamper);
+                    jw.name("totalSohEvents").value(m.totalFaultsAndTamper());
+                } else if (eventType == EventReportType.ALARMS) {
+                    jw.name("gammaAlarm").value(m.gammaAlarm);
+                    jw.name("gammaNeutronAlarm").value(m.gammaNeutronAlarm);
+                    jw.name("neutronAlarm").value(m.neutronAlarm);
+                    jw.name("emlSuppressed").value(m.emlSuppressed);
+                    jw.name("totalAlarms").value(m.totalAlarms());
+                    jw.name("emlAlarmRatePct").value(XlsxWorkbookWriter.roundTwoDecimals(m.emlAlarmRatePct()));
+                } else {
+                    jw.name("gammaAlarm").value(m.gammaAlarm);
+                    jw.name("gammaNeutronAlarm").value(m.gammaNeutronAlarm);
+                    jw.name("neutronAlarm").value(m.neutronAlarm);
+                    jw.name("emlSuppressed").value(m.emlSuppressed);
+                    jw.name("totalAlarms").value(m.totalAlarms());
+                    jw.name("totalOccupancies").value(m.totalOccupancies);
+                    jw.name("alarmOccupancyRatePct").value(XlsxWorkbookWriter.roundTwoDecimals(m.alarmOccupancyRatePct()));
+                    jw.name("emlAlarmRatePct").value(XlsxWorkbookWriter.roundTwoDecimals(m.emlAlarmRatePct()));
+                }
+                jw.endObject();
+            }
+            jw.endArray();
+            jw.endObject();
+            jw.flush();
+        }
+    }
+
+    private void writeXlsx(
+            String nodeId,
+            String scopeLine,
+            Map<String, ReportDataAggregator.ObservationMetrics> dailyMetrics,
+            ReportDataAggregator.ObservationMetrics totals
+    ) throws IOException {
+        List<String> headers = eventColumnHeaders();
+        List<Double> widths = new ArrayList<>(headers.size());
+        for (String h : headers) {
+            widths.add(Math.max(16.0, h.length() + 4.0));
+        }
+
+        List<List<CellValue>> rows = new ArrayList<>(dailyMetrics.size());
+        for (Map.Entry<String, ReportDataAggregator.ObservationMetrics> entry : dailyMetrics.entrySet()) {
+            String date = entry.getKey();
+            ReportDataAggregator.ObservationMetrics m = entry.getValue();
+            rows.add(buildXlsxRow(date, m));
+        }
+
+        List<List<CellValue>> summaryRows = List.of(
+                List.of(CellValue.text("Report Title"), CellValue.text("Event Report")),
+                List.of(CellValue.text("Event Type"), CellValue.text(eventType.name())),
+                List.of(CellValue.text("Node ID"), CellValue.text(nodeId)),
+                List.of(CellValue.text("Scope"), CellValue.text(scopeLine)),
+                List.of(CellValue.text("Start (UTC)"), CellValue.text(start != null ? DateTimeFormatter.ISO_INSTANT.format(start) : "")),
+                List.of(CellValue.text("End (UTC)"), CellValue.text(end != null ? DateTimeFormatter.ISO_INSTANT.format(end) : "")),
+                List.of(CellValue.text("UTC Days Reported"), CellValue.integer(dailyMetrics.size())),
+                List.of(CellValue.text("Total Occupancies"), CellValue.integer(totals.totalOccupancies)),
+                List.of(CellValue.text("Total Alarms"), CellValue.integer(totals.totalAlarms())),
+                List.of(CellValue.text("EML Suppressed"), CellValue.integer(totals.emlSuppressed)),
+                List.of(CellValue.text("Total SOH Events"), CellValue.integer(totals.totalFaultsAndTamper()))
+        );
+
+        XlsxWorkbookWriter.writeWorkbook(out, List.of(
+                new XlsxWorkbookWriter.SheetSpec("Daily Event Breakdown", headers, widths, rows, true),
+                new XlsxWorkbookWriter.SheetSpec("Summary", List.of("Metric", "Value"), List.of(28.0, 46.0), summaryRows, false)
+        ));
+    }
+
+    private List<CellValue> buildXlsxRow(String date, ReportDataAggregator.ObservationMetrics m) {
+        return switch (eventType) {
+            case ALARMS_OCCUPANCIES -> List.of(
+                    CellValue.text(date),
+                    CellValue.integer(m.gammaAlarm),
+                    CellValue.integer(m.gammaNeutronAlarm),
+                    CellValue.integer(m.neutronAlarm),
+                    CellValue.integer(m.emlSuppressed),
+                    CellValue.integer(m.totalAlarms()),
+                    CellValue.integer(m.totalOccupancies),
+                    CellValue.decimal(m.alarmOccupancyRatePct()),
+                    CellValue.decimal(m.emlAlarmRatePct())
+            );
+            case ALARMS -> List.of(
+                    CellValue.text(date),
+                    CellValue.integer(m.gammaAlarm),
+                    CellValue.integer(m.gammaNeutronAlarm),
+                    CellValue.integer(m.neutronAlarm),
+                    CellValue.integer(m.emlSuppressed),
+                    CellValue.integer(m.totalAlarms()),
+                    CellValue.decimal(m.emlAlarmRatePct())
+            );
+            case SOH -> List.of(
+                    CellValue.text(date),
+                    CellValue.integer(m.gammaHighFault),
+                    CellValue.integer(m.gammaLowFault),
+                    CellValue.integer(m.neutronHighFault),
+                    CellValue.integer(m.tamper),
+                    CellValue.integer(m.totalFaultsAndTamper())
+            );
+            default -> List.of(
+                    CellValue.text(date),
+                    CellValue.integer(m.totalOccupancies),
+                    CellValue.integer(m.totalAlarms()),
+                    CellValue.integer(m.gammaAlarm),
+                    CellValue.integer(m.gammaNeutronAlarm),
+                    CellValue.integer(m.neutronAlarm),
+                    CellValue.integer(m.emlSuppressed),
+                    CellValue.integer(m.totalFaultsAndTamper()),
+                    CellValue.integer(m.gammaHighFault),
+                    CellValue.integer(m.gammaLowFault),
+                    CellValue.integer(m.neutronHighFault),
+                    CellValue.integer(m.tamper)
+            );
+        };
     }
 
     @Override
@@ -184,8 +490,10 @@ public class EventReport extends Report {
                 occLine
         );
 
-        pdf.drawSectionHeader("Daily Breakdown Table", "Exact daily alarm, EML suppression, and occupancy counts (UTC)", 70f);
-        tableGenerator.drawTableByDate(pdf, tableByDate, true);
+        if (dailyMetrics.size() > 1) {
+            pdf.drawSectionHeader("Daily Breakdown Table", "Exact daily alarm, EML suppression, and occupancy counts (UTC)", 70f);
+            tableGenerator.drawTableByDate(pdf, tableByDate, false);
+        }
     }
 
     private void renderAlarmsOnly(
@@ -258,8 +566,10 @@ public class EventReport extends Report {
                 )
         );
 
-        pdf.drawSectionHeader("Daily Alarm Breakdown", "Exact daily counts across alarm categories (UTC)", 70f);
-        tableGenerator.drawTableByDate(pdf, tableByDate, true);
+        if (dailyMetrics.size() > 1) {
+            pdf.drawSectionHeader("Daily Alarm Breakdown", "Exact daily counts across alarm categories (UTC)", 70f);
+            tableGenerator.drawTableByDate(pdf, tableByDate, false);
+        }
     }
 
     private void renderSoh(
@@ -332,7 +642,9 @@ public class EventReport extends Report {
                 )
         );
 
-        pdf.drawSectionHeader("Daily SOH Breakdown", "Exact daily fault and tamper counts (UTC)", 70f);
-        tableGenerator.drawTableByDate(pdf, tableByDate, true);
+        if (dailyMetrics.size() > 1) {
+            pdf.drawSectionHeader("Daily SOH Breakdown", "Exact daily fault and tamper counts (UTC)", 70f);
+            tableGenerator.drawTableByDate(pdf, tableByDate, false);
+        }
     }
 }

@@ -258,7 +258,6 @@ public class AdjudicationDetailsReport extends Report {
                         rec.secondaryInspectionStatus(),
                         XlsxWorkbookWriter.guardSpreadsheetFormulaPrefix(rec.vehicleId()),
                         rec.occupancyObsId(),
-                        XlsxWorkbookWriter.guardSpreadsheetFormulaPrefix(rec.operatorFeedback()),
                         XlsxWorkbookWriter.guardSpreadsheetFormulaPrefix(rec.formattedSummary().replace('\n', ' ')),
                         rec.emlDecision(),
                         rec.emlSourceType(),
@@ -350,7 +349,6 @@ public class AdjudicationDetailsReport extends Report {
                 jw.name("secondaryInspectionStatus").value(rec.secondaryInspectionStatus());
                 jw.name("vehicleId").value(rec.vehicleId());
                 jw.name("occupancyObsId").value(rec.occupancyObsId());
-                jw.name("operatorNotes").value(rec.operatorFeedback());
                 jw.name("summary").value(rec.formattedSummary());
                 if (!rec.emlDecision().isEmpty() || !rec.emlSourceType().isEmpty()
                         || rec.emlNormProbPct() != null || rec.emlNonEmittingProbPct() != null || rec.emlThreatProbPct() != null) {
@@ -406,7 +404,7 @@ public class AdjudicationDetailsReport extends Report {
         List<String> headers = detailsColumnHeaders();
         List<Double> widths = List.of(
                 18.0, 28.0, 10.0, 22.0, 15.0, 14.0, 30.0, 18.0,
-                22.0, 20.0, 16.0, 20.0, 30.0, 42.0, 15.0, 16.0,
+                22.0, 20.0, 16.0, 20.0, 42.0, 15.0, 16.0,
                 16.0, 20.0, 16.0, 32.0
         );
 
@@ -426,7 +424,6 @@ public class AdjudicationDetailsReport extends Report {
                     CellValue.text(rec.secondaryInspectionStatus()),
                     CellValue.text(rec.vehicleId()),
                     CellValue.text(rec.occupancyObsId()),
-                    CellValue.text(rec.operatorFeedback().isEmpty() ? "-" : rec.operatorFeedback()),
                     CellValue.text(rec.formattedSummary()),
                     CellValue.text(rec.emlDecision().isEmpty() ? "-" : rec.emlDecision()),
                     CellValue.text(rec.emlSourceType().isEmpty() ? "-" : rec.emlSourceType()),
@@ -471,7 +468,6 @@ public class AdjudicationDetailsReport extends Report {
                 "Secondary Status",
                 "Vehicle ID",
                 "Occupancy Obs ID",
-                "Operator Notes",
                 "Feedback / EML Summary",
                 "EML Decision",
                 "EML Source Type",

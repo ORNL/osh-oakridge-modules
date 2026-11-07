@@ -241,15 +241,15 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
             ReportFormat format
     ) throws DataStoreException {
         if (type == ReportCmdType.LANE) {
-            return out -> new LaneReport(out, start, end, laneUIDs, module);
+            return out -> new LaneReport(out, start, end, laneUIDs, format, module);
         } else if (type == ReportCmdType.EVENT) {
-            return out -> new EventReport(out, start, end, eventType, laneUIDs, module);
+            return out -> new EventReport(out, start, end, eventType, laneUIDs, format, module);
         } else if (type == ReportCmdType.ADJUDICATION) {
-            return out -> new AdjudicationReport(out, start, end, laneUIDs, module);
+            return out -> new AdjudicationReport(out, start, end, laneUIDs, format, module);
         } else if (type == ReportCmdType.ADJUDICATION_DETAILS) {
             return out -> new AdjudicationDetailsReport(out, start, end, laneUIDs, format, module);
         } else if (type == ReportCmdType.RDS_SITE) {
-            return out -> new RDSReport(out, start, end, laneUIDs, module);
+            return out -> new RDSReport(out, start, end, laneUIDs, format, module);
         }
         return null;
     }

@@ -880,8 +880,146 @@ public class ReportTests {
             String event5dText = readBucketPdfText(event5dRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue());
             assertTrue(event5dText.contains("Event Report"));
             assertTrue(event5dText.contains("Total Occupancies"));
+
+            // 5. Verify CSV, JSON, and XLSX generation across RDS_SITE, LANE, ADJUDICATION, and EVENT
+            verifyMultiFormatReportExports(commandDesc, windowStart, windowEnd, laneUid);
         } finally {
             Files.deleteIfExists(dbFile);
+        }
+    }
+
+    private void verifyMultiFormatReportExports(
+            DataComponent commandDesc,
+            Instant windowStart,
+            Instant windowEnd,
+            String laneUid
+    ) throws Exception {
+        // RDS_SITE CSV / JSON / XLSX
+        assertBucketTextContains(
+                submitReportCommand(commandDesc, 301, ReportCmdType.RDS_SITE_CSV, windowStart, windowEnd, laneUid, EventReportType.NONE),
+                ".csv",
+                "Category,Metric / Volume,Value / Used",
+                "Alarm Statistics,Total Occupancies,8,count"
+        );
+        JsonObject siteJson = readBucketJson(
+                submitReportCommand(commandDesc, 302, ReportCmdType.RDS_SITE_JSON, windowStart, windowEnd, laneUid, EventReportType.NONE)
+        );
+        assertEquals("RDS_SITE", siteJson.get("reportType").getAsString());
+        assertEquals(8L, siteJson.getAsJsonObject("summary").get("totalOccupancies").getAsLong());
+        assertTrue(siteJson.getAsJsonArray("records").size() >= 13);
+        assertBucketXlsxContains(
+                submitReportCommand(commandDesc, 303, ReportCmdType.RDS_SITE_XLSX, windowStart, windowEnd, laneUid, EventReportType.NONE),
+                "Alarm Occupancy Rate"
+        );
+
+        // LANE CSV / JSON / XLSX
+        assertBucketTextContains(
+                submitReportCommand(commandDesc, 304, ReportCmdType.LANE_CSV, windowStart, windowEnd, laneUid, EventReportType.NONE),
+                ".csv",
+                "Lane Name,Lane UID,Total Occupancies,Total Alarms",
+                laneUid
+        );
+        JsonObject laneJson = readBucketJson(
+                submitReportCommand(commandDesc, 305, ReportCmdType.LANE_JSON, windowStart, windowEnd, laneUid, EventReportType.NONE)
+        );
+        assertEquals("LANE", laneJson.get("reportType").getAsString());
+        assertEquals(8L, laneJson.getAsJsonObject("summary").get("totalOccupancies").getAsLong());
+        assertEquals(1, laneJson.getAsJsonArray("records").size());
+        assertBucketXlsxContains(
+                submitReportCommand(commandDesc, 306, ReportCmdType.LANE_XLSX, windowStart, windowEnd, laneUid, EventReportType.NONE),
+                laneUid
+        );
+
+        // ADJUDICATION (summary) CSV / JSON / XLSX
+        assertBucketTextContains(
+                submitReportCommand(commandDesc, 307, ReportCmdType.ADJUDICATION_CSV, windowStart, windowEnd, laneUid, EventReportType.NONE),
+                ".csv",
+                "Lane Name,Lane UID,Section,Code / Isotope,Label,Group,Count,Percent (%)",
+                "Cs-137"
+        );
+        JsonObject adjJson = readBucketJson(
+                submitReportCommand(commandDesc, 308, ReportCmdType.ADJUDICATION_JSON, windowStart, windowEnd, laneUid, EventReportType.NONE)
+        );
+        assertEquals("ADJUDICATION", adjJson.get("reportType").getAsString());
+        assertEquals(2L, adjJson.getAsJsonObject("summary").get("totalRecords").getAsLong());
+        assertTrue(adjJson.getAsJsonArray("records").size() > 5);
+        assertBucketXlsxContains(
+                submitReportCommand(commandDesc, 309, ReportCmdType.ADJUDICATION_XLSX, windowStart, windowEnd, laneUid, EventReportType.NONE),
+                "Disposition Summary"
+        );
+
+        // EVENT CSV / JSON / XLSX
+        assertBucketTextContains(
+                submitReportCommand(commandDesc, 310, ReportCmdType.EVENT_CSV, windowStart, windowEnd, laneUid, EventReportType.ALARMS_OCCUPANCIES),
+                ".csv",
+                "Date (UTC),Gamma,Gamma-Neutron,Neutron,EML-Suppressed,Total Alarms,Total Occupancy"
+        );
+        JsonObject eventJson = readBucketJson(
+                submitReportCommand(commandDesc, 311, ReportCmdType.EVENT_JSON, windowStart, windowEnd, laneUid, EventReportType.ALARMS_OCCUPANCIES)
+        );
+        assertEquals("EVENT", eventJson.get("reportType").getAsString());
+        assertEquals("ALARMS_OCCUPANCIES", eventJson.get("eventType").getAsString());
+        assertEquals(8L, eventJson.getAsJsonObject("summary").get("totalOccupancies").getAsLong());
+        assertFalse(eventJson.getAsJsonArray("records").isEmpty());
+        assertBucketXlsxContains(
+                submitReportCommand(commandDesc, 312, ReportCmdType.EVENT_XLSX, windowStart, windowEnd, laneUid, EventReportType.ALARMS_OCCUPANCIES),
+                "Daily Event Breakdown"
+        );
+    }
+
+    private String submitReportCommand(
+            DataComponent commandDesc,
+            int cmdId,
+            ReportCmdType type,
+            Instant start,
+            Instant end,
+            String laneUid,
+            EventReportType eventType
+    ) throws Exception {
+        DataBlock block = commandDesc.createDataBlock();
+        block.setStringValue(0, type.name());
+        block.setTimeStamp(1, start);
+        block.setTimeStamp(2, end);
+        block.setStringValue(3, laneUid);
+        block.setStringValue(4, eventType.name());
+        var res = reportControl.submitCommand(new CommandData(cmdId, block)).get();
+        assertEquals(ICommandStatus.CommandStatusCode.ACCEPTED, res.getStatusCode());
+        return res.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue();
+    }
+
+    private void assertBucketTextContains(String resPath, String expectedSuffix, String... expectedSubstrings) throws Exception {
+        assertTrue("Expected " + resPath + " to end with " + expectedSuffix, resPath.endsWith(expectedSuffix));
+        String key = resPath.startsWith("reports/") ? resPath.substring("reports/".length()) : resPath;
+        try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", key)) {
+            String content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            for (String expected : expectedSubstrings) {
+                assertTrue("Expected report " + resPath + " to contain '" + expected + "'", content.contains(expected));
+            }
+        }
+    }
+
+    private JsonObject readBucketJson(String resPath) throws Exception {
+        assertTrue(resPath.endsWith(".json"));
+        String key = resPath.startsWith("reports/") ? resPath.substring("reports/".length()) : resPath;
+        try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", key)) {
+            return JsonParser.parseString(new String(in.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+        }
+    }
+
+    private void assertBucketXlsxContains(String resPath, String expectedSubstring) throws Exception {
+        assertTrue(resPath.endsWith(".xlsx"));
+        String key = resPath.startsWith("reports/") ? resPath.substring("reports/".length()) : resPath;
+        try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", key);
+             ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(in.readAllBytes()), StandardCharsets.UTF_8)) {
+            StringBuilder combinedXml = new StringBuilder();
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                combinedXml.append(new String(zis.readAllBytes(), StandardCharsets.UTF_8));
+            }
+            assertTrue(
+                    "Expected workbook " + resPath + " XML to contain '" + expectedSubstring + "'",
+                    combinedXml.toString().contains(expectedSubstring)
+            );
         }
     }
 
