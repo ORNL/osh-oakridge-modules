@@ -314,6 +314,37 @@ public final class XlsxWorkbookWriter {
         return raw;
     }
 
+    /**
+     * Writes an RFC-4180 compliant UTF-8 CSV row with CRLF line ending.
+     */
+    public static void writeCsvRow(java.io.BufferedWriter writer, List<String> cells) throws IOException {
+        for (int i = 0; i < cells.size(); i++) {
+            if (i > 0) {
+                writer.write(',');
+            }
+            String val = cells.get(i) != null ? cells.get(i) : "";
+            boolean needsQuotes = val.indexOf(',') >= 0
+                    || val.indexOf('"') >= 0
+                    || val.indexOf('\n') >= 0
+                    || val.indexOf('\r') >= 0;
+            if (needsQuotes) {
+                writer.write('"');
+                writer.write(val.replace("\"", "\"\""));
+                writer.write('"');
+            } else {
+                writer.write(val);
+            }
+        }
+        writer.write("\r\n");
+    }
+
+    public static double roundTwoDecimals(double value) {
+        if (!Double.isFinite(value)) {
+            return 0.0;
+        }
+        return Math.round(value * 100.0) / 100.0;
+    }
+
     static String columnName(int zeroBasedCol) {
         int col = zeroBasedCol + 1;
         StringBuilder name = new StringBuilder(3);

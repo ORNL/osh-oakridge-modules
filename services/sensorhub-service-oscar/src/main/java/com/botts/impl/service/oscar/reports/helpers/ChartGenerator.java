@@ -309,8 +309,8 @@ public class ChartGenerator {
                     drawnSegments++;
                 }
 
-                // Direct bar-total callout on compact single-axis charts
-                if (!hasRightAxis && numCats <= 14 && dayBarTotals[i] > 0) {
+                // Direct bar-total callout only on single-day charts (multi-day reports pair the chart with the daily breakdown table)
+                if (!hasRightAxis && numCats == 1 && dayBarTotals[i] > 0) {
                     String totalStr = intFmt.format(dayBarTotals[i]);
                     float tw = pdf.measureTextWidth(bold, 7f, totalStr);
                     float labelY = Math.min(plotTop - 5f, currentBaseY + 3f);
@@ -371,16 +371,6 @@ public class ChartGenerator {
                         float rInner = nPts <= 20 ? 1.8f : 1.3f;
                         pdf.drawFilledCircle(px[i], py[i], rOuter, Color.WHITE, lineSeries.color(), 1.1f);
                         pdf.drawFilledCircle(px[i], py[i], rInner, lineSeries.color(), null, 0f);
-                    }
-                    if (nPts <= 10) {
-                        String vStr = intFmt.format(val);
-                        float vw = pdf.measureTextWidth(bold, 6.8f, vStr);
-                        float labelX = px[i] - vw * 0.5f;
-                        float labelY = Math.min(plotTop - 5f, py[i] + 5.5f);
-                        cs.setNonStrokingColor(new Color(255, 255, 255));
-                        cs.addRect(labelX - 1.5f, labelY - 1f, vw + 3f, 8f);
-                        cs.fill();
-                        pdf.drawText(bold, 6.8f, COLOR_OCCUPANCY_LINE, labelX, labelY, vStr);
                     }
                 }
             }
@@ -478,7 +468,7 @@ public class ChartGenerator {
 
         // Compute left category column width
         float maxCatLabelW = 0f;
-        float maxAllowedLabelW = compactRows ? 118f : 215f;
+        float maxAllowedLabelW = compactRows ? 140f : 255f;
         for (HorizontalBarItem item : items) {
             PDType0Font f = item.emphasize() ? bold : regular;
             float w = pdf.measureTextWidth(f, labelFontSize, item.categoryLabel());

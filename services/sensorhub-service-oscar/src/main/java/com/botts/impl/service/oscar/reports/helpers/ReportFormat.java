@@ -51,7 +51,7 @@ public enum ReportFormat {
     }
 
     public ReportFormat effectiveFor(ReportCmdType cmdType) {
-        if (cmdType != null && cmdType.isAdjudicationDetails()) {
+        if (cmdType != null) {
             return this;
         }
         return PDF;

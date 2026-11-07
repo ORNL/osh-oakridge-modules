@@ -2,9 +2,25 @@ package com.botts.impl.service.oscar.reports.helpers;
 
 public enum ReportCmdType {
     RDS_SITE,
+    RDS_SITE_PDF,
+    RDS_SITE_CSV,
+    RDS_SITE_JSON,
+    RDS_SITE_XLSX,
     LANE,
+    LANE_PDF,
+    LANE_CSV,
+    LANE_JSON,
+    LANE_XLSX,
     EVENT,
+    EVENT_PDF,
+    EVENT_CSV,
+    EVENT_JSON,
+    EVENT_XLSX,
     ADJUDICATION,
+    ADJUDICATION_PDF,
+    ADJUDICATION_CSV,
+    ADJUDICATION_JSON,
+    ADJUDICATION_XLSX,
     ADJUDICATION_DETAILS,
     ADJUDICATION_DETAILS_PDF,
     ADJUDICATION_DETAILS_CSV,
@@ -12,23 +28,34 @@ public enum ReportCmdType {
     ADJUDICATION_DETAILS_XLSX;
 
     public boolean isAdjudicationDetails() {
-        return this == ADJUDICATION_DETAILS
-                || this == ADJUDICATION_DETAILS_PDF
-                || this == ADJUDICATION_DETAILS_CSV
-                || this == ADJUDICATION_DETAILS_JSON
-                || this == ADJUDICATION_DETAILS_XLSX;
+        return baseType() == ADJUDICATION_DETAILS;
     }
 
     public ReportCmdType baseType() {
-        return isAdjudicationDetails() ? ADJUDICATION_DETAILS : this;
+        return switch (this) {
+            case RDS_SITE, RDS_SITE_PDF, RDS_SITE_CSV, RDS_SITE_JSON, RDS_SITE_XLSX -> RDS_SITE;
+            case LANE, LANE_PDF, LANE_CSV, LANE_JSON, LANE_XLSX -> LANE;
+            case EVENT, EVENT_PDF, EVENT_CSV, EVENT_JSON, EVENT_XLSX -> EVENT;
+            case ADJUDICATION, ADJUDICATION_PDF, ADJUDICATION_CSV, ADJUDICATION_JSON, ADJUDICATION_XLSX -> ADJUDICATION;
+            case ADJUDICATION_DETAILS,
+                 ADJUDICATION_DETAILS_PDF,
+                 ADJUDICATION_DETAILS_CSV,
+                 ADJUDICATION_DETAILS_JSON,
+                 ADJUDICATION_DETAILS_XLSX -> ADJUDICATION_DETAILS;
+        };
     }
 
     public ReportFormat defaultFormat() {
-        return switch (this) {
-            case ADJUDICATION_DETAILS_CSV -> ReportFormat.CSV;
-            case ADJUDICATION_DETAILS_JSON -> ReportFormat.JSON;
-            case ADJUDICATION_DETAILS_XLSX -> ReportFormat.XLSX;
-            default -> ReportFormat.PDF;
-        };
+        String name = name();
+        if (name.endsWith("_CSV")) {
+            return ReportFormat.CSV;
+        }
+        if (name.endsWith("_JSON")) {
+            return ReportFormat.JSON;
+        }
+        if (name.endsWith("_XLSX")) {
+            return ReportFormat.XLSX;
+        }
+        return ReportFormat.PDF;
     }
 }
