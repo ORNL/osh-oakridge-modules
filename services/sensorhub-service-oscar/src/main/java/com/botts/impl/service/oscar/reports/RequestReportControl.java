@@ -20,6 +20,8 @@ import com.botts.impl.service.oscar.OSCARServiceModule;
 import com.botts.impl.service.oscar.OSCARSystem;
 import com.botts.impl.service.oscar.reports.helpers.EventReportType;
 import com.botts.impl.service.oscar.reports.helpers.ReportCmdType;
+import com.botts.impl.service.oscar.reports.helpers.ReportFormat;
+import com.botts.impl.service.oscar.reports.types.AdjudicationDetailsReport;
 import com.botts.impl.service.oscar.reports.types.AdjudicationReport;
 import com.botts.impl.service.oscar.reports.types.EventReport;
 import com.botts.impl.service.oscar.reports.types.LaneReport;
@@ -156,18 +158,20 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
     private ICommandStatus executeReportCommand(ICommandData command) {
         DataBlock paramData = command.getParams();
 
-        ReportCmdType type = ReportCmdType.valueOf(paramData.getStringValue(0));
+        ReportCmdType requestedType = ReportCmdType.valueOf(paramData.getStringValue(0));
+        ReportCmdType type = requestedType.baseType();
         Instant start = paramData.getTimeStamp(1);
         Instant end = paramData.getTimeStamp(2);
         String laneUIDs = paramData.getStringValue(3);
         EventReportType eventType = parseEventType(paramData.getStringValue(4));
+        ReportFormat format = requestedType.defaultFormat().effectiveFor(type);
 
         String resourceURI = null;
         String filePath = null;
         IReportHandler reportHandler = null;
         try {
-            filePath = buildPath(type, start, end, laneUIDs, eventType);
-            reportHandler = getReportHandler(type, start, end, laneUIDs, eventType);
+            filePath = buildPath(type, start, end, laneUIDs, eventType, format);
+            reportHandler = getReportHandler(type, start, end, laneUIDs, eventType, format);
         } catch (DataStoreException e) {
             module.getLogger().error("Failed to build report {}", type, e);
         }
@@ -228,13 +232,22 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
         }
     }
 
-    private IReportHandler getReportHandler(ReportCmdType type, Instant start, Instant end, String laneUIDs, EventReportType eventType) throws DataStoreException {
+    private IReportHandler getReportHandler(
+            ReportCmdType type,
+            Instant start,
+            Instant end,
+            String laneUIDs,
+            EventReportType eventType,
+            ReportFormat format
+    ) throws DataStoreException {
         if (type == ReportCmdType.LANE) {
             return out -> new LaneReport(out, start, end, laneUIDs, module);
         } else if (type == ReportCmdType.EVENT) {
             return out -> new EventReport(out, start, end, eventType, laneUIDs, module);
         } else if (type == ReportCmdType.ADJUDICATION) {
             return out -> new AdjudicationReport(out, start, end, laneUIDs, module);
+        } else if (type == ReportCmdType.ADJUDICATION_DETAILS) {
+            return out -> new AdjudicationDetailsReport(out, start, end, laneUIDs, format, module);
         } else if (type == ReportCmdType.RDS_SITE) {
             return out -> new RDSReport(out, start, end, laneUIDs, module);
         }
@@ -259,22 +272,36 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
     }
 
     String buildPath(ReportCmdType type, Instant start, Instant end, String laneUIDs, EventReportType eventType) {
+        return buildPath(type, start, end, laneUIDs, eventType, ReportFormat.PDF);
+    }
+
+    String buildPath(
+            ReportCmdType type,
+            Instant start,
+            Instant end,
+            String laneUIDs,
+            EventReportType eventType,
+            ReportFormat format
+    ) {
+        ReportCmdType normalizedType = type.baseType();
         String startTime = DateTimeFormatter.ISO_INSTANT.format(start).replace(":", "-");
         String endTime = DateTimeFormatter.ISO_INSTANT.format(end).replace(":", "-");
         String scope = buildScopeToken(laneUIDs);
+        ReportFormat effectiveFormat = (format != null ? format : type.defaultFormat()).effectiveFor(normalizedType);
 
-        String typeToken = (type == ReportCmdType.EVENT && eventType != null && eventType != EventReportType.NONE)
-                ? type.name().toLowerCase(Locale.ROOT) + "-" + eventType.name().toLowerCase(Locale.ROOT)
-                : type.name().toLowerCase(Locale.ROOT);
+        String typeToken = (normalizedType == ReportCmdType.EVENT && eventType != null && eventType != EventReportType.NONE)
+                ? normalizedType.name().toLowerCase(Locale.ROOT) + "-" + eventType.name().toLowerCase(Locale.ROOT)
+                : normalizedType.name().toLowerCase(Locale.ROOT);
 
         return String.format(
                 Locale.ROOT,
-                "%s_%s_%s_%s_%s.pdf",
+                "%s_%s_%s_%s_%s%s",
                 module.getOSCARSystem().getNodeId(),
                 typeToken,
                 scope,
                 startTime,
-                endTime
+                endTime,
+                effectiveFormat.extension()
         ).toLowerCase(Locale.ROOT);
     }
 

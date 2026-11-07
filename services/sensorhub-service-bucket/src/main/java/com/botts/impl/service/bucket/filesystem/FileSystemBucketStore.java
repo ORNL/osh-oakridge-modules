@@ -36,6 +36,7 @@ public class FileSystemBucketStore implements IBucketStore {
             Map.entry("text/plain", ".txt"),
             Map.entry("text/csv", ".csv"),
             Map.entry("application/json", ".json"),
+            Map.entry("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"),
             Map.entry("application/test", ".test")
     );
     private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS = Set.of(
@@ -474,11 +475,14 @@ public class FileSystemBucketStore implements IBucketStore {
             throw new DataStoreException(OBJECT_NOT_FOUND + bucketName, new IllegalArgumentException());
 
         try {
+            String lowerKey = key.toLowerCase(Locale.ROOT);
+            if (lowerKey.endsWith(".xlsx"))
+                return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
             String mimeType = Files.probeContentType(path);
             if (mimeType != null)
                 return mimeType;
 
-            String lowerKey = key.toLowerCase();
             for (Map.Entry<String, String> entry : MIME_EXTENSION_MAP.entrySet()) {
                 String mime = entry.getKey();
                 String extension = entry.getValue();

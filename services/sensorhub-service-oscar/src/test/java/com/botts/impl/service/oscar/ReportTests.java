@@ -53,8 +53,13 @@ import org.sensorhub.impl.utils.rad.output.OccupancyOutput;
 import org.sensorhub.impl.sensor.SensorSystem;
 import org.vast.data.TextEncodingImpl;
 import org.vast.sensorML.SMLHelper;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.net.URI;
@@ -66,6 +71,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import static org.junit.Assert.*;
 
 public class ReportTests {
@@ -463,6 +470,25 @@ public class ReportTests {
         assertEquals(resp.statusCode(), 200);
     }
 
+    @Test
+    public void testSendAdjudicationDetailsExtractCommands() throws Exception {
+        for (ReportCmdType cmdType : List.of(
+                ReportCmdType.ADJUDICATION_DETAILS,
+                ReportCmdType.ADJUDICATION_DETAILS_CSV,
+                ReportCmdType.ADJUDICATION_DETAILS_JSON,
+                ReportCmdType.ADJUDICATION_DETAILS_XLSX
+        )) {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            createCommandParams(cmdType, "2025-08-30T17:37:14.753Z", "2026-10-01T17:17:14.753Z", "hey", EventReportType.NONE)))
+                    .uri(new URI(apiRootUrl + "/controlstreams/" + reportControlApiID + "/commands"))
+                    .header("Content-Type", "application/json")
+                    .build();
+            var resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            assertEquals("Expected HTTP 200 for " + cmdType, 200, resp.statusCode());
+        }
+    }
+
     private static class TestAdjudicationControl extends AdjudicationControl {
         TestAdjudicationControl(LaneSystem lane) {
             super(lane);
@@ -553,7 +579,7 @@ public class ReportTests {
             Instant windowStart = Instant.parse("2026-11-05T00:00:00Z");
             Instant windowEnd = Instant.parse("2026-11-06T00:00:00Z");
 
-            // Insert 5 occupancies: 2 Gamma alarms, 3 non-alarming -> 40.00% Alarm Occupancy Rate
+            // Insert 5 occupancies: 2 Gamma alarms (1 EML-suppressed via adjudicatedIds), 3 non-alarming -> 40.00% Alarm Rate, 50.00% EML Alarm Rate
             for (int i = 0; i < 5; i++) {
                 Instant t = windowStart.plusSeconds(600L * (i + 1));
                 Occupancy occ = new Occupancy.Builder()
@@ -564,6 +590,7 @@ public class ReportTests {
                         .gammaAlarm(i < 2)
                         .neutronAlarm(false)
                         .maxGammaCount(i < 2 ? 2400 : 120)
+                        .adjudicatedIds(i == 1 ? List.of(Adjudication.EML_NON_THREAT_MARKER) : List.of())
                         .build();
                 db.getObservationStore().add(new ObsData.Builder()
                         .withDataStream(occDsId)
@@ -673,7 +700,7 @@ public class ReportTests {
             String laneText2 = readBucketPdfText(lanePdfPath2);
             assertTrue("Re-generated report must overwrite cached PDF with updated 25.00% rate", laneText2.contains("25.00%"));
 
-            // 2. Verify Adjudication Report includes custom code 15, EML Non-Threat, formatted EML summary, and Landscape details page
+            // 2. Verify Adjudication Report is Portrait summary-only and omits zero-count isotopes
             DataBlock adjCmd = commandDesc.createDataBlock();
             adjCmd.setStringValue(0, ReportCmdType.ADJUDICATION.name());
             adjCmd.setTimeStamp(1, windowStart);
@@ -686,9 +713,8 @@ public class ReportTests {
             String adjKey = adjPdfPath.startsWith("reports/") ? adjPdfPath.substring("reports/".length()) : adjPdfPath;
             try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", adjKey);
                  PDDocument doc = Loader.loadPDF(in.readAllBytes())) {
-                assertTrue("Adjudication report with details should have at least 2 pages (Portrait + Landscape)", doc.getNumberOfPages() >= 2);
                 var lastPage = doc.getPage(doc.getNumberOfPages() - 1);
-                assertEquals("Adjudication Details page should be Landscape (792 pt wide)", 792f, lastPage.getMediaBox().getWidth(), 0.5f);
+                assertEquals("Summary Adjudication Report pages should stay Portrait (612 pt wide)", 612f, lastPage.getMediaBox().getWidth(), 0.5f);
 
                 String adjText = new PDFTextStripper().getText(doc);
                 assertTrue(adjText.contains("Adjudication Report"));
@@ -696,13 +722,102 @@ public class ReportTests {
                 assertTrue(adjText.contains("Code 15: Port Authority Hold"));
                 assertTrue(adjText.contains("EML Non-Threat"));
                 assertTrue(adjText.contains("Cs-137 (Cesium137)"));
-                assertTrue(adjText.contains("TRK-150"));
-                assertTrue(adjText.contains("TRK-999"));
-                assertTrue(adjText.contains("Source: NORM"));
-                assertFalse(adjText.contains("\"probabilityNonEmitting\""));
+                assertTrue(adjText.contains("K (Potassium)"));
+                assertFalse("Zero-count isotopes should be excluded from summary plots and tables", adjText.contains("Np (Neptunium)"));
+                assertFalse("Zero-count isotopes should be excluded from summary plots and tables", adjText.contains("Xe (Xenon)"));
+                assertFalse("Adjudication Details must be in its own separate report", adjText.contains("TRK-150"));
             }
 
-            // 3. Verify populated RDS Site Report renders decimal alarm rate and storage volumes
+            // 2b. Verify separate Adjudication Details Report in all 4 formats: PDF, CSV, JSON, and native XLSX
+            DataBlock adjDetailsPdfCmd = commandDesc.createDataBlock();
+            adjDetailsPdfCmd.setStringValue(0, ReportCmdType.ADJUDICATION_DETAILS.name());
+            adjDetailsPdfCmd.setTimeStamp(1, windowStart);
+            adjDetailsPdfCmd.setTimeStamp(2, windowEnd);
+            adjDetailsPdfCmd.setStringValue(3, laneUid);
+            adjDetailsPdfCmd.setStringValue(4, EventReportType.NONE.name());
+            var adjDetailsPdfRes = reportControl.submitCommand(new CommandData(207, adjDetailsPdfCmd)).get();
+            String adjDetailsPdfPath = adjDetailsPdfRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue();
+            assertTrue(adjDetailsPdfPath.endsWith(".pdf"));
+            String adjDetailsPdfKey = adjDetailsPdfPath.startsWith("reports/") ? adjDetailsPdfPath.substring("reports/".length()) : adjDetailsPdfPath;
+            try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", adjDetailsPdfKey);
+                 PDDocument doc = Loader.loadPDF(in.readAllBytes())) {
+                assertEquals("Adjudication Details PDF should be Landscape (792 pt wide)", 792f, doc.getPage(0).getMediaBox().getWidth(), 0.5f);
+                String detailsText = new PDFTextStripper().getText(doc);
+                assertTrue(detailsText.contains("Adjudication Details Report"));
+                assertTrue(detailsText.contains("TRK-150"));
+                assertTrue(detailsText.contains("TRK-999"));
+                assertTrue(detailsText.contains("Source: NORM"));
+                assertFalse(detailsText.contains("\"probabilityNonEmitting\""));
+            }
+
+            DataBlock adjDetailsCsvCmd = commandDesc.createDataBlock();
+            adjDetailsCsvCmd.setStringValue(0, ReportCmdType.ADJUDICATION_DETAILS_CSV.name());
+            adjDetailsCsvCmd.setTimeStamp(1, windowStart);
+            adjDetailsCsvCmd.setTimeStamp(2, windowEnd);
+            adjDetailsCsvCmd.setStringValue(3, laneUid);
+            adjDetailsCsvCmd.setStringValue(4, EventReportType.NONE.name());
+            var adjDetailsCsvRes = reportControl.submitCommand(new CommandData(208, adjDetailsCsvCmd)).get();
+            String csvPath = adjDetailsCsvRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue();
+            assertTrue(csvPath.endsWith(".csv"));
+            String csvKey = csvPath.startsWith("reports/") ? csvPath.substring("reports/".length()) : csvPath;
+            try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", csvKey)) {
+                String csv = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                assertTrue(csv.contains("Lane Name,Lane UID,Record #,Time (UTC)"));
+                assertTrue(csv.contains("TRK-150"));
+                assertTrue(csv.contains("TRK-999"));
+                assertTrue(csv.contains("NORM"));
+            }
+
+            DataBlock adjDetailsJsonCmd = commandDesc.createDataBlock();
+            adjDetailsJsonCmd.setStringValue(0, ReportCmdType.ADJUDICATION_DETAILS_JSON.name());
+            adjDetailsJsonCmd.setTimeStamp(1, windowStart);
+            adjDetailsJsonCmd.setTimeStamp(2, windowEnd);
+            adjDetailsJsonCmd.setStringValue(3, laneUid);
+            adjDetailsJsonCmd.setStringValue(4, EventReportType.NONE.name());
+            var adjDetailsJsonRes = reportControl.submitCommand(new CommandData(209, adjDetailsJsonCmd)).get();
+            String jsonPath = adjDetailsJsonRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue();
+            assertTrue(jsonPath.endsWith(".json"));
+            String jsonKey = jsonPath.startsWith("reports/") ? jsonPath.substring("reports/".length()) : jsonPath;
+            try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", jsonKey)) {
+                JsonObject root = JsonParser.parseString(new String(in.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+                assertEquals("ADJUDICATION_DETAILS", root.get("reportType").getAsString());
+                assertEquals(2L, root.getAsJsonObject("summary").get("totalRecords").getAsLong());
+                JsonArray records = root.getAsJsonArray("records");
+                assertEquals(2, records.size());
+                assertEquals("TRK-150", records.get(0).getAsJsonObject().get("vehicleId").getAsString());
+                assertEquals("NORM", records.get(1).getAsJsonObject().getAsJsonObject("eml").get("sourceType").getAsString());
+            }
+
+            DataBlock adjDetailsXlsxCmd = commandDesc.createDataBlock();
+            adjDetailsXlsxCmd.setStringValue(0, ReportCmdType.ADJUDICATION_DETAILS_XLSX.name());
+            adjDetailsXlsxCmd.setTimeStamp(1, windowStart);
+            adjDetailsXlsxCmd.setTimeStamp(2, windowEnd);
+            adjDetailsXlsxCmd.setStringValue(3, laneUid);
+            adjDetailsXlsxCmd.setStringValue(4, EventReportType.NONE.name());
+            var adjDetailsXlsxRes = reportControl.submitCommand(new CommandData(210, adjDetailsXlsxCmd)).get();
+            String xlsxPath = adjDetailsXlsxRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue();
+            assertTrue(xlsxPath.endsWith(".xlsx"));
+            String xlsxKey = xlsxPath.startsWith("reports/") ? xlsxPath.substring("reports/".length()) : xlsxPath;
+            assertEquals(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    oscarServiceModule.getBucketService().getBucketStore().getObjectMimeType("reports", xlsxKey)
+            );
+            try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", xlsxKey);
+                 ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(in.readAllBytes()), StandardCharsets.UTF_8)) {
+                Map<String, String> zipParts = new HashMap<>();
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    zipParts.put(entry.getName(), new String(zis.readAllBytes(), StandardCharsets.UTF_8));
+                }
+                assertTrue(zipParts.containsKey("[Content_Types].xml"));
+                assertTrue(zipParts.containsKey("xl/workbook.xml"));
+                assertTrue(zipParts.containsKey("xl/styles.xml"));
+                assertTrue(zipParts.containsKey("xl/worksheets/sheet1.xml"));
+                assertTrue(zipParts.get("xl/worksheets/sheet1.xml").contains("TRK-150"));
+                assertTrue(zipParts.get("xl/worksheets/sheet1.xml").contains("TRK-999"));
+            }
+
+            // 3. Verify populated RDS Site Report renders decimal alarm rate, 50.00% EML alarm rate (1 of 2 alarms), and storage volumes
             DataBlock siteCmd = commandDesc.createDataBlock();
             siteCmd.setStringValue(0, ReportCmdType.RDS_SITE.name());
             siteCmd.setTimeStamp(1, windowStart);
@@ -713,6 +828,7 @@ public class ReportTests {
             String siteText = readBucketPdfText(siteRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue());
             assertTrue(siteText.contains("RDS Site Report"));
             assertTrue(siteText.contains("25.00%"));
+            assertTrue("EML Alarm Rate should reflect 1 EML-suppressed occupancy out of 2 alarms (50.00%)", siteText.contains("50.00%"));
             assertTrue(siteText.contains("Storage Availability"));
 
             // 4. Verify populated 1-day and 5-day Event Reports (ALARMS_OCCUPANCIES)

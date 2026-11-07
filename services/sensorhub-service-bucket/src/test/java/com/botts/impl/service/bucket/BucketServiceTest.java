@@ -41,6 +41,7 @@ public class BucketServiceTest {
         BucketServiceConfig config = new BucketServiceConfig();
         config.initialBuckets = List.of(TEST_BUCKET);
         config.fileStoreRootDir = "src/test/resources/test-root";
+        config.security.requireAuth = false;
         config.autoStart = true;
         return (BucketService) reg.loadModule(config);
     }
@@ -80,6 +81,60 @@ public class BucketServiceTest {
         service.unregisterObjectHandler(expectedHandler);
         handler = service.getObjectHandler(TEST_BUCKET, "item.test");
         assertEquals(defaultHandler, handler);
+    }
+
+    @Test
+    public void testDownloadDispositionAndXlsxMimeType() throws Exception {
+        var store = service.getBucketStore();
+        try {
+            try (var out = store.putObject(TEST_BUCKET, "sample_report.pdf", java.util.Collections.emptyMap())) {
+                out.write("%PDF-1.4\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            try (var out = store.putObject(TEST_BUCKET, "sample_extract.xlsx", java.util.Collections.emptyMap())) {
+                out.write(new byte[]{'P', 'K', 3, 4});
+            }
+            assertEquals(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    store.getObjectMimeType(TEST_BUCKET, "sample_extract.xlsx")
+            );
+
+            var client = java.net.http.HttpClient.newHttpClient();
+            String base = httpServer.getPublicEndpointUrl(service.getPublicEndpointUrl());
+            if (!base.endsWith("/")) base += "/";
+
+            var inlineResp = client.send(
+                    java.net.http.HttpRequest.newBuilder().GET()
+                            .uri(java.net.URI.create(base + TEST_BUCKET + "/sample_report.pdf")).build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofByteArray()
+            );
+            assertEquals(200, inlineResp.statusCode());
+            assertTrue(inlineResp.headers().firstValue("Content-Disposition").isEmpty());
+
+            var dlResp = client.send(
+                    java.net.http.HttpRequest.newBuilder().GET()
+                            .uri(java.net.URI.create(base + TEST_BUCKET + "/sample_report.pdf?download=1")).build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofByteArray()
+            );
+            assertEquals(200, dlResp.statusCode());
+            assertEquals(
+                    "attachment; filename=\"sample_report.pdf\"",
+                    dlResp.headers().firstValue("Content-Disposition").orElse("")
+            );
+
+            var xlsxResp = client.send(
+                    java.net.http.HttpRequest.newBuilder().GET()
+                            .uri(java.net.URI.create(base + TEST_BUCKET + "/sample_extract.xlsx")).build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofByteArray()
+            );
+            assertEquals(200, xlsxResp.statusCode());
+            assertEquals(
+                    "attachment; filename=\"sample_extract.xlsx\"",
+                    xlsxResp.headers().firstValue("Content-Disposition").orElse("")
+            );
+        } finally {
+            try { store.deleteObject(TEST_BUCKET, "sample_report.pdf"); } catch (Exception ignored) {}
+            try { store.deleteObject(TEST_BUCKET, "sample_extract.xlsx"); } catch (Exception ignored) {}
+        }
     }
 
     @After
