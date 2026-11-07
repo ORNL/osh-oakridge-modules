@@ -845,6 +845,8 @@ Pour l'assistance, relevez version OSCAR, navigateur, voie/occupation, heure et 
 
 ## 15. Documentation associée
 
+- [Guides vidéo pratiques OSCAR](https://github.com/ORNL/oscar-video-guides)
+- [Index des guides vidéo OSCAR](https://github.com/ORNL/oscar/blob/main/docs/VIDEO_GUIDES.md)
 - [Démarrage rapide OSCAR](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
 - [Guide de déploiement](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
 - [Guide du système de traduction](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)

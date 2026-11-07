@@ -866,6 +866,8 @@ When collecting support data, record the OSCAR version, browser, affected lane/o
 
 ## 15. Related documentation
 
+- [OSCAR how-to video guides](https://github.com/ORNL/oscar-video-guides)
+- [OSCAR video-guides index](https://github.com/ORNL/oscar/blob/main/docs/VIDEO_GUIDES.md)
 - [OSCAR release Quick Start](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
 - [OSCAR Deployment Guide](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
 - [OSCAR translation-system guide](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)

@@ -11,7 +11,7 @@ The complete OSCAR 3.11.0 administration and operations manual is available in e
 - [Français](services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_fr.md)
 - [Ελληνικά](services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_el.md)
 
-The administration UI selects the matching manual in the OSCAR Service Module's README tab. Training screenshots used by all four manuals are maintained under [`docs/oscar-operator-manual/images`](docs/oscar-operator-manual/images).
+The administration UI selects the matching manual in the OSCAR Service Module's README tab. Training screenshots used by all four manuals are maintained under [`docs/oscar-operator-manual/images`](docs/oscar-operator-manual/images), and concise 1080p workflow screen-recording guides with captions and sequential step blocks are published in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides).
 
 The versioned five-JPEG retention contract, crash-safety rules, and Viewer API are documented in
 [`docs/retained-media-v1.md`](docs/retained-media-v1.md).
