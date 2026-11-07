@@ -5,8 +5,8 @@ import org.sensorhub.impl.module.ModuleSecurity;
 import org.sensorhub.impl.security.ItemPermission;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class BucketSecurity extends ModuleSecurity {
 
@@ -29,7 +29,7 @@ public class BucketSecurity extends ModuleSecurity {
     public BucketSecurity(BucketService module, Collection<String> buckets, boolean enable) {
         super(module, "bucketservice", enable);
 
-        this.bucketPermissions = new HashMap<>();
+        this.bucketPermissions = new ConcurrentHashMap<>();
 
         this.api_get = new ItemPermission(rootPerm, "get");
         this.api_put = new ItemPermission(rootPerm, "put");
@@ -43,7 +43,7 @@ public class BucketSecurity extends ModuleSecurity {
     }
 
     public void addBucket(String bucket) {
-        bucketPermissions.put(bucket, createBucketPermissions(bucket));
+        bucketPermissions.computeIfAbsent(bucket, this::createBucketPermissions);
     }
 
     private BucketPermissions createBucketPermissions(String bucket) {

@@ -17,6 +17,7 @@ package com.botts.impl.service.oscar;
 
 import com.botts.api.service.bucket.IBucketService;
 import com.botts.api.service.bucket.IBucketStore;
+import com.botts.impl.service.oscar.dailyfile.DailyFileSliceHandler;
 import com.botts.impl.service.oscar.eml.EmlPluginHandler;
 import com.botts.impl.service.oscar.purge.DatabasePurger;
 import com.botts.impl.service.oscar.retention.StoragePressureRetention;
@@ -69,6 +70,7 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     StoragePressureRetention storagePressureRetention;
     WebIdResourceHandler webIdResourceHandler;
     MediaResourceHandler mediaResourceHandler;
+    DailyFileSliceHandler dailyFileSliceHandler;
     MediaSetStore retainedMediaStore;
     ApplicationReadiness applicationReadiness;
 
@@ -219,6 +221,16 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         bucketService.registerObjectHandler(webIdResourceHandler);
         mediaResourceHandler = new MediaResourceHandler(retainedMediaStore);
         bucketService.registerObjectHandler(mediaResourceHandler);
+        try {
+            bucketService.ensureBucketRegistered(DatabasePurger.DAILY_FILES_BUCKET);
+            dailyFileSliceHandler = new DailyFileSliceHandler(
+                    bucketStore,
+                    this::resolveSliceDatabase,
+                    () -> getParentHub().getModuleRegistry().getModuleByType(IDailyFileJournalService.class));
+            bucketService.registerObjectHandler(dailyFileSliceHandler);
+        } catch (org.sensorhub.api.datastore.DataStoreException e) {
+            throw new SensorHubException("Unable to initialize daily-file slice handler", e);
+        }
 
         statsOutput.start();
 
@@ -279,6 +291,7 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                 () -> awaitStoragePressureRetentionStop(deadline));
         failure = runStopStep(failure, "Web ID object handler", this::unregisterWebIdHandler);
         failure = runStopStep(failure, "retained-media object handler", this::unregisterMediaHandler);
+        failure = runStopStep(failure, "daily-file slice object handler", this::unregisterDailyFileSliceHandler);
         failure = runStopStep(failure, "OSCAR system registration", this::unregisterSystem);
         if (failure != null)
             throw failure;
@@ -431,6 +444,27 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
             return;
         bucketService.unregisterObjectHandler(mediaResourceHandler);
         mediaResourceHandler = null;
+    }
+
+    void unregisterDailyFileSliceHandler() {
+        if (dailyFileSliceHandler == null)
+            return;
+        bucketService.unregisterObjectHandler(dailyFileSliceHandler);
+        dailyFileSliceHandler = null;
+    }
+
+    private IObsSystemDatabase resolveSliceDatabase() {
+        if (config != null && config.databaseID != null && !config.databaseID.isBlank()) {
+            try {
+                var module = getParentHub().getModuleRegistry().getModuleById(config.databaseID);
+                if (module instanceof IObsSystemDatabase db)
+                    return db;
+            } catch (SensorHubException ignored) {
+                // Fall back to federated database below.
+            }
+        }
+        return getParentHub() != null && getParentHub().getDatabaseRegistry() != null
+                ? getParentHub().getDatabaseRegistry().getFederatedDatabase() : null;
     }
 
     @FunctionalInterface
