@@ -842,6 +842,8 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 
 ## 15. Σχετική τεκμηρίωση
 
+- [Βιντεοοδηγοί εργασιών OSCAR](https://github.com/ORNL/oscar-video-guides)
+- [Ευρετήριο βιντεοοδηγών OSCAR](https://github.com/ORNL/oscar/blob/main/docs/VIDEO_GUIDES.md)
 - [Γρήγορη εκκίνηση OSCAR](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
 - [Οδηγός εγκατάστασης](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
 - [Οδηγός συστήματος μεταφράσεων](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)

@@ -7,4 +7,4 @@ The localized OSCAR 3.11.0 administrator and operator manuals are loaded directl
 - [Français](../../services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_fr.md)
 - [Ελληνικά](../../services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_el.md)
 
-The `images` directory contains the shared, ordered training screenshots. Keep image names stable because all localized manuals reference their upstream raw GitHub URLs so the pictures also render inside the administration README panel.
+The `images` directory contains the shared, ordered training screenshots. Keep image names stable because all localized manuals reference their upstream raw GitHub URLs so the pictures also render inside the administration README panel. Companion bite-sized workflow screen recordings and caption tracks are maintained in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides).

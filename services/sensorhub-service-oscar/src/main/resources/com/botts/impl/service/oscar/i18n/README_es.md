@@ -844,6 +844,8 @@ Para soporte, registre versión OSCAR, navegador, carril/ocupación, hora y zona
 
 ## 15. Documentación relacionada
 
+- [Videoguías prácticas de OSCAR](https://github.com/ORNL/oscar-video-guides)
+- [Índice de videoguías de OSCAR](https://github.com/ORNL/oscar/blob/main/docs/VIDEO_GUIDES.md)
 - [Inicio rápido de OSCAR](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
 - [Guía de despliegue](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
 - [Sistema de traducción](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)

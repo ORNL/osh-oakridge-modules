@@ -9,7 +9,7 @@ The detailed OSCAR 3.11.0 manual is maintained beside `OSCARServiceConfig`, wher
 - [Français](com/botts/impl/service/oscar/i18n/README_fr.md)
 - [Ελληνικά](com/botts/impl/service/oscar/i18n/README_el.md)
 
-Keep those four files synchronized whenever configuration or operator workflows change.
+Keep those four files synchronized whenever configuration or operator workflows change. Short single-task workflow video guides with synchronized captions are maintained in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides).
 
 ## Purpose
 The purpose of this module is to handle the following aspects of OSCAR (3.0+)
