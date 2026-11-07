@@ -1,52 +1,138 @@
+/*******************************************************************************
+
+ The contents of this file are subject to the Mozilla Public License, v. 2.0.
+ If a copy of the MPL was not distributed with this file, You can obtain one
+ at http://mozilla.org/MPL/2.0/.
+
+ Software distributed under the License is distributed on an "AS IS" basis,
+ WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+ for the specific language governing rights and limitations under the License.
+
+ The Initial Developer is Botts Innovative Research Inc. Portions created by the Initial
+ Developer are Copyright (C) 2025 the Initial Developer. All Rights Reserved.
+
+ ******************************************************************************/
+
 package com.botts.impl.service.oscar.reports.types;
 
 import com.botts.impl.service.oscar.OSCARServiceModule;
+import com.botts.impl.service.oscar.reports.helpers.ChartGenerator;
+import com.botts.impl.service.oscar.reports.helpers.PdfDocumentBuilder;
 import com.botts.impl.service.oscar.reports.helpers.ReportCmdType;
+import com.botts.impl.service.oscar.reports.helpers.ReportDataAggregator;
 import com.botts.impl.service.oscar.reports.helpers.TableGenerator;
 import com.botts.impl.service.oscar.reports.helpers.Utils;
-import com.itextpdf.kernel.pdf.PdfDocument;
-import com.itextpdf.kernel.pdf.PdfWriter;
-import com.itextpdf.layout.Document;
-import com.itextpdf.layout.element.Paragraph;
-import org.sensorhub.api.common.BigId;
-import org.sensorhub.api.data.IObsData;
-import org.sensorhub.api.datastore.obs.DataStreamFilter;
-import org.sensorhub.api.datastore.obs.ObsFilter;
-import org.sensorhub.api.datastore.system.SystemFilter;
-import org.sensorhub.impl.utils.rad.RADHelper;
-import java.io.OutputStream;
-import java.time.Instant;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.function.Predicate;
+import org.sensorhub.api.datastore.DataStoreException;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.text.NumberFormat;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 public class LaneReport extends Report {
 
-    Document document;
-    PdfDocument pdfDocument;
-
-    String laneUIDs;
-    TableGenerator tableGenerator;
+    private final String laneUIDs;
+    private final TableGenerator tableGenerator;
 
     public LaneReport(OutputStream out, Instant startTime, Instant endTime, String laneUIDs, OSCARServiceModule module) {
         super(out, startTime, endTime, module);
-        pdfDocument = new PdfDocument(new PdfWriter(out));
-        document = new Document(pdfDocument);
-
         this.laneUIDs = laneUIDs;
         this.tableGenerator = new TableGenerator();
     }
 
     @Override
-    public void generate() {
-        addHeader();
-        addAlarmStatistics();
-        addFaultStatistics();
+    public void generate() throws DataStoreException {
+        String nodeId = (module != null && module.getConfiguration() != null && module.getConfiguration().nodeId != null)
+                ? module.getConfiguration().nodeId
+                : "oscar-node";
 
-        document.close();
-        tableGenerator = null;
+        List<String> targetLanes = ReportDataAggregator.resolveTargetLaneUIDs(module, laneUIDs);
+        Map<String, String> multilineLaneLabels = ReportDataAggregator.resolveLaneDisplayLabels(module, targetLanes, true);
+        Map<String, ReportDataAggregator.ObservationMetrics> perLane =
+                ReportDataAggregator.aggregateMetricsByLane(module, targetLanes, start, end);
+
+        ReportDataAggregator.ObservationMetrics totals = new ReportDataAggregator.ObservationMetrics();
+        for (ReportDataAggregator.ObservationMetrics m : perLane.values()) {
+            totals.add(m);
+        }
+
+        NumberFormat intFmt = NumberFormat.getIntegerInstance(Locale.US);
+        String scopeLine = ReportDataAggregator.buildBannerScopeSummary(module, laneUIDs);
+
+        // Switch to Landscape automatically when many lanes or wide comparisons benefit, or Portrait for compact crisp tables
+        try (PdfDocumentBuilder pdf = new PdfDocumentBuilder("Lane Report", nodeId)) {
+            pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
+                    "Lane Report",
+                    nodeId,
+                    null,
+                    scopeLine,
+                    start,
+                    end
+            ));
+
+            pdf.drawKpiCards(List.of(
+                    new PdfDocumentBuilder.KpiCard(
+                            "Lanes Reported",
+                            intFmt.format(targetLanes.size()),
+                            targetLanes.size() == 1 ? "Single-lane scope" : "Multi-lane comparison",
+                            PdfDocumentBuilder.ACCENT_BLUE
+                    ),
+                    new PdfDocumentBuilder.KpiCard(
+                            "Total Occupancies",
+                            intFmt.format(totals.totalOccupancies),
+                            "Alarm Rate: " + Utils.formatPercentage(totals.alarmOccupancyRatePct()),
+                            PdfDocumentBuilder.ACCENT_SKY
+                    ),
+                    new PdfDocumentBuilder.KpiCard(
+                            "Total Alarms",
+                            intFmt.format(totals.totalAlarms()),
+                            "EML Suppressed: " + intFmt.format(totals.emlSuppressed)
+                                    + " (" + Utils.formatPercentage(totals.emlAlarmRatePct()) + ")",
+                            ChartGenerator.COLOR_GAMMA
+                    ),
+                    new PdfDocumentBuilder.KpiCard(
+                            "Faults & Tampers",
+                            intFmt.format(totals.totalFaultsAndTamper()),
+                            String.format(Locale.US, "Tamper: %s | Faults: %s",
+                                    intFmt.format(totals.tamper),
+                                    intFmt.format(totals.gammaHighFault + totals.gammaLowFault + totals.neutronHighFault)),
+                            ChartGenerator.COLOR_TAMPER
+                    )
+            ));
+
+            // 1. Alarm Statistics per lane
+            pdf.drawSectionHeader("Alarm Statistics", "Per-lane occupancy, radiation alarm, and EML suppression breakdown", 80f);
+            Map<String, Map<String, String>> alarmTableByLane = new LinkedHashMap<>();
+            for (Map.Entry<String, ReportDataAggregator.ObservationMetrics> entry : perLane.entrySet()) {
+                alarmTableByLane.put(entry.getKey(), formatAlarmRow(entry.getValue(), intFmt));
+            }
+            if (perLane.size() > 1) {
+                String totalKey = "All Selected Lanes (" + perLane.size() + ")";
+                multilineLaneLabels.put(totalKey, totalKey);
+                alarmTableByLane.put(totalKey, formatAlarmRow(totals, intFmt));
+            }
+            tableGenerator.drawLanesTable(pdf, alarmTableByLane, multilineLaneLabels);
+
+            // 2. Fault Statistics per lane
+            pdf.drawSectionHeader("Fault Statistics", "Per-lane state-of-health faults and tamper events", 80f);
+            Map<String, Map<String, String>> faultTableByLane = new LinkedHashMap<>();
+            for (Map.Entry<String, ReportDataAggregator.ObservationMetrics> entry : perLane.entrySet()) {
+                faultTableByLane.put(entry.getKey(), formatFaultRow(entry.getValue(), intFmt));
+            }
+            if (perLane.size() > 1) {
+                String totalKey = "All Selected Lanes (" + perLane.size() + ")";
+                faultTableByLane.put(totalKey, formatFaultRow(totals, intFmt));
+            }
+            tableGenerator.drawLanesTable(pdf, faultTableByLane, multilineLaneLabels);
+
+            pdf.finishAndSave(out);
+        } catch (IOException e) {
+            throw new DataStoreException("Failed to generate Lane Report PDF", e);
+        }
     }
 
     @Override
@@ -54,97 +140,24 @@ public class LaneReport extends Report {
         return ReportCmdType.LANE.name();
     }
 
-    private void addHeader(){
-        document.add(new Paragraph("Lane Report").setFontSize(16).simulateBold());
-        document.add(new Paragraph("Lane UIDs: " + laneUIDs).setFontSize(12));
-        document.add(new Paragraph("\n"));
+    private static Map<String, String> formatAlarmRow(ReportDataAggregator.ObservationMetrics m, NumberFormat intFmt) {
+        Map<String, String> row = new LinkedHashMap<>();
+        row.put("Gamma Alarm", intFmt.format(m.gammaAlarm));
+        row.put("Neutron Alarm", intFmt.format(m.neutronAlarm));
+        row.put("Gamma-Neutron Alarm", intFmt.format(m.gammaNeutronAlarm));
+        row.put("EML Suppressed", intFmt.format(m.emlSuppressed));
+        row.put("Total Occupancies", intFmt.format(m.totalOccupancies));
+        row.put("Alarm Occupancy Rate", Utils.formatPercentage(m.alarmOccupancyRatePct()));
+        row.put("EML Alarm Rate", Utils.formatPercentage(m.emlAlarmRatePct()));
+        return row;
     }
 
-
-    private void addAlarmStatistics(){
-        document.add(new Paragraph("Alarm Statistics"));
-
-        Map<String, Map<String, String>> countsLane = new LinkedHashMap<>();
-
-        for (var laneUID : laneUIDs.split(",")) {
-            var counts = calculateAlarmCounts(laneUID);
-            countsLane.put(laneUID, counts);
-        }
-
-        var table = tableGenerator.addLanesTable(countsLane);
-        if (table == null) {
-            document.add(new Paragraph("Failed to add Alarm Stats table to pdf"));
-            return;
-        }
-
-        document.add(table);
-        document.add(new Paragraph("\n"));
+    private static Map<String, String> formatFaultRow(ReportDataAggregator.ObservationMetrics m, NumberFormat intFmt) {
+        Map<String, String> row = new LinkedHashMap<>();
+        row.put("Tamper", intFmt.format(m.tamper));
+        row.put("Gamma-High", intFmt.format(m.gammaHighFault));
+        row.put("Gamma-Low", intFmt.format(m.gammaLowFault));
+        row.put("Neutron-High", intFmt.format(m.neutronHighFault));
+        return row;
     }
-
-    private void addFaultStatistics(){
-        document.add(new Paragraph("Fault Statistics"));
-
-        Map<String, Map<String, String>> countsLane = new LinkedHashMap<>();
-
-        for (var laneUID : laneUIDs.split(",")){
-            var counts = calculateFaultCounts(laneUID);
-            countsLane.put(laneUID, counts);
-        }
-
-        var table = tableGenerator.addLanesTable(countsLane);
-        if (table == null) {
-            document.add(new Paragraph("Failed to add Fault Stats table to pdf"));
-            return;
-        }
-
-        document.add(table);
-        document.add(new Paragraph("\n"));
-    }
-
-    private Map<String, String> calculateAlarmCounts(String laneUID) {
-        Map<String, String> alarmOccCounts = new LinkedHashMap<>();
-
-        long gammaNeutronAlarmCount = Utils.countObservationsFromLane(laneUID, module, Utils.gammaNeutronAlarmCQL, start, end, RADHelper.DEF_OCCUPANCY);
-        long gammaAlarmCount = Utils.countObservationsFromLane(laneUID, module, Utils.gammaAlarmCQL, start, end, RADHelper.DEF_OCCUPANCY);
-        long neutronAlarmCount = Utils.countObservationsFromLane(laneUID, module, Utils.neutronAlarmCQL, start, end, RADHelper.DEF_OCCUPANCY);
-        long totalOccupancyCount = Utils.countObservationsFromLane(laneUID, module,null, start, end, RADHelper.DEF_OCCUPANCY);
-
-        long emlSuppressedCount = Utils.countObservationsFromLane(laneUID, module, Utils.emlSuppressedCQL, start, end, RADHelper.DEF_EML_ANALYSIS);
-
-
-        long totalAlarmingCount = gammaAlarmCount + neutronAlarmCount + gammaNeutronAlarmCount;
-        long alarmOccupancyAverage = Utils.calculateAlarmingOccRate(totalAlarmingCount, totalOccupancyCount);
-        long emlSuppressedAverage = Utils.calcEMLAlarmRate(emlSuppressedCount, totalAlarmingCount);
-
-        alarmOccCounts.put("Gamma Alarm", String.valueOf(gammaAlarmCount));
-        alarmOccCounts.put("Neutron Alarm", String.valueOf(neutronAlarmCount));
-        alarmOccCounts.put("Gamma-Neutron Alarm", String.valueOf(gammaNeutronAlarmCount));
-        alarmOccCounts.put("EML Suppressed", String.valueOf(emlSuppressedCount));
-        alarmOccCounts.put("Total Occupancies", String.valueOf(totalOccupancyCount));
-        alarmOccCounts.put("Alarm Occupancy Rate", String.valueOf(alarmOccupancyAverage));
-        alarmOccCounts.put("EML Alarm Rate", String.valueOf(emlSuppressedAverage));
-
-        return alarmOccCounts;
-    }
-
-    private Map<String, String> calculateFaultCounts(String laneUID){
-        HashMap<String, String> faultCounts = new LinkedHashMap<>();
-
-        long tamperCount = Utils.countObservationsFromLane(laneUID, module, Utils.tamperCQL, start, end, RADHelper.DEF_TAMPER);
-        long gammaHighFaultCount = Utils.countObservationsFromLane(laneUID, module, Utils.gammaHighFaultCQL, start, end, RADHelper.DEF_GAMMA, RADHelper.DEF_ALARM);
-        long gammaLowFaultCount = Utils.countObservationsFromLane(laneUID, module, Utils.gammaLowFaultCQL, start, end, RADHelper.DEF_GAMMA, RADHelper.DEF_ALARM);
-        long neutronHighFaultCount = Utils.countObservationsFromLane(laneUID, module, Utils.neutronFaultCQL, start, end, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM);
-//        long extendedOccupancyCount = Utils.countObservationsFromLane(laneUID, module, Utils.extendedOccPredicate, start, end, RADHelper.DEF_OCCUPANCY);
-
-        faultCounts.put("Tamper", String.valueOf(tamperCount));
-        faultCounts.put("Gamma-High", String.valueOf(gammaHighFaultCount));
-        faultCounts.put("Gamma-Low", String.valueOf(gammaLowFaultCount));
-        faultCounts.put("Neutron-High", String.valueOf(neutronHighFaultCount));
-//        faultCounts.put("Extended Occupancy", String.valueOf(extendedOccupancyCount));
-//        faultCounts.put("Comm", commsCount);
-//        faultCounts.put("Camera", camCount);
-
-        return faultCounts;
-    }
-
 }

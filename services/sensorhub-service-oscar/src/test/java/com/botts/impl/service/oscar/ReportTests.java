@@ -7,28 +7,56 @@ import com.botts.impl.service.oscar.reports.helpers.*;
 import com.botts.impl.service.oscar.siteinfo.SiteDiagramConfig;
 import net.opengis.swe.v20.DataBlock;
 import net.opengis.swe.v20.DataComponent;
+import com.botts.impl.system.lane.AdjudicationControl;
+import com.botts.impl.system.lane.LaneSystem;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.sensorhub.api.command.CommandData;
+import org.sensorhub.api.command.CommandResult;
+import org.sensorhub.api.command.CommandStatus;
+import org.sensorhub.api.command.CommandStreamInfo;
 import org.sensorhub.api.command.ICommandStatus;
+import org.sensorhub.api.common.BigId;
 import org.sensorhub.api.common.SensorHubException;
+import org.sensorhub.api.data.DataStreamInfo;
 import org.sensorhub.api.data.IObsData;
+import org.sensorhub.api.data.ObsData;
+import org.sensorhub.api.database.IObsSystemDatabase;
 import org.sensorhub.api.datastore.obs.DataStreamFilter;
 import org.sensorhub.api.datastore.obs.ObsFilter;
+import org.sensorhub.api.feature.FeatureId;
 import org.sensorhub.api.module.ModuleEvent;
 import org.sensorhub.api.service.IHttpServer;
 import org.sensorhub.impl.SensorHub;
 import org.sensorhub.impl.database.system.SystemDriverDatabase;
 import org.sensorhub.impl.database.system.SystemDriverDatabaseConfig;
 import org.sensorhub.impl.datastore.h2.MVObsSystemDatabaseConfig;
+import org.sensorhub.impl.datastore.h2.MVObsSystemDatabaseDescriptor;
 import org.sensorhub.impl.module.ModuleRegistry;
 import org.sensorhub.impl.service.HttpServer;
 import org.sensorhub.impl.service.HttpServerConfig;
 import org.sensorhub.impl.service.consys.ConSysApiService;
 import org.sensorhub.impl.service.consys.ConSysApiServiceConfig;
+import org.sensorhub.impl.system.wrapper.SystemWrapper;
 import org.sensorhub.impl.utils.rad.RADHelper;
+import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
+import org.sensorhub.impl.utils.rad.eml.EmlSourceBreakdown;
+import org.sensorhub.impl.utils.rad.model.Adjudication;
+import org.sensorhub.impl.utils.rad.model.Occupancy;
+import org.sensorhub.impl.utils.rad.output.OccupancyOutput;
+import org.sensorhub.impl.sensor.SensorSystem;
+import org.vast.data.TextEncodingImpl;
+import org.vast.sensorML.SMLHelper;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.http.HttpClient;
@@ -41,6 +69,9 @@ import java.util.function.Predicate;
 import static org.junit.Assert.*;
 
 public class ReportTests {
+    @Rule
+    public TemporaryFolder tempBucketDir = new TemporaryFolder();
+
     static SensorHub hub;
     static ModuleRegistry reg;
 
@@ -154,7 +185,7 @@ public class ReportTests {
 
     private BucketServiceConfig createBucketServiceConfig() throws SensorHubException {
         BucketServiceConfig bucketServiceConfig = (BucketServiceConfig) reg.createModuleConfig(new com.botts.impl.service.bucket.Descriptor());
-        bucketServiceConfig.fileStoreRootDir = "oscar-test";
+        bucketServiceConfig.fileStoreRootDir = tempBucketDir.getRoot().getAbsolutePath();
 
         List<String> buckets = new ArrayList<>();
         buckets.add("reports");
@@ -170,6 +201,11 @@ public class ReportTests {
         serviceConfig.autoStart = true;
         serviceConfig.siteDiagramConfig = new SiteDiagramConfig();
         serviceConfig.nodeId = "test-node-id";
+
+        AdjudicationCodeConfig customHold = new AdjudicationCodeConfig();
+        customHold.code = 15;
+        customHold.label = "Port Authority Hold";
+        serviceConfig.customAdjudicationCodes.add(customHold);
 
 //        serviceConfig.databaseID = systemDriverDatabase.getLocalID();
 
@@ -425,6 +461,312 @@ public class ReportTests {
     public void testSendAdjudicationReportCommand() throws URISyntaxException, IOException, InterruptedException {
         var resp = httpClient.send(createAdjReportControlRequest(), HttpResponse.BodyHandlers.ofString());
         assertEquals(resp.statusCode(), 200);
+    }
+
+    private static class TestAdjudicationControl extends AdjudicationControl {
+        TestAdjudicationControl(LaneSystem lane) {
+            super(lane);
+        }
+    }
+
+    private String readBucketPdfText(String relativePath) throws Exception {
+        String key = relativePath.startsWith("reports/") ? relativePath.substring("reports/".length()) : relativePath;
+        try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", key);
+             PDDocument doc = Loader.loadPDF(in.readAllBytes())) {
+            return new PDFTextStripper().getText(doc);
+        }
+    }
+
+    @Test
+    public void eventSubtypesUseDistinctPathsAndPreserveEventTypeHeader() throws Exception {
+        Instant windowStart = Instant.parse("2026-11-01T00:00:00Z");
+        Instant windowEnd = Instant.parse("2026-11-03T00:00:00Z");
+        DataComponent commandDesc = reportControl.getCommandDescription().copy();
+
+        Map<EventReportType, String> paths = new EnumMap<>(EventReportType.class);
+        int cmdId = 100;
+        for (EventReportType subtype : List.of(EventReportType.ALARMS, EventReportType.SOH, EventReportType.ALARMS_OCCUPANCIES)) {
+            DataBlock cmd = commandDesc.createDataBlock();
+            cmd.setStringValue(0, ReportCmdType.EVENT.name());
+            cmd.setTimeStamp(1, windowStart);
+            cmd.setTimeStamp(2, windowEnd);
+            cmd.setStringValue(3, "urn:osh:system:lane:lane-50");
+            cmd.setStringValue(4, subtype.name());
+
+            var status = reportControl.submitCommand(new CommandData(cmdId++, cmd)).get();
+            assertEquals(ICommandStatus.CommandStatusCode.ACCEPTED, status.getStatusCode());
+            String path = status.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue();
+            assertTrue(path.endsWith(".pdf"));
+            paths.put(subtype, path);
+
+            String text = readBucketPdfText(path);
+            assertTrue(text.contains("Event Report"));
+            assertTrue(text.contains("Event Type: " + subtype.name()));
+        }
+
+        assertEquals("Each EventReportType subtype must write to a distinct PDF path", 3, new HashSet<>(paths.values()).size());
+    }
+
+    @Test
+    public void populatedReportsRenderExactCountsDecimalRatesCustomCodesAndOverwriteFreshly() throws Exception {
+        Path dbFile = Files.createTempFile("oscar-report-test-", ".dat");
+        try {
+            var dbConfig = (MVObsSystemDatabaseConfig) reg.createModuleConfig(new MVObsSystemDatabaseDescriptor());
+            dbConfig.id = UUID.randomUUID().toString();
+            dbConfig.databaseNum = 42;
+            dbConfig.storagePath = dbFile.toString();
+            var dbModule = reg.loadModule(dbConfig);
+            dbModule.init();
+            dbModule.start();
+            IObsSystemDatabase db = (IObsSystemDatabase) dbModule;
+
+            String laneUid = "urn:osh:system:lane:lane-50";
+            var sml = new SMLHelper();
+            var sysProcess = sml.createPhysicalSystem()
+                    .uniqueID(laneUid)
+                    .name("Lane 50")
+                    .build();
+            BigId laneSysId = db.getSystemDescStore().add(new SystemWrapper(sysProcess)).getInternalID();
+
+            @SuppressWarnings({"rawtypes", "unchecked"})
+            DataComponent occStruct = new OccupancyOutput(new SensorSystem()).getRecordDescription();
+            BigId occDsId = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                    .withSystem(new FeatureId(laneSysId, laneUid))
+                    .withName("occupancy")
+                    .withRecordDescription(occStruct)
+                    .withRecordEncoding(new TextEncodingImpl())
+                    .build()).getInternalID();
+
+            LaneSystem dummyLane = new LaneSystem();
+            dummyLane.setParentHub(hub);
+            TestAdjudicationControl adjControl = new TestAdjudicationControl(dummyLane);
+
+            BigId cmdStreamId = db.getCommandStore().getCommandStreams().add(new CommandStreamInfo.Builder()
+                    .withSystem(new FeatureId(laneSysId, laneUid))
+                    .withName(AdjudicationControl.NAME)
+                    .withRecordDescription(adjControl.getCommandDescription())
+                    .withRecordEncoding(new TextEncodingImpl())
+                    .withResultDescription(adjControl.getResultDescription())
+                    .withResultEncoding(new TextEncodingImpl())
+                    .build()).getInternalID();
+
+            Instant windowStart = Instant.parse("2026-11-05T00:00:00Z");
+            Instant windowEnd = Instant.parse("2026-11-06T00:00:00Z");
+
+            // Insert 5 occupancies: 2 Gamma alarms, 3 non-alarming -> 40.00% Alarm Occupancy Rate
+            for (int i = 0; i < 5; i++) {
+                Instant t = windowStart.plusSeconds(600L * (i + 1));
+                Occupancy occ = new Occupancy.Builder()
+                        .samplingTime(t.getEpochSecond())
+                        .occupancyCount(i + 1)
+                        .startTime(t.getEpochSecond() - 5)
+                        .endTime(t.getEpochSecond())
+                        .gammaAlarm(i < 2)
+                        .neutronAlarm(false)
+                        .maxGammaCount(i < 2 ? 2400 : 120)
+                        .build();
+                db.getObservationStore().add(new ObsData.Builder()
+                        .withDataStream(occDsId)
+                        .withPhenomenonTime(t)
+                        .withResultTime(t)
+                        .withResult(Occupancy.fromOccupancy(occ))
+                        .build());
+            }
+
+            // Record 2 completed adjudications: 1 custom code (15) + 1 EML automated release (9999)
+            var createResultMethod = AdjudicationControl.class.getDeclaredMethod("createResultData", Adjudication.class, String.class);
+            createResultMethod.setAccessible(true);
+
+            Adjudication customAdj = new Adjudication.Builder()
+                    .feedback("Referred to port supervisor")
+                    .adjudicationCode(15)
+                    .isotopes(List.of("Cesium137"))
+                    .secondaryInspectionStatus(Adjudication.SecondaryInspectionStatus.COMPLETED)
+                    .filePaths(List.of("/buckets/reports/spec1.n42"))
+                    .occupancyObsId("obs-custom-15")
+                    .vehicleId("TRK-150")
+                    .build();
+            BigId cmdKey1 = db.getCommandStore().add(new CommandData.Builder()
+                    .withCommandStream(cmdStreamId)
+                    .withIssueTime(windowStart.plusSeconds(900))
+                    .withSender("operator1")
+                    .withParams(Adjudication.fromAdjudication(customAdj))
+                    .build());
+            DataBlock resBlock1 = (DataBlock) createResultMethod.invoke(adjControl, customAdj, "operator1");
+            db.getCommandStatusStore().add(new CommandStatus.Builder()
+                    .withCommand(cmdKey1)
+                    .withReportTime(windowStart.plusSeconds(905))
+                    .withStatusCode(ICommandStatus.CommandStatusCode.COMPLETED)
+                    .withResult(CommandResult.withData(resBlock1))
+                    .build());
+
+            EmlEvaluationResult emlEval = new EmlEvaluationResult(
+                    "1.0.2", "ERNIE", 0.50, "PORT-1", 50L, windowStart.plusSeconds(1500).toEpochMilli(), 2L,
+                    "ALARM", true, false, false, "RELEASE", false, "",
+                    0.02, 0.98, false, false, 5, 18.2, "",
+                    List.of(),
+                    new EmlSourceBreakdown("NORM", "ERNIE", 0, 0, 0, 0, 0.03, 0.95, 0.02)
+            );
+            Adjudication emlAdj = new Adjudication.Builder()
+                    .feedback(emlEval.toAdjudicationFeedback())
+                    .adjudicationCode(Adjudication.EML_NON_THREAT_CODE)
+                    .isotopes(List.of("Potassium"))
+                    .secondaryInspectionStatus(Adjudication.SecondaryInspectionStatus.NONE)
+                    .filePaths(List.of())
+                    .occupancyObsId("obs-eml-9999")
+                    .vehicleId("TRK-999")
+                    .build();
+            BigId cmdKey2 = db.getCommandStore().add(new CommandData.Builder()
+                    .withCommandStream(cmdStreamId)
+                    .withIssueTime(windowStart.plusSeconds(1500))
+                    .withSender("EML")
+                    .withParams(Adjudication.fromAdjudication(emlAdj))
+                    .build());
+            DataBlock resBlock2 = (DataBlock) createResultMethod.invoke(adjControl, emlAdj, "EML");
+            db.getCommandStatusStore().add(new CommandStatus.Builder()
+                    .withCommand(cmdKey2)
+                    .withReportTime(windowStart.plusSeconds(1502))
+                    .withStatusCode(ICommandStatus.CommandStatusCode.COMPLETED)
+                    .withResult(CommandResult.withData(resBlock2))
+                    .build());
+
+            DataComponent commandDesc = reportControl.getCommandDescription().copy();
+
+            // 1. Verify Lane Report renders decimal rate 40.00%, then overwrites to 33.33% after a 6th occupancy arrives
+            DataBlock laneCmd = commandDesc.createDataBlock();
+            laneCmd.setStringValue(0, ReportCmdType.LANE.name());
+            laneCmd.setTimeStamp(1, windowStart);
+            laneCmd.setTimeStamp(2, windowEnd);
+            laneCmd.setStringValue(3, laneUid);
+            laneCmd.setStringValue(4, EventReportType.NONE.name());
+
+            var laneRes1 = reportControl.submitCommand(new CommandData(201, laneCmd)).get();
+            String lanePdfPath = laneRes1.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue();
+            String laneText1 = readBucketPdfText(lanePdfPath);
+            assertTrue(laneText1.contains("Lane Report"));
+            assertTrue(laneText1.contains("lane-50"));
+            assertTrue("Decimal alarm occupancy rate should be rendered instead of integer-truncated 0", laneText1.contains("40.00%"));
+
+            // Add 3 more non-alarming occupancies (total 8 occupancies, 2 alarms -> 25.00%) and re-run same report
+            for (int i = 5; i < 8; i++) {
+                Instant t = windowStart.plusSeconds(600L * (i + 1));
+                Occupancy occ = new Occupancy.Builder()
+                        .samplingTime(t.getEpochSecond())
+                        .occupancyCount(i + 1)
+                        .startTime(t.getEpochSecond() - 5)
+                        .endTime(t.getEpochSecond())
+                        .gammaAlarm(false)
+                        .neutronAlarm(false)
+                        .maxGammaCount(110)
+                        .build();
+                db.getObservationStore().add(new ObsData.Builder()
+                        .withDataStream(occDsId)
+                        .withPhenomenonTime(t)
+                        .withResultTime(t)
+                        .withResult(Occupancy.fromOccupancy(occ))
+                        .build());
+            }
+
+            var laneRes2 = reportControl.submitCommand(new CommandData(202, laneCmd)).get();
+            String lanePdfPath2 = laneRes2.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue();
+            assertEquals(lanePdfPath, lanePdfPath2);
+            String laneText2 = readBucketPdfText(lanePdfPath2);
+            assertTrue("Re-generated report must overwrite cached PDF with updated 25.00% rate", laneText2.contains("25.00%"));
+
+            // 2. Verify Adjudication Report includes custom code 15, EML Non-Threat, formatted EML summary, and Landscape details page
+            DataBlock adjCmd = commandDesc.createDataBlock();
+            adjCmd.setStringValue(0, ReportCmdType.ADJUDICATION.name());
+            adjCmd.setTimeStamp(1, windowStart);
+            adjCmd.setTimeStamp(2, windowEnd);
+            adjCmd.setStringValue(3, laneUid);
+            adjCmd.setStringValue(4, EventReportType.NONE.name());
+
+            var adjRes = reportControl.submitCommand(new CommandData(203, adjCmd)).get();
+            String adjPdfPath = adjRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue();
+            String adjKey = adjPdfPath.startsWith("reports/") ? adjPdfPath.substring("reports/".length()) : adjPdfPath;
+            try (InputStream in = oscarServiceModule.getBucketService().getBucketStore().getObject("reports", adjKey);
+                 PDDocument doc = Loader.loadPDF(in.readAllBytes())) {
+                assertTrue("Adjudication report with details should have at least 2 pages (Portrait + Landscape)", doc.getNumberOfPages() >= 2);
+                var lastPage = doc.getPage(doc.getNumberOfPages() - 1);
+                assertEquals("Adjudication Details page should be Landscape (792 pt wide)", 792f, lastPage.getMediaBox().getWidth(), 0.5f);
+
+                String adjText = new PDFTextStripper().getText(doc);
+                assertTrue(adjText.contains("Adjudication Report"));
+                assertTrue(adjText.contains("lane-50"));
+                assertTrue(adjText.contains("Code 15: Port Authority Hold"));
+                assertTrue(adjText.contains("EML Non-Threat"));
+                assertTrue(adjText.contains("Cs-137 (Cesium137)"));
+                assertTrue(adjText.contains("TRK-150"));
+                assertTrue(adjText.contains("TRK-999"));
+                assertTrue(adjText.contains("Source: NORM"));
+                assertFalse(adjText.contains("\"probabilityNonEmitting\""));
+            }
+
+            // 3. Verify populated RDS Site Report renders decimal alarm rate and storage volumes
+            DataBlock siteCmd = commandDesc.createDataBlock();
+            siteCmd.setStringValue(0, ReportCmdType.RDS_SITE.name());
+            siteCmd.setTimeStamp(1, windowStart);
+            siteCmd.setTimeStamp(2, windowEnd);
+            siteCmd.setStringValue(3, laneUid);
+            siteCmd.setStringValue(4, EventReportType.NONE.name());
+            var siteRes = reportControl.submitCommand(new CommandData(204, siteCmd)).get();
+            String siteText = readBucketPdfText(siteRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue());
+            assertTrue(siteText.contains("RDS Site Report"));
+            assertTrue(siteText.contains("25.00%"));
+            assertTrue(siteText.contains("Storage Availability"));
+
+            // 4. Verify populated 1-day and 5-day Event Reports (ALARMS_OCCUPANCIES)
+            DataBlock event1dCmd = commandDesc.createDataBlock();
+            event1dCmd.setStringValue(0, ReportCmdType.EVENT.name());
+            event1dCmd.setTimeStamp(1, windowStart);
+            event1dCmd.setTimeStamp(2, windowEnd);
+            event1dCmd.setStringValue(3, laneUid);
+            event1dCmd.setStringValue(4, EventReportType.ALARMS_OCCUPANCIES.name());
+            var event1dRes = reportControl.submitCommand(new CommandData(205, event1dCmd)).get();
+            String event1dText = readBucketPdfText(event1dRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue());
+            assertTrue(event1dText.contains("Event Report"));
+            assertTrue(event1dText.contains("Event Type: ALARMS_OCCUPANCIES"));
+            assertTrue(event1dText.contains("Occupancies: 8"));
+
+            // Seed 4 prior days of varied traffic + alarms for multi-day dual-axis Event Report verification
+            for (int dayOffset = 1; dayOffset <= 4; dayOffset++) {
+                Instant dayBase = windowStart.minusSeconds(86400L * dayOffset);
+                int dayOccCount = 40 + dayOffset * 15;
+                for (int k = 0; k < dayOccCount; k++) {
+                    Instant t = dayBase.plusSeconds(300L * (k + 1));
+                    boolean g = (k < (dayOffset % 3) + 1);
+                    boolean n = (k == 0 && dayOffset % 2 == 0);
+                    Occupancy occ = new Occupancy.Builder()
+                            .samplingTime(t.getEpochSecond())
+                            .occupancyCount(k + 1)
+                            .startTime(t.getEpochSecond() - 4)
+                            .endTime(t.getEpochSecond())
+                            .gammaAlarm(g)
+                            .neutronAlarm(n)
+                            .maxGammaCount(g ? 1950 : 105)
+                            .build();
+                    db.getObservationStore().add(new ObsData.Builder()
+                            .withDataStream(occDsId)
+                            .withPhenomenonTime(t)
+                            .withResultTime(t)
+                            .withResult(Occupancy.fromOccupancy(occ))
+                            .build());
+                }
+            }
+
+            DataBlock event5dCmd = commandDesc.createDataBlock();
+            event5dCmd.setStringValue(0, ReportCmdType.EVENT.name());
+            event5dCmd.setTimeStamp(1, windowStart.minusSeconds(86400L * 4));
+            event5dCmd.setTimeStamp(2, windowEnd);
+            event5dCmd.setStringValue(3, laneUid);
+            event5dCmd.setStringValue(4, EventReportType.ALARMS_OCCUPANCIES.name());
+            var event5dRes = reportControl.submitCommand(new CommandData(206, event5dCmd)).get();
+            String event5dText = readBucketPdfText(event5dRes.getResult().getInlineRecords().stream().findFirst().orElseThrow().getStringValue());
+            assertTrue(event5dText.contains("Event Report"));
+            assertTrue(event5dText.contains("Total Occupancies"));
+        } finally {
+            Files.deleteIfExists(dbFile);
+        }
     }
 
 

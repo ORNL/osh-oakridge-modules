@@ -10,8 +10,7 @@ dependencies {
 
     implementation project(':sensorhub-system-lane') // Lane for loading via spreadsheet
     implementation project(':sensorhub-service-bucket') // service for file system
-    implementation("jfree:jfreechart:1.0.13") // charts
-    implementation("com.itextpdf:itext7-core:9.3.0") //pdfs
+    implementation("org.apache.pdfbox:pdfbox:3.0.3") // vector PDF generation (Apache-2.0)
 
     embeddedApi 'org.bytedeco:ffmpeg-platform:7.1-1.5.11'
     implementation project(':sensorhub-driver-ffmpeg')

@@ -1,342 +1,339 @@
 package com.botts.impl.service.oscar;
 
 import com.botts.impl.service.oscar.reports.helpers.ChartGenerator;
+import com.botts.impl.service.oscar.reports.helpers.PdfDocumentBuilder;
+import com.botts.impl.service.oscar.reports.helpers.ReportDataAggregator;
 import com.botts.impl.service.oscar.reports.helpers.TableGenerator;
-import com.itextpdf.io.image.ImageDataFactory;
-import com.itextpdf.kernel.pdf.PdfDocument;
-import com.itextpdf.kernel.pdf.PdfWriter;
-import com.itextpdf.layout.Document;
-import com.itextpdf.layout.element.Image;
-import org.jfree.chart.axis.AxisLocation;
-import org.jfree.chart.axis.NumberAxis;
-import org.jfree.chart.axis.NumberTickUnit;
-import org.jfree.chart.plot.CategoryPlot;
-import org.jfree.chart.plot.PlotOrientation;
-import org.jfree.chart.renderer.category.BarRenderer;
-import org.jfree.data.category.DefaultCategoryDataset;
-import org.junit.Before;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.text.PDFTextStripper;
+import org.junit.Rule;
 import org.junit.Test;
-import org.sensorhub.api.common.SensorHubException;
+import org.junit.rules.TemporaryFolder;
+import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
+import org.sensorhub.impl.utils.rad.eml.EmlSourceBreakdown;
 
-import javax.imageio.ImageIO;
-import java.awt.*;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.text.DecimalFormat;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
-import java.util.*;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
-import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class ReportHelperTests {
 
-    public static Instant now = Instant.now();
-    public static Instant begin = now.minus(365, ChronoUnit.DAYS);
-    public static Instant end = now;
-
+    @Rule
+    public TemporaryFolder tempFolder = new TemporaryFolder();
 
     @Test
-    public void TestLanesTable(){
-        String dest = "table_lanes_test.pdf";
+    public void TestLanesTable() throws IOException {
+        File dest = tempFolder.newFile("table_lanes_test.pdf");
 
-        try{
-            PdfWriter pdfWriter = new PdfWriter(dest);
-            PdfDocument pdfDocument = new PdfDocument(pdfWriter);
-            Document document = new Document(pdfDocument);
+        Map<String, String> testData1 = new LinkedHashMap<>();
+        testData1.put("Gamma Alarm", "15");
+        testData1.put("Neutron Alarm", "10");
+        testData1.put("Gamma-Neutron Alarm", "5");
+        testData1.put("EML Suppressed", "6");
+        testData1.put("Total Occupancies", "200");
+        testData1.put("Alarm Occupancy Rate", "15.00%");
+        testData1.put("EML Alarm Rate", "16.67%");
 
-            Map<String, String> testData1 = new HashMap<>();
-            testData1.put("Alarm Occupancy Rate", "1");
-            testData1.put("Neutron Alarm", "10");
-            testData1.put("Gamma Alarm", "15");
-            testData1.put("Gamma-Neutron Alarm", "5");
-            testData1.put("Total Occupancies", "20");
-            testData1.put("Primary Occupancies", "20");
-            testData1.put("Another Name", "20");
-            testData1.put("Total", "20");
+        Map<String, String> testData2 = new LinkedHashMap<>();
+        testData2.put("Gamma Alarm", "2");
+        testData2.put("Neutron Alarm", "0");
+        testData2.put("Gamma-Neutron Alarm", "1");
+        testData2.put("EML Suppressed", "1");
+        testData2.put("Total Occupancies", "120");
+        testData2.put("Alarm Occupancy Rate", "2.50%");
+        testData2.put("EML Alarm Rate", "25.00%");
 
-            Map<String, String> testData2 = new HashMap<>();
-            testData2.put("Alarm Occupancy Rate", "1");
-            testData2.put("Neutron Alarm", "10");
-            testData2.put("Gamma Alarm", "15");
-            testData2.put("Gamma-Neutron Alarm", "5");
-            testData2.put("Total Occupancies", "20");
-            testData2.put("Primary Occupancies", "20");
-            testData2.put("Another Name", "20");
-            testData2.put("Total", "20");
+        Map<String, Map<String, String>> testData = new LinkedHashMap<>();
+        testData.put("urn:osh:system:lane:lane-1", testData1);
+        testData.put("urn:osh:system:lane:lane-2", testData2);
 
-            Map<String, Map<String, String>> testData = new HashMap<>();
-            testData.put("uid:lane:1", testData1);
-            testData.put("uid:lane:2", testData2);
+        Map<String, String> labels = Map.of(
+                "urn:osh:system:lane:lane-1", "Lane 1\nurn:osh:system:lane:lane-1",
+                "urn:osh:system:lane:lane-2", "Lane 2\nurn:osh:system:lane:lane-2"
+        );
 
-            TableGenerator tableGenerator = new TableGenerator();
-            document.add(tableGenerator.addLanesTable(testData));
-            document.close();
+        TableGenerator tableGenerator = new TableGenerator();
+        try (FileOutputStream out = new FileOutputStream(dest);
+             PdfDocumentBuilder pdf = new PdfDocumentBuilder("Lane Report", "test-node")) {
+            tableGenerator.drawLanesTable(pdf, testData, labels);
+            pdf.finishAndSave(out);
+        }
 
-            System.out.println("PDF Created with table: "+ dest);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        try (PDDocument loaded = Loader.loadPDF(dest)) {
+            assertEquals(1, loaded.getNumberOfPages());
+            String text = new PDFTextStripper().getText(loaded);
+            assertTrue(text.contains("Lane 1"));
+            assertTrue(text.contains("urn:osh:system:lane:lane-1"));
+            assertTrue(text.contains("15.00%"));
+            assertTrue(text.contains("16.67%"));
+            assertTrue(text.contains("Page 1 of 1"));
+            assertZeroRasterImages(loaded);
         }
     }
 
     @Test
-    public void TestTable(){
-        String dest = "table_test.pdf";
+    public void TestTable() throws IOException {
+        File dest = tempFolder.newFile("table_test.pdf");
 
-        try{
-            PdfWriter pdfWriter = new PdfWriter(dest);
-            PdfDocument pdfDocument = new PdfDocument(pdfWriter);
-            Document document = new Document(pdfDocument);
+        Map<String, String> testData = new LinkedHashMap<>();
+        testData.put("Gamma Alarm", "15");
+        testData.put("Neutron Alarm", "10");
+        testData.put("Gamma-Neutron Alarm", "5");
+        testData.put("Total Occupancies", "200");
+        testData.put("Alarm Occupancy Rate", "15.00%");
+        testData.put("EML Suppressed", "5");
+        testData.put("EML Alarm Rate", "14.29%");
 
-            Map<String, String> testData1 = new HashMap<>();
-            testData1.put("Alarm Occupancy Rate", "1");
-            testData1.put("Neutron Alarm", "10");
-            testData1.put("Gamma Alarm", "15");
-            testData1.put("Gamma-Neutron Alarm", "5");
-            testData1.put("Total Occupancies", "20");
-            testData1.put("Primary Occupancies", "20");
-            testData1.put("Another Name", "20");
-            testData1.put("Total", "20");
+        TableGenerator tableGenerator = new TableGenerator();
+        try (FileOutputStream out = new FileOutputStream(dest);
+             PdfDocumentBuilder pdf = new PdfDocumentBuilder("RDS Site Report", "test-node")) {
+            tableGenerator.drawSummaryTable(pdf, testData);
+            pdf.finishAndSave(out);
+        }
 
-            TableGenerator tableGenerator = new TableGenerator();
-            document.add(tableGenerator.addTable(testData1));
-            document.close();
-
-            System.out.println("PDF Created with table: "+ dest);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        try (PDDocument loaded = Loader.loadPDF(dest)) {
+            String text = new PDFTextStripper().getText(loaded).replaceAll("\\s+", " ");
+            assertTrue(text.contains("Alarm Occupancy Rate"));
+            assertTrue(text.contains("15.00%"));
+            assertZeroRasterImages(loaded);
         }
     }
 
     @Test
-    public void TestBarChart(){
-        String dest = "chart_test1.pdf";
+    public void TestBarChart() throws IOException {
+        File dest = tempFolder.newFile("chart_test1.pdf");
 
-        try{
-            PdfWriter pdfWriter = new PdfWriter(dest);
-            PdfDocument pdfDocument = new PdfDocument(pdfWriter);
-            Document document = new Document(pdfDocument);
+        List<ChartGenerator.HorizontalBarItem> items = List.of(
+                new ChartGenerator.HorizontalBarItem("Code 1: Contraband Found", 10.0, "5 (10.0%)", ChartGenerator.GROUP_REAL_ALARM, true),
+                new ChartGenerator.HorizontalBarItem("Code 3: Medical Isotope Found", 16.0, "8 (16.0%)", ChartGenerator.GROUP_INNOCENT, true),
+                new ChartGenerator.HorizontalBarItem("Code 5: Declared Shipment of Radioactive Material", 0.0, "0 (0.0%)", ChartGenerator.GROUP_INNOCENT, false),
+                new ChartGenerator.HorizontalBarItem("Code 6: Physical Inspection Negative", 12.0, "6 (12.0%)", ChartGenerator.GROUP_FALSE_ALARM, true),
+                new ChartGenerator.HorizontalBarItem("EML Non-Threat", 62.0, "31 (62.0%)", ChartGenerator.GROUP_AUTOMATED, true)
+        );
 
-            DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+        List<ChartGenerator.LegendItem> legend = List.of(
+                new ChartGenerator.LegendItem("Real Alarm", ChartGenerator.GROUP_REAL_ALARM),
+                new ChartGenerator.LegendItem("Innocent Alarm", ChartGenerator.GROUP_INNOCENT),
+                new ChartGenerator.LegendItem("False Alarm", ChartGenerator.GROUP_FALSE_ALARM),
+                new ChartGenerator.LegendItem("Automated", ChartGenerator.GROUP_AUTOMATED)
+        );
 
-            dataset.addValue((9.0 / 50) * 100, "Other", "No Disposition");
-            dataset.addValue((5.0 / 50) * 100, "Real Alarm", "Code 1: Contraband Found");
-            dataset.addValue((3.0 / 50) * 100, "Real Alarm", "Code 2: Other");
-            dataset.addValue((8.0 / 50) * 100, "Innocent Alarm", "Code 3: Medical Isotope Found");
-            dataset.addValue((5.0 / 50) * 100, "Innocent Alarm", "Code 4: NORM Found");
-            dataset.addValue(0, "Innocent Alarm", "Code 5: Declared Shipment of Radioactive Material");
-            dataset.addValue((6.0 / 50) * 100, "False Alarm", "Code 6: Physical Inspection Negative");
-            dataset.addValue((5.0 / 50) * 100, "False Alarm", "Code 7: RIID/ASP Indicates Background Only");
-            dataset.addValue((2.0 / 50) * 100, "False Alarm", "Code 8: Other");
-            dataset.addValue((4.0 / 50) * 100, "Test/Maintenance",  "Code 9: Authorized Test, Maintenance, or Training Activity");
-            dataset.addValue((3.0 / 50) * 100, "Tamper/Fault",  "Code 10: Unauthorized Activity");
-
-            String title = "Test Chart";
-            String yLabel = "% of Total Number of Records";
-
-            ChartGenerator chartGenerator = new ChartGenerator(new OSCARServiceModule());
-
-            var chart = chartGenerator.createChart(
-                    title,
-                    null,
-                    yLabel,
-                    dataset,
-                    "bar",
-                    PlotOrientation.HORIZONTAL
+        ChartGenerator chartGenerator = new ChartGenerator();
+        try (FileOutputStream out = new FileOutputStream(dest);
+             PdfDocumentBuilder pdf = new PdfDocumentBuilder("Adjudication Report", "test-node")) {
+            chartGenerator.drawHorizontalBarChart(
+                    pdf,
+                    "Disposition",
+                    "% of Total Number of Records",
+                    items,
+                    legend,
+                    true,
+                    false
             );
 
-            assertNotNull(chart);
+            // Also verify zero-count isotope horizontal bar chart never emits 0.0000000 ticks
+            List<ChartGenerator.HorizontalBarItem> zeroIsoItems = new ArrayList<>();
+            for (Map.Entry<String, String> e : ReportDataAggregator.STANDARD_ISOTOPES.entrySet()) {
+                zeroIsoItems.add(new ChartGenerator.HorizontalBarItem(
+                        e.getKey() + " (" + e.getValue() + ")", 0.0, "0", ChartGenerator.COLOR_NEUTRON, false));
+            }
+            chartGenerator.drawHorizontalBarChart(
+                    pdf,
+                    "Isotope Results",
+                    "Count",
+                    zeroIsoItems,
+                    List.of(new ChartGenerator.LegendItem("Count", ChartGenerator.COLOR_NEUTRON)),
+                    false,
+                    true
+            );
+            pdf.finishAndSave(out);
+        }
 
-            CategoryPlot plot = chart.getCategoryPlot();
-            plot.setRangeAxisLocation(AxisLocation.BOTTOM_OR_LEFT);
-
-            BarRenderer renderer = (BarRenderer) plot.getRenderer();
-            renderer.setSeriesPaint(dataset.getRowIndex("Other"), Color.GRAY);
-            renderer.setSeriesPaint(dataset.getRowIndex("Real Alarm"), Color.RED);
-            renderer.setSeriesPaint(dataset.getRowIndex("Innocent Alarm"), Color.BLUE);
-            renderer.setSeriesPaint(dataset.getRowIndex("False Alarm"), Color.GREEN);
-            renderer.setSeriesPaint(dataset.getRowIndex("Test/Maintenance"), Color.GRAY);
-            renderer.setSeriesPaint(dataset.getRowIndex("Tamper/Fault"), new Color(128, 0, 128, 255));
-            renderer.setItemMargin(0.05);
-
-            NumberAxis rangeAxis = (NumberAxis) plot.getRangeAxis();
-            rangeAxis.setNumberFormatOverride(new DecimalFormat("0'%'"));
-            rangeAxis.setTickUnit(new NumberTickUnit(10));
-
-            BufferedImage bufferedImage = chart.createBufferedImage(1200, 600);
-            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            ImageIO.write(bufferedImage, "png", byteArrayOutputStream);
-
-            byte[] imageBytes = byteArrayOutputStream.toByteArray();
-            Image image = new Image(ImageDataFactory.create(imageBytes)).setAutoScale(true);
-
-            document.add(image);
-
-            document.close();
-
-            System.out.println("PDF created with chart: "+ dest);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        try (PDDocument loaded = Loader.loadPDF(dest)) {
+            String text = new PDFTextStripper().getText(loaded);
+            assertTrue(text.contains("Disposition"));
+            assertTrue(text.contains("31 (62.0%)"));
+            assertTrue(text.contains("Cs-137 (Cesium137)"));
+            assertFalse("Zero-count axis should never render fractional 0.0000000 ticks", text.contains("0.00000"));
+            assertZeroRasterImages(loaded);
         }
     }
 
     @Test
-    public void TestStackedBarChart(){
-        String dest = "stacked_bar_chart_test.pdf";
+    public void TestStackedBarChart() throws IOException {
+        File dest = tempFolder.newFile("stacked_bar_chart_test.pdf");
 
-        try{
-            PdfWriter pdfWriter = new PdfWriter(dest);
-            PdfDocument pdfDocument = new PdfDocument(pdfWriter);
-            Document document = new Document(pdfDocument);
+        List<String> dates = new ArrayList<>();
+        List<Long> gamma = new ArrayList<>();
+        List<Long> gn = new ArrayList<>();
+        List<Long> neutron = new ArrayList<>();
+        List<Long> eml = new ArrayList<>();
 
-            int days = 10;
+        LocalDate base = LocalDate.of(2026, 10, 20);
+        for (int i = 0; i < 10; i++) {
+            dates.add(base.plusDays(i).toString());
+            gamma.add((long) (3 + i));
+            gn.add((long) (i % 3));
+            neutron.add((long) (1 + (i % 2)));
+            eml.add((long) (2 + (i % 4)));
+        }
 
-            Map<Instant, Long> gammaDaily = generateFakeData(days, 10, 50);
-            Map<Instant, Long> gammaNeutronDaily = generateFakeData(days, 20, 60);
-            Map<Instant, Long> neutronDaily = generateFakeData(days, 5, 30);
-            Map<Instant, Long> emlSuppressedDaily = generateFakeData(days, 0, 10);
-
-
-            DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-            for(Map.Entry<Instant, Long> entry : gammaDaily.entrySet()){
-                dataset.addValue(entry.getValue(), "Gamma", formatter.format(entry.getKey()));
-            }
-
-            for(Map.Entry<Instant, Long> entry : gammaNeutronDaily.entrySet()){
-                dataset.addValue(entry.getValue(), "Gamma-Neutron",  formatter.format(entry.getKey()));
-            }
-
-            for(Map.Entry<Instant, Long> entry : neutronDaily.entrySet()){
-                dataset.addValue(entry.getValue(), "Neutron",  formatter.format(entry.getKey()));
-            }
-
-            for(Map.Entry<Instant, Long> entry : emlSuppressedDaily.entrySet()){
-                dataset.addValue(entry.getValue(), "EML-Suppressed",  formatter.format(entry.getKey()));
-            }
-
-            String title = "Test Chart";
-            String yLabel = "Count";
-            String xLabel = "Date";
-
-            ChartGenerator chartGenerator = new ChartGenerator(new OSCARServiceModule());
-            var chart = chartGenerator.createStackedBarChart(
-                    title,
-                    xLabel,
-                    yLabel,
-                    dataset
+        ChartGenerator chartGenerator = new ChartGenerator();
+        try (FileOutputStream out = new FileOutputStream(dest);
+             PdfDocumentBuilder pdf = new PdfDocumentBuilder("Event Report", "test-node")) {
+            chartGenerator.drawStackedBarChart(
+                    pdf,
+                    "Alarms",
+                    "Date (UTC)",
+                    "Count",
+                    dates,
+                    List.of(
+                            new ChartGenerator.StackedSeries("Gamma", ChartGenerator.COLOR_GAMMA, gamma),
+                            new ChartGenerator.StackedSeries("Gamma-Neutron", ChartGenerator.COLOR_GAMMA_NEUTRON, gn),
+                            new ChartGenerator.StackedSeries("Neutron", ChartGenerator.COLOR_NEUTRON, neutron),
+                            new ChartGenerator.StackedSeries("EML-Suppressed", ChartGenerator.COLOR_EML_SUPPRESSED, eml)
+                    )
             );
+            pdf.finishAndSave(out);
+        }
 
-            assertNotNull(chart);
-
-            BufferedImage bufferedImage = chart.createBufferedImage(1200, 600);
-            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            ImageIO.write(bufferedImage, "png", byteArrayOutputStream);
-
-            byte[] imageBytes = byteArrayOutputStream.toByteArray();
-            Image image = new Image(ImageDataFactory.create(imageBytes)).setAutoScale(true);
-
-            document.add(image);
-
-            document.close();
-
-            System.out.println("PDF created with chart: "+ dest);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        try (PDDocument loaded = Loader.loadPDF(dest)) {
+            String text = new PDFTextStripper().getText(loaded);
+            assertTrue(text.contains("Alarms"));
+            assertTrue(text.contains("2026-10-20"));
+            assertTrue(text.contains("2026-10-29"));
+            assertZeroRasterImages(loaded);
         }
     }
-
-    private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault());
 
     @Test
-    public void TestStackedBarLineOverlayChart(){
-        String dest = "bar_line_chart.pdf";
+    public void TestStackedBarLineOverlayChart() throws IOException {
+        File dest = tempFolder.newFile("bar_line_chart.pdf");
 
-        try{
-            PdfWriter pdfWriter = new PdfWriter(dest);
-            PdfDocument pdfDocument = new PdfDocument(pdfWriter);
-            Document document = new Document(pdfDocument);
-
-            int days = 10;
-
-            Map<Instant, Long> gammaDaily = generateFakeData(days, 10, 50);
-            Map<Instant, Long> gammaNeutronDaily = generateFakeData(days, 20, 60);
-            Map<Instant, Long> neutronDaily = generateFakeData(days, 5, 30);
-            Map<Instant, Long> emlSuppressedDaily = generateFakeData(days, 0, 10);
-            Map<Instant, Long> totalOccupancyDaily = generateFakeData(days, 100, 200);
-
-
-            DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-            for(Map.Entry<Instant, Long> entry : gammaDaily.entrySet()){
-                dataset.addValue(entry.getValue(), "Gamma", formatter.format(entry.getKey()));
-            }
-
-            for(Map.Entry<Instant, Long> entry : gammaNeutronDaily.entrySet()){
-                dataset.addValue(entry.getValue(), "Gamma-Neutron",  formatter.format(entry.getKey()));
-            }
-
-            for(Map.Entry<Instant, Long> entry : neutronDaily.entrySet()){
-                dataset.addValue(entry.getValue(), "Neutron",  formatter.format(entry.getKey()));
-            }
-
-            for(Map.Entry<Instant, Long> entry : emlSuppressedDaily.entrySet()){
-                dataset.addValue(entry.getValue(), "EML-Suppressed",  formatter.format(entry.getKey()));
-            }
-
-            DefaultCategoryDataset dataset2 = new DefaultCategoryDataset();
-            for(Map.Entry<Instant, Long> entry : totalOccupancyDaily.entrySet()){
-                dataset2.addValue(entry.getValue(), "Total occupancy",  formatter.format(entry.getKey()));
-            }
-            String title = "Test Chart";
-            String yLabel = "Count";
-            String xLabel = "Date";
-
-            ChartGenerator chartGenerator = new ChartGenerator(new OSCARServiceModule());
-            var chart = chartGenerator.createStackedBarLineOverlayChart(
-                    title,
-                    xLabel,
-                    yLabel,
-                    dataset,
-                    dataset2
+        ChartGenerator chartGenerator = new ChartGenerator();
+        try (FileOutputStream out = new FileOutputStream(dest);
+             PdfDocumentBuilder pdf = new PdfDocumentBuilder("Event Report", "test-node")) {
+            // 1. Single-day window (verifies explicit Occupancies callout badge + independent dual Y-axes)
+            chartGenerator.drawDualAxisStackedBarLineChart(
+                    pdf,
+                    "Alarms and Occupancies (1-Day)",
+                    "Date (UTC)",
+                    "Alarm / Suppressed Count",
+                    List.of("2026-11-06"),
+                    List.of(
+                            new ChartGenerator.StackedSeries("Gamma", ChartGenerator.COLOR_GAMMA, List.of(2L)),
+                            new ChartGenerator.StackedSeries("Gamma-Neutron", ChartGenerator.COLOR_GAMMA_NEUTRON, List.of(1L)),
+                            new ChartGenerator.StackedSeries("Neutron", ChartGenerator.COLOR_NEUTRON, List.of(0L)),
+                            new ChartGenerator.StackedSeries("EML-Suppressed", ChartGenerator.COLOR_EML_SUPPRESSED, List.of(3L))
+                    ),
+                    "Total Occupancies",
+                    new ChartGenerator.LineSeries("Total Occupancy (Right Axis)", ChartGenerator.COLOR_OCCUPANCY_LINE, List.of(1840L))
             );
 
-            assertNotNull(chart);
+            // 2. Multi-day window
+            List<String> dates = List.of("2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05");
+            chartGenerator.drawDualAxisStackedBarLineChart(
+                    pdf,
+                    "Alarms and Occupancies (5-Day)",
+                    "Date (UTC)",
+                    "Alarm / Suppressed Count",
+                    dates,
+                    List.of(
+                            new ChartGenerator.StackedSeries("Gamma", ChartGenerator.COLOR_GAMMA, List.of(1L, 3L, 0L, 2L, 4L)),
+                            new ChartGenerator.StackedSeries("EML-Suppressed", ChartGenerator.COLOR_EML_SUPPRESSED, List.of(2L, 1L, 1L, 0L, 3L))
+                    ),
+                    "Total Occupancies",
+                    new ChartGenerator.LineSeries("Total Occupancy (Right Axis)", ChartGenerator.COLOR_OCCUPANCY_LINE, List.of(950L, 1210L, 1105L, 1430L, 1380L))
+            );
+            pdf.finishAndSave(out);
+        }
 
-            BufferedImage bufferedImage = chart.createBufferedImage(1200, 600);
-            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            ImageIO.write(bufferedImage, "png", byteArrayOutputStream);
-
-            byte[] imageBytes = byteArrayOutputStream.toByteArray();
-            Image image = new Image(ImageDataFactory.create(imageBytes)).setAutoScale(true);
-
-            document.add(image);
-
-            document.close();
-
-            System.out.println("PDF created with chart: "+ dest);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        try (PDDocument loaded = Loader.loadPDF(dest)) {
+            String text = new PDFTextStripper().getText(loaded);
+            assertTrue(text.contains("Occupancies: 1,840"));
+            assertTrue(text.contains("Total Occupancies"));
+            assertTrue(text.contains("Alarm / Suppressed Count"));
+            assertZeroRasterImages(loaded);
         }
     }
 
-    // from chatgpt sorry -- used to simulate fake data for testing my charts to see if they work mwahhahahahaha
-    public static Map<Instant, Long> generateFakeData(int days, long min, long max) {
-        Map<Instant, Long> data = new LinkedHashMap<>();
-        LocalDate today = LocalDate.now();
+    @Test
+    public void TestFormatAdjudicationFeedbackAndLandscapeTable() throws IOException {
+        EmlEvaluationResult emlEval = new EmlEvaluationResult(
+                "1.0.2", "ERNIE", 0.50, "PORT-1", 50L, Instant.now().toEpochMilli(), 1L,
+                "ALARM", true, false, false, "RELEASE", false, "",
+                0.015, 0.985, false, false, 4, 16.4, "",
+                List.of(),
+                new EmlSourceBreakdown("NORM", "ERNIE-Classifier", 0.0, 0.0, 0.0, 0.0, 0.04, 0.95, 0.01)
+        );
+        String rawFeedback = emlEval.toAdjudicationFeedback();
+        String formatted = TableGenerator.formatAdjudicationFeedback(rawFeedback);
+        assertTrue(formatted.contains("Automated EML Non-Threat release"));
+        assertTrue(formatted.contains("Source: NORM"));
+        assertTrue(formatted.contains("Vehicle: Class 4 (16.4m)"));
+        assertTrue(formatted.contains("NORM 95.0%"));
+        assertFalse("Raw unspaced JSON keys must not leak into formatted cell text", formatted.contains("\"probabilityNonEmitting\""));
 
-        Random rand = new Random();
+        File dest = tempFolder.newFile("adj_landscape_test.pdf");
+        TableGenerator tableGenerator = new TableGenerator();
+        Map<String, String> row = new LinkedHashMap<>();
+        row.put("#", "1");
+        row.put("Time (UTC)", LocalDate.of(2026, 11, 6).atStartOfDay().toInstant(ZoneOffset.UTC).toString());
+        row.put("Username", "EML");
+        row.put("Feedback", rawFeedback);
+        row.put("Adjudication Code", "9999 (EML Non-Threat)");
+        row.put("Isotopes", "Potassium (1)");
+        row.put("Secondary Inspection Status", "NONE");
+        row.put("File Paths", "None (0)");
+        row.put("Occupancy Obs ID", "019a57f2-abc1-7000-8000-000000000050");
+        row.put("Vehicle ID", "TRK-4092");
 
-        for (int i = days - 1; i >= 0; i--) {
-            LocalDate date = today.minusDays(i);
-            Instant instant = date.atStartOfDay(ZoneId.systemDefault()).toInstant();
-            long value = min + (long)(rand.nextDouble() * (max - min));
-            data.put(instant, value);
+        try (FileOutputStream out = new FileOutputStream(dest);
+             PdfDocumentBuilder pdf = new PdfDocumentBuilder("Adjudication Report", "test-node", PdfDocumentBuilder.Orientation.LANDSCAPE)) {
+            tableGenerator.drawAdjudicationDetailsTable(
+                    pdf,
+                    Map.of("urn:osh:system:lane:lane-50", List.of(row)),
+                    Map.of("urn:osh:system:lane:lane-50", "Lane 50\nurn:osh:system:lane:lane-50")
+            );
+            pdf.finishAndSave(out);
         }
 
-        return data;
+        try (PDDocument loaded = Loader.loadPDF(dest)) {
+            PDPage firstPage = loaded.getPage(0);
+            assertEquals(792f, firstPage.getMediaBox().getWidth(), 0.5f);
+            assertEquals(612f, firstPage.getMediaBox().getHeight(), 0.5f);
+            String text = new PDFTextStripper().getText(loaded);
+            assertTrue(text.contains("TRK-4092"));
+            assertTrue(text.contains("Source: NORM"));
+            assertZeroRasterImages(loaded);
+        }
     }
 
+    private static void assertZeroRasterImages(PDDocument doc) throws IOException {
+        for (PDPage page : doc.getPages()) {
+            if (page.getResources() == null) {
+                continue;
+            }
+            for (COSName name : page.getResources().getXObjectNames()) {
+                PDXObject xObj = page.getResources().getXObject(name);
+                assertFalse("Report PDF should be pure vector without embedded raster images", xObj instanceof PDImageXObject);
+            }
+        }
+    }
 }

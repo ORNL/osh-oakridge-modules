@@ -20,16 +20,25 @@ import com.botts.impl.service.oscar.OSCARServiceModule;
 import com.botts.impl.service.oscar.OSCARSystem;
 import com.botts.impl.service.oscar.reports.helpers.EventReportType;
 import com.botts.impl.service.oscar.reports.helpers.ReportCmdType;
-import com.botts.impl.service.oscar.reports.types.*;
+import com.botts.impl.service.oscar.reports.types.AdjudicationReport;
+import com.botts.impl.service.oscar.reports.types.EventReport;
+import com.botts.impl.service.oscar.reports.types.LaneReport;
+import com.botts.impl.service.oscar.reports.types.RDSReport;
+import com.botts.impl.service.oscar.reports.types.Report;
 import net.opengis.swe.v20.DataBlock;
 import net.opengis.swe.v20.DataComponent;
 import net.opengis.swe.v20.DataRecord;
-import org.sensorhub.api.command.*;
+import org.sensorhub.api.command.CommandResult;
+import org.sensorhub.api.command.CommandStatus;
+import org.sensorhub.api.command.ICommandData;
+import org.sensorhub.api.command.ICommandResult;
+import org.sensorhub.api.command.ICommandStatus;
+import org.sensorhub.api.command.IStreamingControlInterfaceWithResult;
 import org.sensorhub.api.datastore.DataStoreException;
 import org.sensorhub.impl.command.AbstractControlInterface;
 import org.vast.swe.SWEHelper;
-import org.vast.util.DateTime;
 
+import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -37,9 +46,17 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.Collections;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HexFormat;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static com.botts.impl.service.oscar.Constants.REPORT_BUCKET;
@@ -51,6 +68,7 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
     public static final String DESCRIPTION = "Control to request operations, performance, and maintenance reports";
 
     public static final int RETRY_COUNT = 3;
+    private static final int REPORT_WORKER_THREADS = 2;
 
     DataRecord commandStructure;
     DataComponent resultStructure;
@@ -61,12 +79,22 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
 
     DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
 
+    private final ExecutorService reportExecutor;
+    private final ConcurrentHashMap<String, Object> fileWriteLocks = new ConcurrentHashMap<>();
+
     public RequestReportControl(OSCARSystem parent, OSCARServiceModule module) {
         super(NAME, parent);
 
         fac = new SWEHelper();
         this.module = module;
         this.bucketService = module.getBucketService();
+
+        AtomicInteger workerSeq = new AtomicInteger(1);
+        this.reportExecutor = Executors.newFixedThreadPool(REPORT_WORKER_THREADS, runnable -> {
+            Thread thread = new Thread(runnable, "OSCAR-report-worker-" + workerSeq.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        });
 
         commandStructure = fac.createRecord()
                 .name(NAME)
@@ -102,11 +130,9 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
                 .addField("reportPath", fac.createText())
                 .build();
 
-
         try {
             if (!bucketService.getBucketStore().bucketExists(REPORT_BUCKET))
                 bucketService.getBucketStore().createBucket(REPORT_BUCKET);
-
         } catch (DataStoreException e) {
             module.getLogger().error("Bucket already exists.", e);
         }
@@ -119,49 +145,69 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
 
     @Override
     public CompletableFuture<ICommandStatus> submitCommand(ICommandData command) {
-        return CompletableFuture.supplyAsync(() -> {
-            DataBlock paramData = command.getParams();
+        try {
+            return CompletableFuture.supplyAsync(() -> executeReportCommand(command), reportExecutor);
+        } catch (RejectedExecutionException rejected) {
+            return CompletableFuture.completedFuture(
+                    CommandStatus.failed(command.getID(), "Report worker pool is shutting down"));
+        }
+    }
 
-            ReportCmdType type = ReportCmdType.valueOf(paramData.getStringValue(0));
-            Instant start = paramData.getTimeStamp(1);
-            Instant end = paramData.getTimeStamp(2);
-            String laneUIDs = paramData.getStringValue(3);
-            EventReportType eventType = EventReportType.valueOf(paramData.getStringValue(4));
+    private ICommandStatus executeReportCommand(ICommandData command) {
+        DataBlock paramData = command.getParams();
 
-            String resourceURI = null;
+        ReportCmdType type = ReportCmdType.valueOf(paramData.getStringValue(0));
+        Instant start = paramData.getTimeStamp(1);
+        Instant end = paramData.getTimeStamp(2);
+        String laneUIDs = paramData.getStringValue(3);
+        EventReportType eventType = parseEventType(paramData.getStringValue(4));
 
-            String filePath = null;
-            IReportHandler reportHandler = null;
+        String resourceURI = null;
+        String filePath = null;
+        IReportHandler reportHandler = null;
+        try {
+            filePath = buildPath(type, start, end, laneUIDs, eventType);
+            reportHandler = getReportHandler(type, start, end, laneUIDs, eventType);
+        } catch (DataStoreException e) {
+            module.getLogger().error("Failed to build report {}", type, e);
+        }
+
+        for (int retryAttempt = 0; retryAttempt < RETRY_COUNT; retryAttempt++) {
+            if (Thread.currentThread().isInterrupted()) {
+                break;
+            }
             try {
-                filePath = buildPath(type, start, end, laneUIDs);
-                reportHandler = getReportHandler(type, start, end, laneUIDs, eventType);
-            } catch (DataStoreException e) {
-                module.getLogger().error("Failed to build report " + type, e);
-            }
+                resourceURI = handleReportGeneration(reportHandler, filePath);
 
-            for (int retryAttempt = 0; retryAttempt < RETRY_COUNT; retryAttempt++) {
-                try {
-                    resourceURI = handleReportGeneration(reportHandler, filePath);
-
-                    if (resourceURI != null) {
-                        module.getLogger().info("Successfully generated report {}", resourceURI);
-                        break;
-                    }
-                } catch (DataStoreException e) {
-                    module.getLogger().error("Failed to build report {}", type, e);
+                if (resourceURI != null) {
+                    module.getLogger().info("Successfully generated report {}", resourceURI);
+                    break;
                 }
+            } catch (DataStoreException | IOException e) {
+                module.getLogger().error("Failed to build report {} (attempt {})", type, retryAttempt + 1, e);
             }
+        }
 
-            DataBlock resultData = resultStructure.createDataBlock();
-            resultData.setStringValue(resourceURI);
-            ICommandResult result = CommandResult.withData(resultData);
+        DataBlock resultData = resultStructure.createDataBlock();
+        resultData.setStringValue(resourceURI);
+        ICommandResult result = CommandResult.withData(resultData);
 
-           return new CommandStatus.Builder()
-                    .withCommand(command.getID())
-                    .withStatusCode(resourceURI == null ? ICommandStatus.CommandStatusCode.FAILED : ICommandStatus.CommandStatusCode.ACCEPTED)
-                    .withResult(result)
-                    .build();
-        });
+        return new CommandStatus.Builder()
+                .withCommand(command.getID())
+                .withStatusCode(resourceURI == null ? ICommandStatus.CommandStatusCode.FAILED : ICommandStatus.CommandStatusCode.ACCEPTED)
+                .withResult(result)
+                .build();
+    }
+
+    private static EventReportType parseEventType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return EventReportType.NONE;
+        }
+        try {
+            return EventReportType.valueOf(raw.trim());
+        } catch (IllegalArgumentException e) {
+            return EventReportType.NONE;
+        }
     }
 
     @Override
@@ -169,8 +215,21 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
         return resultStructure;
     }
 
+    public void requestStop() {
+        reportExecutor.shutdownNow();
+    }
+
+    public void awaitStop(long timeout, TimeUnit unit) {
+        try {
+            reportExecutor.awaitTermination(Math.max(1L, timeout), unit);
+        } catch (InterruptedException e) {
+            reportExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private IReportHandler getReportHandler(ReportCmdType type, Instant start, Instant end, String laneUIDs, EventReportType eventType) throws DataStoreException {
-        if(type == ReportCmdType.LANE) {
+        if (type == ReportCmdType.LANE) {
             return out -> new LaneReport(out, start, end, laneUIDs, module);
         } else if (type == ReportCmdType.EVENT) {
             return out -> new EventReport(out, start, end, eventType, laneUIDs, module);
@@ -182,31 +241,41 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
         return null;
     }
 
-    private String handleReportGeneration(IReportHandler reportHandler, String filePath) throws DataStoreException {
-        OutputStream out = checkBucketForOutputStream(filePath);
-
-        if (out != null) {
-            Report report = reportHandler.createReport(out);
-            report.generate();
+    private String handleReportGeneration(IReportHandler reportHandler, String filePath) throws DataStoreException, IOException {
+        if (reportHandler == null || filePath == null || filePath.isBlank()) {
+            return null;
+        }
+        Object fileLock = fileWriteLocks.computeIfAbsent(filePath, k -> new Object());
+        synchronized (fileLock) {
+            try (OutputStream out = bucketService.getBucketStore().putObject(REPORT_BUCKET, filePath, Collections.emptyMap())) {
+                if (out == null) {
+                    return null;
+                }
+                Report report = reportHandler.createReport(out);
+                report.generate();
+            }
         }
         return bucketService.getBucketStore().getRelativeResourceURI(REPORT_BUCKET, filePath);
     }
 
-    private String buildPath(ReportCmdType type, Instant start, Instant end, String laneUIDs) {
-
+    String buildPath(ReportCmdType type, Instant start, Instant end, String laneUIDs, EventReportType eventType) {
         String startTime = DateTimeFormatter.ISO_INSTANT.format(start).replace(":", "-");
         String endTime = DateTimeFormatter.ISO_INSTANT.format(end).replace(":", "-");
-
         String scope = buildScopeToken(laneUIDs);
 
+        String typeToken = (type == ReportCmdType.EVENT && eventType != null && eventType != EventReportType.NONE)
+                ? type.name().toLowerCase(Locale.ROOT) + "-" + eventType.name().toLowerCase(Locale.ROOT)
+                : type.name().toLowerCase(Locale.ROOT);
+
         return String.format(
+                Locale.ROOT,
                 "%s_%s_%s_%s_%s.pdf",
                 module.getOSCARSystem().getNodeId(),
-                type.name().toLowerCase(),
+                typeToken,
                 scope,
                 startTime,
                 endTime
-        ).toLowerCase();
+        ).toLowerCase(Locale.ROOT);
     }
 
     private String buildScopeToken(String laneUIDs) {
@@ -219,20 +288,14 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
                 .distinct()
                 .sorted()
                 .collect(Collectors.joining(","));
+        if (canonicalScope.isEmpty())
+            return "all";
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(canonicalScope.getBytes(StandardCharsets.UTF_8));
-            return "scope-" + java.util.HexFormat.of().formatHex(digest, 0, 8);
+            return "scope-" + HexFormat.of().formatHex(digest, 0, 8);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is not available", e);
         }
-    }
-
-    // checks if a report file already exists in object store and only creates a new output if it doesnt exist
-    private OutputStream checkBucketForOutputStream(String filePath) throws DataStoreException {
-        if (!bucketService.getBucketStore().objectExists(REPORT_BUCKET, filePath)) {
-            return bucketService.getBucketStore().putObject(REPORT_BUCKET, filePath, Collections.emptyMap());
-        }
-        return null;
     }
 }
