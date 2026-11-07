@@ -1,80 +1,97 @@
+/*******************************************************************************
+
+ The contents of this file are subject to the Mozilla Public License, v. 2.0.
+ If a copy of the MPL was not distributed with this file, You can obtain one
+ at http://mozilla.org/MPL/2.0/.
+
+ Software distributed under the License is distributed on an "AS IS" basis,
+ WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+ for the specific language governing rights and limitations under the License.
+
+ The Initial Developer is Botts Innovative Research Inc. Portions created by the Initial
+ Developer are Copyright (C) 2025 the Initial Developer. All Rights Reserved.
+
+ ******************************************************************************/
+
 package com.botts.impl.service.oscar.reports.types;
 
 import com.botts.impl.service.oscar.OSCARServiceModule;
-import com.botts.impl.service.oscar.reports.helpers.*;
-import com.itextpdf.io.image.ImageDataFactory;
-import com.itextpdf.kernel.pdf.PdfDocument;
-import com.itextpdf.kernel.pdf.PdfWriter;
-import com.itextpdf.layout.Document;
-import com.itextpdf.layout.element.Image;
-import com.itextpdf.layout.element.Paragraph;
-import com.itextpdf.layout.element.Table;
-import org.jfree.data.category.CategoryDataset;
-import org.jfree.data.category.DefaultCategoryDataset;
-import org.sensorhub.api.data.IObsData;
-import org.sensorhub.impl.utils.rad.RADHelper;
+import com.botts.impl.service.oscar.reports.helpers.ChartGenerator;
+import com.botts.impl.service.oscar.reports.helpers.EventReportType;
+import com.botts.impl.service.oscar.reports.helpers.PdfDocumentBuilder;
+import com.botts.impl.service.oscar.reports.helpers.ReportCmdType;
+import com.botts.impl.service.oscar.reports.helpers.ReportDataAggregator;
+import com.botts.impl.service.oscar.reports.helpers.TableGenerator;
+import com.botts.impl.service.oscar.reports.helpers.Utils;
+import org.sensorhub.api.datastore.DataStoreException;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.text.NumberFormat;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.function.Predicate;
 
 public class EventReport extends Report {
-    private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault());
 
-    Document document;
-    PdfDocument pdfDocument;
+    private final EventReportType eventType;
+    private final String laneUIDs;
+    private final TableGenerator tableGenerator;
+    private final ChartGenerator chartGenerator;
 
-    TableGenerator tableGenerator;
-    ChartGenerator chartGenerator;
-
-    EventReportType eventType;
-    String laneUIDs;
-
-    private record DatasetResult(DefaultCategoryDataset dataset, Map<String, Map<String, String>> tableData) {}
-
-    public EventReport(OutputStream outputStream, Instant startTime, Instant endTime, EventReportType eventType, String laneUIDs, OSCARServiceModule module) {
+    public EventReport(OutputStream outputStream, Instant startTime, Instant endTime,
+                       EventReportType eventType, String laneUIDs, OSCARServiceModule module) {
         super(outputStream, startTime, endTime, module);
-
-        pdfDocument = new PdfDocument(new PdfWriter(outputStream));
-        document = new Document(pdfDocument);
-
-        this.eventType = eventType;
+        this.eventType = eventType != null ? eventType : EventReportType.ALARMS;
         this.laneUIDs = laneUIDs;
         this.tableGenerator = new TableGenerator();
         this.chartGenerator = new ChartGenerator(module);
-
-        this.start = startTime;
-        this.end = endTime;
     }
 
     @Override
-    public void generate() {
-        addHeader();
+    public void generate() throws DataStoreException {
+        String nodeId = (module != null && module.getConfiguration() != null && module.getConfiguration().nodeId != null)
+                ? module.getConfiguration().nodeId
+                : "oscar-node";
+        String scopeLine = ReportDataAggregator.buildBannerScopeSummary(module, laneUIDs);
 
-        if (eventType.equals(EventReportType.ALARMS_OCCUPANCIES))
-            addAlarmOccStatisticsByDay();
+        Map<String, ReportDataAggregator.ObservationMetrics> dailyMetrics =
+                ReportDataAggregator.aggregateDailyEventMetrics(module, laneUIDs, start, end, eventType);
 
-        else if (eventType.equals(EventReportType.ALARMS))
-            addAlarmStatisticsByDay();
+        ReportDataAggregator.ObservationMetrics totals = new ReportDataAggregator.ObservationMetrics();
+        for (ReportDataAggregator.ObservationMetrics m : dailyMetrics.values()) {
+            totals.add(m);
+        }
 
-        else if (eventType.equals(EventReportType.SOH))
-            addFaultStatisticsByDay();
+        NumberFormat intFmt = NumberFormat.getIntegerInstance(Locale.US);
 
+        try (PdfDocumentBuilder pdf = new PdfDocumentBuilder("Event Report", nodeId)) {
+            pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
+                    "Event Report",
+                    nodeId,
+                    "Event Type: " + eventType,
+                    scopeLine,
+                    start,
+                    end
+            ));
 
-        document.close();
-        chartGenerator = null;
-        tableGenerator = null;
+            if (eventType == EventReportType.ALARMS_OCCUPANCIES) {
+                renderAlarmsAndOccupancies(pdf, dailyMetrics, totals, intFmt);
+            } else if (eventType == EventReportType.ALARMS) {
+                renderAlarmsOnly(pdf, dailyMetrics, totals, intFmt);
+            } else if (eventType == EventReportType.SOH) {
+                renderSoh(pdf, dailyMetrics, totals, intFmt);
+            } else {
+                pdf.drawCalloutBox("No specific event subtype selected (Event Type: " + eventType + ").");
+            }
+
+            pdf.finishAndSave(out);
+        } catch (IOException e) {
+            throw new DataStoreException("Failed to generate Event Report PDF", e);
+        }
     }
 
     @Override
@@ -82,248 +99,240 @@ public class EventReport extends Report {
         return ReportCmdType.EVENT.name();
     }
 
-    private void addHeader(){
-        document.add(new Paragraph("Event Report ").setFontSize(16).simulateBold());
-        document.add(new Paragraph("Event Type: " + eventType).setFontSize(12));
-        if (laneUIDs != null && !laneUIDs.isBlank() && !laneUIDs.equals("NONE"))
-            document.add(new Paragraph("Lane UIDs: " + laneUIDs).setFontSize(12));
-        document.add(new Paragraph("Requested Time: " + start + "-" + end).setFontSize(12));
-        document.add(new Paragraph("\n"));
+    private void renderAlarmsAndOccupancies(
+            PdfDocumentBuilder pdf,
+            Map<String, ReportDataAggregator.ObservationMetrics> dailyMetrics,
+            ReportDataAggregator.ObservationMetrics totals,
+            NumberFormat intFmt
+    ) throws IOException {
+        pdf.drawKpiCards(List.of(
+                new PdfDocumentBuilder.KpiCard(
+                        "Total Occupancies",
+                        intFmt.format(totals.totalOccupancies),
+                        "Alarm Rate: " + Utils.formatPercentage(totals.alarmOccupancyRatePct()),
+                        ChartGenerator.COLOR_OCCUPANCY_LINE
+                ),
+                new PdfDocumentBuilder.KpiCard(
+                        "Total Alarms",
+                        intFmt.format(totals.totalAlarms()),
+                        "Gamma: " + intFmt.format(totals.gammaAlarm),
+                        ChartGenerator.COLOR_GAMMA
+                ),
+                new PdfDocumentBuilder.KpiCard(
+                        "Neutron & G+N Alarms",
+                        intFmt.format(totals.neutronAlarm + totals.gammaNeutronAlarm),
+                        "N: " + intFmt.format(totals.neutronAlarm) + " | G+N: " + intFmt.format(totals.gammaNeutronAlarm),
+                        ChartGenerator.COLOR_GAMMA_NEUTRON
+                ),
+                new PdfDocumentBuilder.KpiCard(
+                        "EML Suppressed",
+                        intFmt.format(totals.emlSuppressed),
+                        "EML Rate: " + Utils.formatPercentage(totals.emlAlarmRatePct()),
+                        ChartGenerator.COLOR_EML_SUPPRESSED
+                )
+        ));
+
+        List<String> dates = new ArrayList<>(dailyMetrics.keySet());
+        List<Long> gammaVals = new ArrayList<>(dates.size());
+        List<Long> gnVals = new ArrayList<>(dates.size());
+        List<Long> neutronVals = new ArrayList<>(dates.size());
+        List<Long> emlVals = new ArrayList<>(dates.size());
+        List<Long> occVals = new ArrayList<>(dates.size());
+        Map<String, Map<String, String>> tableByDate = new LinkedHashMap<>();
+
+        for (String date : dates) {
+            ReportDataAggregator.ObservationMetrics m = dailyMetrics.get(date);
+            gammaVals.add(m.gammaAlarm);
+            gnVals.add(m.gammaNeutronAlarm);
+            neutronVals.add(m.neutronAlarm);
+            emlVals.add(m.emlSuppressed);
+            occVals.add(m.totalOccupancies);
+
+            Map<String, String> row = new LinkedHashMap<>();
+            row.put("Gamma", String.valueOf(m.gammaAlarm));
+            row.put("Gamma-Neutron", String.valueOf(m.gammaNeutronAlarm));
+            row.put("Neutron", String.valueOf(m.neutronAlarm));
+            row.put("EML-Suppressed", String.valueOf(m.emlSuppressed));
+            row.put("Total Occupancy", String.valueOf(m.totalOccupancies));
+            tableByDate.put(date, row);
+        }
+
+        pdf.drawSectionHeader(
+                "Alarms and Occupancies by UTC Day",
+                "Dual-axis view: stacked alarms/suppressions on left axis, total occupancies on independent right axis",
+                245f
+        );
+
+        List<ChartGenerator.StackedSeries> barSeries = List.of(
+                new ChartGenerator.StackedSeries("Gamma", ChartGenerator.COLOR_GAMMA, gammaVals),
+                new ChartGenerator.StackedSeries("Gamma-Neutron", ChartGenerator.COLOR_GAMMA_NEUTRON, gnVals),
+                new ChartGenerator.StackedSeries("Neutron", ChartGenerator.COLOR_NEUTRON, neutronVals),
+                new ChartGenerator.StackedSeries("EML-Suppressed", ChartGenerator.COLOR_EML_SUPPRESSED, emlVals)
+        );
+        ChartGenerator.LineSeries occLine = new ChartGenerator.LineSeries(
+                "Total Occupancy (Right Axis)", ChartGenerator.COLOR_OCCUPANCY_LINE, occVals
+        );
+
+        chartGenerator.drawDualAxisStackedBarLineChart(
+                pdf,
+                "Alarms and Occupancies",
+                "Date (UTC)",
+                "Alarm / Suppressed Count",
+                dates,
+                barSeries,
+                "Total Occupancies",
+                occLine
+        );
+
+        pdf.drawSectionHeader("Daily Breakdown Table", "Exact daily alarm, EML suppression, and occupancy counts (UTC)", 70f);
+        tableGenerator.drawTableByDate(pdf, tableByDate, true);
     }
 
-    private void addAlarmStatisticsByDay() {
-        document.add(new Paragraph("Alarm Statistics").setFontSize(12));
+    private void renderAlarmsOnly(
+            PdfDocumentBuilder pdf,
+            Map<String, ReportDataAggregator.ObservationMetrics> dailyMetrics,
+            ReportDataAggregator.ObservationMetrics totals,
+            NumberFormat intFmt
+    ) throws IOException {
+        pdf.drawKpiCards(List.of(
+                new PdfDocumentBuilder.KpiCard(
+                        "Total Alarms",
+                        intFmt.format(totals.totalAlarms()),
+                        dailyMetrics.size() + (dailyMetrics.size() == 1 ? " UTC day" : " UTC days"),
+                        ChartGenerator.COLOR_GAMMA
+                ),
+                new PdfDocumentBuilder.KpiCard(
+                        "Gamma Alarms",
+                        intFmt.format(totals.gammaAlarm),
+                        "Gamma-only triggers",
+                        ChartGenerator.COLOR_GAMMA
+                ),
+                new PdfDocumentBuilder.KpiCard(
+                        "Neutron & G+N Alarms",
+                        intFmt.format(totals.neutronAlarm + totals.gammaNeutronAlarm),
+                        "N: " + intFmt.format(totals.neutronAlarm) + " | G+N: " + intFmt.format(totals.gammaNeutronAlarm),
+                        ChartGenerator.COLOR_GAMMA_NEUTRON
+                ),
+                new PdfDocumentBuilder.KpiCard(
+                        "EML Suppressed",
+                        intFmt.format(totals.emlSuppressed),
+                        "EML Rate: " + Utils.formatPercentage(totals.emlAlarmRatePct()),
+                        ChartGenerator.COLOR_EML_SUPPRESSED
+                )
+        ));
 
-        DatasetResult result = buildAlarmingDatasetAndTable();
-        DefaultCategoryDataset dataset = result.dataset();
-        Map<String, Map<String, String>> tableData = result.tableData();
+        List<String> dates = new ArrayList<>(dailyMetrics.keySet());
+        List<Long> gammaVals = new ArrayList<>(dates.size());
+        List<Long> gnVals = new ArrayList<>(dates.size());
+        List<Long> neutronVals = new ArrayList<>(dates.size());
+        List<Long> emlVals = new ArrayList<>(dates.size());
+        Map<String, Map<String, String>> tableByDate = new LinkedHashMap<>();
 
-        String title = "Alarms";
-        String xAxis = "Dates";
-        String yAxis = "Counts";
+        for (String date : dates) {
+            ReportDataAggregator.ObservationMetrics m = dailyMetrics.get(date);
+            gammaVals.add(m.gammaAlarm);
+            gnVals.add(m.gammaNeutronAlarm);
+            neutronVals.add(m.neutronAlarm);
+            emlVals.add(m.emlSuppressed);
 
-        try{
-            var chart = chartGenerator.createStackedBarChart(
-                    title,
-                    xAxis,
-                    yAxis,
-                    dataset
-            );
-
-            if (chart == null) {
-                document.add(new Paragraph("Alarm Chart failed to create"));
-                return;
-            }
-
-            BufferedImage bufferedImage = chart.createBufferedImage(1200, 600);
-            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            ImageIO.write(bufferedImage, "png", byteArrayOutputStream);
-
-            byte[] imageBytes = byteArrayOutputStream.toByteArray();
-            Image image = new Image(ImageDataFactory.create(imageBytes)).setAutoScale(true);
-
-            document.add(image);
-            document.add(new Paragraph("\n"));
-
-            Table table = tableGenerator.addTableByDate(tableData);
-            document.add(table);
-            document.add(new Paragraph("\n"));
-        } catch (IOException e) {
-            module.getLogger().error("Error creating Alarm chart", e);
-            return;
+            Map<String, String> row = new LinkedHashMap<>();
+            row.put("Gamma", String.valueOf(m.gammaAlarm));
+            row.put("Gamma-Neutron", String.valueOf(m.gammaNeutronAlarm));
+            row.put("Neutron", String.valueOf(m.neutronAlarm));
+            row.put("EML-Suppressed", String.valueOf(m.emlSuppressed));
+            tableByDate.put(date, row);
         }
 
-        document.add(new Paragraph("\n"));
+        pdf.drawSectionHeader("Alarm Statistics by UTC Day", "Stacked daily radiation alarms and EML suppressions", 245f);
+        chartGenerator.drawStackedBarChart(
+                pdf,
+                "Alarms",
+                "Date (UTC)",
+                "Count",
+                dates,
+                List.of(
+                        new ChartGenerator.StackedSeries("Gamma", ChartGenerator.COLOR_GAMMA, gammaVals),
+                        new ChartGenerator.StackedSeries("Gamma-Neutron", ChartGenerator.COLOR_GAMMA_NEUTRON, gnVals),
+                        new ChartGenerator.StackedSeries("Neutron", ChartGenerator.COLOR_NEUTRON, neutronVals),
+                        new ChartGenerator.StackedSeries("EML-Suppressed", ChartGenerator.COLOR_EML_SUPPRESSED, emlVals)
+                )
+        );
+
+        pdf.drawSectionHeader("Daily Alarm Breakdown", "Exact daily counts across alarm categories (UTC)", 70f);
+        tableGenerator.drawTableByDate(pdf, tableByDate, true);
     }
 
-    private void addFaultStatisticsByDay(){
+    private void renderSoh(
+            PdfDocumentBuilder pdf,
+            Map<String, ReportDataAggregator.ObservationMetrics> dailyMetrics,
+            ReportDataAggregator.ObservationMetrics totals,
+            NumberFormat intFmt
+    ) throws IOException {
+        pdf.drawKpiCards(List.of(
+                new PdfDocumentBuilder.KpiCard(
+                        "Total SOH Events",
+                        intFmt.format(totals.totalFaultsAndTamper()),
+                        dailyMetrics.size() + (dailyMetrics.size() == 1 ? " UTC day" : " UTC days"),
+                        ChartGenerator.COLOR_TAMPER
+                ),
+                new PdfDocumentBuilder.KpiCard(
+                        "Gamma High Faults",
+                        intFmt.format(totals.gammaHighFault),
+                        "Fault - Gamma High",
+                        ChartGenerator.COLOR_GAMMA
+                ),
+                new PdfDocumentBuilder.KpiCard(
+                        "Gamma Low Faults",
+                        intFmt.format(totals.gammaLowFault),
+                        "Fault - Gamma Low",
+                        ChartGenerator.COLOR_GAMMA_LOW
+                ),
+                new PdfDocumentBuilder.KpiCard(
+                        "Neutron High & Tamper",
+                        intFmt.format(totals.neutronHighFault + totals.tamper),
+                        "N-High: " + intFmt.format(totals.neutronHighFault) + " | Tamper: " + intFmt.format(totals.tamper),
+                        ChartGenerator.COLOR_NEUTRON
+                )
+        ));
 
-        Map<Instant, Long> gammaHighDaily = Utils.countObservationsByDayForLanes(module, laneUIDs, Utils.gammaHighFaultCQL, start, end, RADHelper.DEF_GAMMA, RADHelper.DEF_ALARM);
-        Map<Instant, Long> gammaLowDaily = Utils.countObservationsByDayForLanes(module, laneUIDs, Utils.gammaLowFaultCQL, start, end, RADHelper.DEF_GAMMA, RADHelper.DEF_ALARM);
-        Map<Instant, Long> neutronHighDaily = Utils.countObservationsByDayForLanes(module, laneUIDs, Utils.neutronFaultCQL, start, end, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM);
-        Map<Instant, Long> tamperDaily = Utils.countObservationsByDayForLanes(module, laneUIDs, Utils.tamperCQL, start, end, RADHelper.DEF_TAMPER);
-//        Map<Instant, Long> extendedOccupancyDaily = Utils.countObservationsByDay(module, Utils.extendedOccPredicate, start, end, RADHelper.DEF_OCCUPANCY);
-//        Map<Instant, Long> commDaily = Utils.countObservationsByDay(module, Utils.commsPredicate, start, end, RADHelper.DEF_OCCUPANCY);
-//        Map<Instant, Long> cameraDaily = Utils.countObservationsByDay(module, Utils.cameraPredicate, start, end, RADHelper.DEF_OCCUPANCY);
+        List<String> dates = new ArrayList<>(dailyMetrics.keySet());
+        List<Long> ghVals = new ArrayList<>(dates.size());
+        List<Long> glVals = new ArrayList<>(dates.size());
+        List<Long> nhVals = new ArrayList<>(dates.size());
+        List<Long> tamperVals = new ArrayList<>(dates.size());
+        Map<String, Map<String, String>> tableByDate = new LinkedHashMap<>();
 
-        Map<String, Map<String, String>> tableDataByDate = new LinkedHashMap<>();
+        for (String date : dates) {
+            ReportDataAggregator.ObservationMetrics m = dailyMetrics.get(date);
+            ghVals.add(m.gammaHighFault);
+            glVals.add(m.gammaLowFault);
+            nhVals.add(m.neutronHighFault);
+            tamperVals.add(m.tamper);
 
-        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-
-        for(Map.Entry<Instant, Long> entry : gammaHighDaily.entrySet()){
-            String date = formatter.format(entry.getKey());
-            dataset.addValue(entry.getValue(), "Gamma High", date);
-            tableDataByDate.computeIfAbsent(date, k -> new LinkedHashMap<>()).put("Gamma High", entry.getValue().toString());
+            Map<String, String> row = new LinkedHashMap<>();
+            row.put("Gamma High", String.valueOf(m.gammaHighFault));
+            row.put("Gamma Low", String.valueOf(m.gammaLowFault));
+            row.put("Neutron High", String.valueOf(m.neutronHighFault));
+            row.put("Tamper", String.valueOf(m.tamper));
+            tableByDate.put(date, row);
         }
 
-        for(Map.Entry<Instant, Long> entry : gammaLowDaily.entrySet()){
-            String date = formatter.format(entry.getKey());
-            dataset.addValue(entry.getValue(), "Gamma Low", date);
-            tableDataByDate.computeIfAbsent(date, k -> new LinkedHashMap<>()).put("Gamma Low", entry.getValue().toString());
-        }
+        pdf.drawSectionHeader("State of Health (SOH) by UTC Day", "Daily detector fault and tamper occurrences", 245f);
+        chartGenerator.drawStackedBarChart(
+                pdf,
+                "SOH",
+                "Date (UTC)",
+                "Count",
+                dates,
+                List.of(
+                        new ChartGenerator.StackedSeries("Gamma High", ChartGenerator.COLOR_GAMMA, ghVals),
+                        new ChartGenerator.StackedSeries("Gamma Low", ChartGenerator.COLOR_GAMMA_LOW, glVals),
+                        new ChartGenerator.StackedSeries("Neutron High", ChartGenerator.COLOR_NEUTRON, nhVals),
+                        new ChartGenerator.StackedSeries("Tamper", ChartGenerator.COLOR_TAMPER, tamperVals)
+                )
+        );
 
-        for(Map.Entry<Instant, Long> entry : neutronHighDaily.entrySet()){
-            String date = formatter.format(entry.getKey());
-            dataset.addValue(entry.getValue(), "Neutron High", date);
-            tableDataByDate.computeIfAbsent(date, k -> new LinkedHashMap<>()).put("Neutron High", entry.getValue().toString());
-        }
-
-        for(Map.Entry<Instant, Long> entry : tamperDaily.entrySet()){
-            String date = formatter.format(entry.getKey());
-            dataset.addValue(entry.getValue(), "Tamper", date);
-            tableDataByDate.computeIfAbsent(date, k -> new LinkedHashMap<>()).put("Tamper", entry.getValue().toString());
-        }
-
-//        for(Map.Entry<Instant, Long> entry : extendedOccupancyDaily.entrySet()){
-//            dataset.addValue(entry.getValue(), "Extended Occupancy",  formatter.format(entry.getKey()));
-//        }
-//
-//        for(Map.Entry<Instant, Long> entry : cameraDaily.entrySet()){
-//            dataset.addValue(entry.getValue(), "Camera",  formatter.format(entry.getKey()));
-//        }
-//
-//        for(Map.Entry<Instant, Long> entry : commDaily.entrySet()){
-//            dataset.addValue(entry.getValue(), "Comm",  formatter.format(entry.getKey()));
-//        }
-
-        String title = "SOH";
-        String xAxis = "Date";
-        String yAxis = "Count";
-
-        try{
-            var chart = chartGenerator.createStackedBarChart(
-                    title,
-                    xAxis,
-                    yAxis,
-                    dataset
-            );
-
-            if(chart == null){
-                document.add(new Paragraph("SOH Chart failed to create"));
-                return;
-            }
-
-
-            BufferedImage bufferedImage = chart.createBufferedImage(1200, 600);
-            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            ImageIO.write(bufferedImage, "png", byteArrayOutputStream);
-
-            byte[] imageBytes = byteArrayOutputStream.toByteArray();
-            Image image = new Image(ImageDataFactory.create(imageBytes)).setAutoScale(true);
-
-            document.add(image);
-            document.add(new Paragraph("\n"));
-            Table table = tableGenerator.addTableByDate(tableDataByDate);
-            document.add(table);
-            document.add(new Paragraph("\n"));
-
-        } catch (IOException e) {
-            module.getLogger().error("Error creating SOH chart", e);
-            return;
-        }
-
-        document.add(new Paragraph("\n"));
-    }
-
-    private void addAlarmOccStatisticsByDay(){
-
-        Map<Instant, Long> totalOccupancyDaily = Utils.countObservationsByDayForLanes(module, laneUIDs, null, start, end, RADHelper.DEF_OCCUPANCY);
-
-        DatasetResult result = buildAlarmingDatasetAndTable();
-        DefaultCategoryDataset dataset = result.dataset();
-        Map<String, Map<String, String>> tableData = result.tableData();
-
-
-        // this will be a linegraph on top of the bar chart
-        DefaultCategoryDataset occDataset = new DefaultCategoryDataset();
-
-        for(Map.Entry<Instant, Long> entry : totalOccupancyDaily.entrySet()){
-            String date = formatter.format(entry.getKey());
-
-            occDataset.addValue(entry.getValue(), "TotalOccupancy", date);
-            tableData.computeIfAbsent(date, k -> new LinkedHashMap<>()).put("Total Occupancy", entry.getValue().toString());
-        }
-
-        String title = "Alarms and Occupancies";
-        String xAxis = "Date";
-        String yAxis = "Count";
-
-        try{
-            var chart = chartGenerator.createStackedBarLineOverlayChart(
-                    title,
-                    xAxis,
-                    yAxis,
-                    dataset,
-                    occDataset
-            );
-
-            if(chart == null){
-                document.add(new Paragraph("Alarm-Occupancy Chart failed to create"));
-                module.getLogger().error("Chart failed to create");
-                return;
-            }
-
-
-            BufferedImage bufferedImage = chart.createBufferedImage(1200, 600);
-            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            ImageIO.write(bufferedImage, "png", byteArrayOutputStream);
-
-            byte[] imageBytes = byteArrayOutputStream.toByteArray();
-            Image image = new Image(ImageDataFactory.create(imageBytes)).setAutoScale(true);
-
-            document.add(image);
-            document.add(new Paragraph("\n"));
-
-            Table table = tableGenerator.addTableByDate(tableData);
-            document.add(table);
-            document.add(new Paragraph("\n"));
-        } catch (IOException e) {
-            module.getLogger().error("Error creating Alarm-Occupancy chart", e);
-            return;
-        }
-
-        document.add(new Paragraph("\n"));
-    }
-
-    private DatasetResult buildAlarmingDatasetAndTable() {
-
-        Map<Instant, Long> gammaDaily = Utils.countObservationsByDayForLanes(module, laneUIDs, Utils.gammaAlarmCQL, start, end, RADHelper.DEF_OCCUPANCY);
-        Map<Instant, Long> neutronDaily = Utils.countObservationsByDayForLanes(module, laneUIDs, Utils.neutronAlarmCQL, start, end, RADHelper.DEF_OCCUPANCY);
-        Map<Instant, Long> gammaNeutronDaily = Utils.countObservationsByDayForLanes(module, laneUIDs, Utils.gammaNeutronAlarmCQL, start, end, RADHelper.DEF_OCCUPANCY);
-        Map<Instant, Long> emlSuppressedDaily = Utils.countObservationsByDayForLanes(module, laneUIDs, Utils.emlSuppressedCQL, start, end, RADHelper.DEF_EML_ANALYSIS);
-
-
-        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-        Map<String, Map<String, String>> tableDataByDate = new LinkedHashMap<>();
-
-        for (Map.Entry<Instant, Long> entry : gammaDaily.entrySet()) {
-            String date = formatter.format(entry.getKey());
-
-            dataset.addValue(entry.getValue(), "Gamma", date);
-            tableDataByDate.computeIfAbsent(date, k -> new LinkedHashMap<>()).put("Gamma", entry.getValue().toString());
-        }
-
-        for (Map.Entry<Instant, Long> entry : gammaNeutronDaily.entrySet()) {
-            String date = formatter.format(entry.getKey());
-
-            dataset.addValue(entry.getValue(), "Gamma-Neutron", date);
-            tableDataByDate.computeIfAbsent(date, k -> new LinkedHashMap<>()).put("Gamma-Neutron", entry.getValue().toString());
-        }
-
-        for (Map.Entry<Instant, Long> entry : neutronDaily.entrySet()) {
-            String date = formatter.format(entry.getKey());
-
-            dataset.addValue(entry.getValue(), "Neutron", date);
-            tableDataByDate.computeIfAbsent(date, k -> new LinkedHashMap<>()).put("Neutron", entry.getValue().toString());
-        }
-
-        for (Map.Entry<Instant, Long> entry : emlSuppressedDaily.entrySet()) {
-            String date = formatter.format(entry.getKey());
-
-            dataset.addValue(entry.getValue(), "EML-Suppressed", date);
-            tableDataByDate.computeIfAbsent(date, k -> new LinkedHashMap<>()).put("EML-Suppressed", entry.getValue().toString());
-        }
-
-        return new DatasetResult(dataset, tableDataByDate);
+        pdf.drawSectionHeader("Daily SOH Breakdown", "Exact daily fault and tamper counts (UTC)", 70f);
+        tableGenerator.drawTableByDate(pdf, tableByDate, true);
     }
 }

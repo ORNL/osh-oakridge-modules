@@ -268,6 +268,8 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         // workers were stopped serially, that first wait would leave every later service running
         // and give it an already-expired deadline. The request phase is deliberately non-blocking;
         // the await phase below remains truthful and shares this one module-registry-safe deadline.
+        failure = runStopStep(failure, "report worker stop request",
+                this::requestReportControlStop);
         failure = runStopStep(failure, "statistics output stop request",
                 this::requestStatisticsOutputStop);
         failure = runStopStep(failure, "database purger stop request",
@@ -279,6 +281,8 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         failure = runStopStep(failure, "storage-pressure retention stop request",
                 this::requestStoragePressureRetentionStop);
 
+        failure = runStopStep(failure, "report worker",
+                () -> awaitReportControlStop(deadline));
         failure = runStopStep(failure, "statistics output",
                 () -> awaitStatisticsOutputStop(deadline));
         failure = runStopStep(failure, "database purger",
@@ -374,6 +378,11 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         }
     }
 
+    void requestReportControlStop() {
+        if (reportControl != null)
+            reportControl.requestStop();
+    }
+
     void requestStatisticsOutputStop() {
         if (statsOutput != null)
             statsOutput.requestStop();
@@ -397,6 +406,11 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     void requestStoragePressureRetentionStop() {
         if (storagePressureRetention != null)
             storagePressureRetention.requestStop();
+    }
+
+    void awaitReportControlStop(long deadline) {
+        if (reportControl != null)
+            reportControl.awaitStop(remainingStopNanos(deadline), TimeUnit.NANOSECONDS);
     }
 
     void awaitStatisticsOutputStop(long deadline) {

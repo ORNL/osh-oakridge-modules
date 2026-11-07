@@ -1,97 +1,176 @@
+/*******************************************************************************
+
+ The contents of this file are subject to the Mozilla Public License, v. 2.0.
+ If a copy of the MPL was not distributed with this file, You can obtain one
+ at http://mozilla.org/MPL/2.0/.
+
+ Software distributed under the License is distributed on an "AS IS" basis,
+ WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+ for the specific language governing rights and limitations under the License.
+
+ The Initial Developer is Botts Innovative Research Inc. Portions created by the Initial
+ Developer are Copyright (C) 2025 the Initial Developer. All Rights Reserved.
+
+ ******************************************************************************/
+
 package com.botts.impl.service.oscar.reports.types;
 
 import com.botts.impl.service.oscar.OSCARServiceModule;
-import com.botts.impl.service.oscar.reports.helpers.*;
-import com.itextpdf.io.image.ImageDataFactory;
-import com.itextpdf.kernel.pdf.PdfDocument;
-import com.itextpdf.kernel.pdf.PdfWriter;
-import com.itextpdf.layout.Document;
-import com.itextpdf.layout.element.Image;
-import com.itextpdf.layout.element.Paragraph;
-import com.itextpdf.layout.element.Table;
-import com.itextpdf.layout.properties.UnitValue;
-import org.checkerframework.checker.units.qual.A;
-import org.jfree.chart.JFreeChart;
-import org.jfree.chart.axis.AxisLocation;
-import org.jfree.chart.axis.NumberAxis;
-import org.jfree.chart.axis.NumberTickUnit;
-import org.jfree.chart.plot.CategoryPlot;
-import org.jfree.chart.plot.PlotOrientation;
-import org.jfree.chart.renderer.category.BarRenderer;
-import org.jfree.data.category.DefaultCategoryDataset;
-import org.sensorhub.api.command.ICommandData;
-import org.sensorhub.api.command.ICommandStatus;
-import org.sensorhub.api.command.ICommandStreamInfo;
-import org.sensorhub.api.data.IObsData;
+import com.botts.impl.service.oscar.reports.helpers.ChartGenerator;
+import com.botts.impl.service.oscar.reports.helpers.PdfDocumentBuilder;
+import com.botts.impl.service.oscar.reports.helpers.ReportCmdType;
+import com.botts.impl.service.oscar.reports.helpers.ReportDataAggregator;
+import com.botts.impl.service.oscar.reports.helpers.TableGenerator;
 import org.sensorhub.api.datastore.DataStoreException;
-import org.sensorhub.impl.utils.rad.RADHelper;
-import org.sensorhub.impl.utils.rad.model.Adjudication;
-import javax.imageio.ImageIO;
-import java.awt.*;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
+
+import java.awt.Color;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.text.DecimalFormat;
+import java.text.NumberFormat;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.function.Predicate;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 public class AdjudicationReport extends Report {
 
-    Document document;
-    PdfDocument pdfDocument;
-    
-    TableGenerator tableGenerator;
-    ChartGenerator chartGenerator;
-
-    String laneUIDs;
-
-    private static final List<Map<String, Object>> ADJUDICATION_CODES = List.of(
-            Map.of("code", 0, "label", "", "group", "Other"),
-            Map.of("code", 1, "label", "Code 1: Contraband Found", "group", "Real Alarm"),
-            Map.of("code", 2, "label", "Code 2: Other", "group", "Real Alarm"),
-            Map.of("code", 3, "label", "Code 3: Medical Isotope Found", "group", "Innocent Alarm"),
-            Map.of("code", 4, "label", "Code 4: NORM Found", "group", "Innocent Alarm"),
-            Map.of("code", 5, "label", "Code 5: Declared Shipment of Radioactive Material", "group", "Innocent Alarm"),
-            Map.of("code", 6, "label", "Code 6: Physical Inspection Negative", "group", "False Alarm"),
-            Map.of("code", 7, "label", "Code 7: RIID/ASP Indicates Background Only", "group", "False Alarm"),
-            Map.of("code", 8, "label", "Code 8: Other", "group", "False Alarm"),
-            Map.of("code", 9, "label", "Code 9: Authorized Test, Maintenance, or Training Activity", "group", "Test/Maintenance"),
-            Map.of("code", 10, "label", "Code 10: Unauthorized Activity", "group", "Tamper/Fault"),
-            Map.of("code", 11, "label", "Code 11: Other", "group", "Other"),
-            Map.of("code", Adjudication.EML_NON_THREAT_CODE, "label", "EML Non-Threat", "group", "Automated")
-    );
-
-    private record DatasetResult(DefaultCategoryDataset dataset, Map<String, String> tableData) {}
+    private final String laneUIDs;
+    private final TableGenerator tableGenerator;
+    private final ChartGenerator chartGenerator;
 
     public AdjudicationReport(OutputStream out, Instant startTime, Instant endTime, String laneUIDs, OSCARServiceModule module) {
         super(out, startTime, endTime, module);
-
-        pdfDocument = new PdfDocument(new PdfWriter(out));
-        document = new Document(pdfDocument);
-
         this.laneUIDs = laneUIDs;
         this.tableGenerator = new TableGenerator();
         this.chartGenerator = new ChartGenerator(module);
     }
 
     @Override
-    public void generate(){
-        addHeader();
+    public void generate() throws DataStoreException {
+        String nodeId = (module != null && module.getConfiguration() != null && module.getConfiguration().nodeId != null)
+                ? module.getConfiguration().nodeId
+                : "oscar-node";
 
-        for (var laneUID : laneUIDs.split(",")){
-            document.add(new Paragraph("Lane UID: " + laneUIDs).setFontSize(12));
+        List<String> targetLanes = ReportDataAggregator.resolveTargetLaneUIDs(module, laneUIDs);
+        Map<String, String> inlineLaneLabels = ReportDataAggregator.resolveLaneDisplayLabels(module, targetLanes, false);
+        Map<String, String> multilineLaneLabels = ReportDataAggregator.resolveLaneDisplayLabels(module, targetLanes, true);
 
-            createDispositionChart(laneUID);
-            createIsotopeChartAndTable(laneUID);
+        // Single-pass aggregation per lane
+        Map<String, ReportDataAggregator.AdjudicationLaneSummary> summariesByLane = new LinkedHashMap<>();
+        long grandTotalRecords = 0L;
+        long realAlarmCount = 0L;
+        long innocentOrAutoCount = 0L;
+        long falseAlarmCount = 0L;
+        Set<String> activeIsotopesAcrossScope = new LinkedHashSet<>();
+        Map<String, List<Map<String, String>>> detailsByLane = new LinkedHashMap<>();
+
+        for (String laneUid : targetLanes) {
+            ReportDataAggregator.AdjudicationLaneSummary summary =
+                    ReportDataAggregator.aggregateAdjudicationsForLane(module, laneUid, start, end);
+            summariesByLane.put(laneUid, summary);
+            detailsByLane.put(laneUid, summary.detailRows());
+            grandTotalRecords += summary.totalRecords();
+
+            for (ReportDataAggregator.DispositionCodeSpec spec : summary.dispositionSpecs()) {
+                long c = summary.countsByCode().getOrDefault(spec.code(), 0L);
+                if (c <= 0L) {
+                    continue;
+                }
+                switch (spec.group()) {
+                    case "Real Alarm" -> realAlarmCount += c;
+                    case "Innocent Alarm", "Automated" -> innocentOrAutoCount += c;
+                    case "False Alarm" -> falseAlarmCount += c;
+                    default -> {
+                        // Tracked in full Disposition breakdown table
+                    }
+                }
+            }
+            for (Map.Entry<String, Long> isoEntry : summary.isotopeCountsBySymbol().entrySet()) {
+                if (isoEntry.getValue() != null && isoEntry.getValue() > 0L) {
+                    activeIsotopesAcrossScope.add(isoEntry.getKey());
+                }
+            }
         }
-        addAdjudicationDetails();
 
-        document.close();
-        chartGenerator = null;
-        tableGenerator = null;
+        NumberFormat intFmt = NumberFormat.getIntegerInstance(Locale.US);
+        String scopeLine = ReportDataAggregator.buildBannerScopeSummary(module, laneUIDs);
+
+        try (PdfDocumentBuilder pdf = new PdfDocumentBuilder("Adjudication Report", nodeId)) {
+            pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
+                    "Adjudication Report",
+                    nodeId,
+                    null,
+                    scopeLine,
+                    start,
+                    end
+            ));
+
+            pdf.drawKpiCards(List.of(
+                    new PdfDocumentBuilder.KpiCard(
+                            "Total Adjudications",
+                            intFmt.format(grandTotalRecords),
+                            targetLanes.size() + (targetLanes.size() == 1 ? " lane" : " lanes"),
+                            PdfDocumentBuilder.ACCENT_BLUE
+                    ),
+                    new PdfDocumentBuilder.KpiCard(
+                            "Real Alarms",
+                            intFmt.format(realAlarmCount),
+                            "Codes 1 - 2",
+                            ChartGenerator.GROUP_REAL_ALARM
+                    ),
+                    new PdfDocumentBuilder.KpiCard(
+                            "Innocent & EML Auto",
+                            intFmt.format(innocentOrAutoCount),
+                            "Codes 3 - 5 & EML Non-Threat",
+                            ChartGenerator.GROUP_AUTOMATED
+                    ),
+                    new PdfDocumentBuilder.KpiCard(
+                            "False Alarms",
+                            intFmt.format(falseAlarmCount),
+                            "Codes 6 - 8",
+                            ChartGenerator.GROUP_FALSE_ALARM
+                    ),
+                    new PdfDocumentBuilder.KpiCard(
+                            "Isotopes Identified",
+                            intFmt.format(activeIsotopesAcrossScope.size()),
+                            activeIsotopesAcrossScope.isEmpty() ? "No isotopes recorded" : String.join(", ", activeIsotopesAcrossScope),
+                            PdfDocumentBuilder.ACCENT_PURPLE
+                    )
+            ));
+
+            if (targetLanes.isEmpty()) {
+                pdf.drawCalloutBox("No lanes selected or configured for Adjudication Report.");
+            }
+
+            for (String laneUid : targetLanes) {
+                String friendlyLane = inlineLaneLabels.getOrDefault(laneUid, laneUid);
+                ReportDataAggregator.AdjudicationLaneSummary summary = summariesByLane.get(laneUid);
+                renderLaneDispositionSection(pdf, friendlyLane, summary, intFmt);
+                renderLaneIsotopeSection(pdf, friendlyLane, summary, intFmt);
+            }
+
+            // Wide 12-column Adjudication Details section on Landscape pages when records exist
+            if (grandTotalRecords > 0L) {
+                pdf.switchOrientationIfNeeded(PdfDocumentBuilder.Orientation.LANDSCAPE, 140f);
+                pdf.drawSectionHeader(
+                        "Adjudication Details",
+                        "Complete operator and automated EML adjudication records (Landscape view)",
+                        90f
+                );
+                tableGenerator.drawAdjudicationDetailsTable(pdf, detailsByLane, multilineLaneLabels);
+            } else {
+                pdf.drawSectionHeader("Adjudication Details", "Complete operator and automated EML adjudication records", 60f);
+                pdf.drawCalloutBox("No completed adjudication records exist for the selected lanes and time period.");
+            }
+
+            pdf.finishAndSave(out);
+        } catch (IOException e) {
+            throw new DataStoreException("Failed to generate Adjudication Report PDF", e);
+        }
     }
 
     @Override
@@ -99,327 +178,119 @@ public class AdjudicationReport extends Report {
         return ReportCmdType.ADJUDICATION.name();
     }
 
-    private void addHeader() {
-        document.add(new Paragraph("Adjudication Report").setFontSize(16).simulateBold());
-        document.add(new Paragraph("\n"));
-    }
+    private void renderLaneDispositionSection(
+            PdfDocumentBuilder pdf,
+            String friendlyLane,
+            ReportDataAggregator.AdjudicationLaneSummary summary,
+            NumberFormat intFmt
+    ) throws IOException {
+        pdf.drawSectionHeader(
+                "Disposition - " + friendlyLane,
+                "Percentage and count breakdown by built-in, custom, and automated disposition codes",
+                80f
+        );
 
-    private void createDispositionChart(String laneUID) {
-        document.add(new Paragraph("Disposition - " + laneUID).setFontSize(12));
-
-        String title =  "Disposition";
-        String yLabel = "% of Total Number of Records";
-
-
-        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-
-        long totalRecords = Utils.countStatusResults(laneUID, module, cmdData -> true, start, end);
-
-        if (totalRecords == 0) {
-            document.add(new Paragraph("No data available for the selected time period and selected lane: "+ laneUID));
+        if (summary == null || summary.totalRecords() == 0L) {
+            pdf.drawCalloutBox("No data available for the selected time period and selected lane: " + friendlyLane);
             return;
         }
 
-        List<Map<String, String>> tableRows = new ArrayList<>();
+        List<ChartGenerator.HorizontalBarItem> barItems = new ArrayList<>();
+        Map<String, Color> presentGroups = new LinkedHashMap<>();
+        List<List<String>> dispTableRows = new ArrayList<>();
 
-        for (var item : ADJUDICATION_CODES) {
-            int code = (int) item.get("code");
-            String label = (String) item.get("label");
-            String group = (String) item.get("group");
+        for (ReportDataAggregator.DispositionCodeSpec spec : summary.dispositionSpecs()) {
+            long count = summary.countsByCode().getOrDefault(spec.code(), 0L);
+            double pct = (count * 100.0) / summary.totalRecords();
+            Color groupColor = ChartGenerator.colorForDispositionGroup(spec.group());
 
-            //todo: replace with cql when filter is added
-            Predicate<ICommandStatus> predicate = (cmdData) -> cmdData.getResult().getInlineRecords().stream().toList().get(0).getIntValue(2) == code;
-
-            long count = Utils.countStatusResults(laneUID, module, predicate, start, end);
-            double percentage = (count / (double) totalRecords) * 100.0;
-
-            if (label != null && !label.isEmpty()) {
-                dataset.addValue(percentage, group, label);
+            if (spec.label() != null && !spec.label().isBlank()) {
+                presentGroups.putIfAbsent(spec.group(), groupColor);
+                String callout = count > 0L
+                        ? String.format(Locale.US, "%s (%.1f%%)", intFmt.format(count), pct)
+                        : "0 (0.0%)";
+                barItems.add(new ChartGenerator.HorizontalBarItem(
+                        spec.label(),
+                        pct,
+                        callout,
+                        groupColor,
+                        count > 0L
+                ));
             }
 
-            tableRows.add(Map.of(
-                    "Code", String.valueOf(code),
-                    "Label", label.isEmpty() ? "(None)" : label,
-                    "Group", group,
-                    "Count", String.valueOf(count),
-                    "Percent", String.format("%.1f%%", percentage)
+            dispTableRows.add(List.of(
+                    String.valueOf(spec.code()),
+                    (spec.label() == null || spec.label().isBlank()) ? "(None)" : spec.label(),
+                    spec.group(),
+                    intFmt.format(count),
+                    String.format(Locale.US, "%.1f%%", pct)
             ));
         }
 
-        try {
-            var chart = chartGenerator.createChart(
-                    title,
-                    null,
-                    yLabel,
-                    dataset,
-                    "bar",
-                    PlotOrientation.HORIZONTAL
-            );
-
-            if (chart == null) {
-                document.add(new Paragraph("Disposition chart failed to create"));
-                return;
-            }
-
-            CategoryPlot plot = chart.getCategoryPlot();
-            plot.setRangeAxisLocation(AxisLocation.BOTTOM_OR_LEFT);
-
-            BarRenderer renderer = (BarRenderer) plot.getRenderer();
-            renderer.setSeriesPaint(dataset.getRowIndex("Other"), Color.GRAY);
-            renderer.setSeriesPaint(dataset.getRowIndex("Real Alarm"), Color.RED);
-            renderer.setSeriesPaint(dataset.getRowIndex("Innocent Alarm"), Color.BLUE);
-            renderer.setSeriesPaint(dataset.getRowIndex("False Alarm"), Color.GREEN);
-            renderer.setSeriesPaint(dataset.getRowIndex("Test/Maintenance"), Color.ORANGE);
-            renderer.setSeriesPaint(dataset.getRowIndex("Tamper/Fault"), new Color(128, 0, 128));
-            int automatedSeriesIdx = dataset.getRowIndex("Automated");
-            if (automatedSeriesIdx >= 0) {
-                renderer.setSeriesPaint(automatedSeriesIdx, new Color(14, 116, 144));
-            }
-            renderer.setItemMargin(0.05);
-
-            NumberAxis rangeAxis = (NumberAxis) plot.getRangeAxis();
-            rangeAxis.setNumberFormatOverride(new DecimalFormat("0'%'"));
-            rangeAxis.setTickUnit(new NumberTickUnit(10));
-
-            Image image = addChartAsImage(chart);
-            document.add(image);
-            document.add(new Paragraph("\n"));
-
-            Table table = createDispositionTable(tableRows);
-            document.add(table);
-            document.add(new Paragraph("\n"));
-
-        } catch (IOException e) {
-            module.getLogger().error("Error adding chart to report", e);
-        }
-    }
-
-    private Table createDispositionTable(List<Map<String, String>> rows) {
-        if (rows.isEmpty())
-            return null;
-
-        List<String> headers = List.of("Code", "Label", "Group", "Count", "Percent");
-        float[] columnWidths = new float[headers.size()];
-        Arrays.fill(columnWidths, 1.0f);
-
-        Table table = new Table(UnitValue.createPercentArray(columnWidths))
-                .setWidth(UnitValue.createPercentValue(75));
-
-        for (String header : headers) {
-            table.addHeaderCell(tableGenerator.createHeaderCell(header));
+        List<ChartGenerator.LegendItem> groupLegend = new ArrayList<>();
+        for (Map.Entry<String, Color> g : presentGroups.entrySet()) {
+            groupLegend.add(new ChartGenerator.LegendItem(g.getKey(), g.getValue()));
         }
 
-        for (Map<String, String> row : rows) {
-            for (String header : headers) {
-                table.addCell(tableGenerator.createValueCell(row.get(header)));
-            }
-        }
-        return table;
-    }
-
-    private DatasetResult buildIsotopeDatasetAndTable(String laneUID) {
-
-        Map<String, String> isotopes = Map.ofEntries(
-                Map.entry("Np", "Neptunium"),
-                Map.entry("Pu", "Plutonium"),
-                Map.entry("U-233", "Uranium233"),
-                Map.entry("U-235", "Uranium235"),
-                Map.entry("Am", "Americium"),
-                Map.entry("U-238", "Uranium238"),
-                Map.entry("Ba", "Barium"),
-                Map.entry("Bi", "Bismuth"),
-                Map.entry("Cf", "Californium"),
-                Map.entry("Cs-134", "Cesium134"),
-                Map.entry("Cs-137", "Cesium137"),
-                Map.entry("Co-57", "Cobalt57"),
-                Map.entry("Co-60", "Cobalt60"),
-                Map.entry("Eu", "Europium"),
-                Map.entry("Ir", "Iridium"),
-                Map.entry("Mn", "Manganese"),
-                Map.entry("Se", "Selenium"),
-                Map.entry("Na", "Sodium"),
-                Map.entry("Sr", "Strontium"),
-                Map.entry("F", "Fluorine"),
-                Map.entry("Ga", "Gallium"),
-                Map.entry("I-123", "Iodine123"),
-                Map.entry("I-131", "Iodine131"),
-                Map.entry("In", "Indium"),
-                Map.entry("Pd", "Palladium"),
-                Map.entry("Tc", "Technetium"),
-                Map.entry("Xe", "Xenon"),
-                Map.entry("K", "Potassium"),
-                Map.entry("Ra", "Radium"),
-                Map.entry("Th", "Thorium"),
-                Map.entry("Unk", "Unknown")
+        chartGenerator.drawHorizontalBarChart(
+                pdf,
+                "Disposition",
+                "% of Total Number of Records",
+                barItems,
+                groupLegend,
+                true,
+                false
         );
 
-        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-        Map<String, String> tableData = new LinkedHashMap<>();
-
-        var query = Utils.queryCommandStatus(module, laneUID, start, end);
-
-        Map<String, Long> isotopeCounts = new HashMap<>();
-
-        while (query.hasNext()) {
-            var entry = query.next();
-            var resultList = entry.getResult().getInlineRecords().stream().toList();
-            var result = resultList.get(0);
-
-            int index = 3;
-            var isotopeCount = result.getIntValue(index++);
-
-            var isotopeList = new ArrayList<>();
-            for (int i = 0; i < isotopeCount; i++) {
-                isotopeList.add(result.getStringValue(index++));
-            }
-
-            for (Map.Entry<String, String> isotopeEntry : isotopes.entrySet()) {
-                String symbol = isotopeEntry.getKey();
-                String name = isotopeEntry.getValue();
-
-                for (var isotope : isotopeList) {
-                    if (isotope.equals(name)) {
-                        isotopeCounts.merge(symbol, 1L, Long::sum);
-                    }
-                }
-            }
-        }
-
-        for (Map.Entry<String, String> entry : isotopes.entrySet()) {
-            String symbol = entry.getKey();
-            String name = entry.getValue();
-            long count = isotopeCounts.getOrDefault(symbol, 0L);
-
-            dataset.addValue(count, name, symbol);
-            tableData.put(symbol, String.valueOf(count));
-        }
-
-
-        return new DatasetResult(dataset, tableData);
+        List<TableGenerator.ColumnSpec> cols = List.of(
+                new TableGenerator.ColumnSpec("Code", 0.55f, TableGenerator.Align.RIGHT),
+                new TableGenerator.ColumnSpec("Label", 2.85f, TableGenerator.Align.LEFT),
+                new TableGenerator.ColumnSpec("Group", 1.15f, TableGenerator.Align.LEFT),
+                new TableGenerator.ColumnSpec("Count", 0.70f, TableGenerator.Align.RIGHT, true),
+                new TableGenerator.ColumnSpec("Percent", 0.75f, TableGenerator.Align.RIGHT)
+        );
+        tableGenerator.drawTable(pdf, cols, dispTableRows, false, 7.6f);
     }
 
-    private void createIsotopeChartAndTable(String laneUID) {
-        document.add(new Paragraph("\n"));
-        document.add(new Paragraph("Isotope Results - " + laneUID).setFontSize(12));
+    private void renderLaneIsotopeSection(
+            PdfDocumentBuilder pdf,
+            String friendlyLane,
+            ReportDataAggregator.AdjudicationLaneSummary summary,
+            NumberFormat intFmt
+    ) throws IOException {
+        pdf.drawSectionHeader(
+                "Isotope Results - " + friendlyLane,
+                "Identification counts across all 31 standard SNM, industrial, medical, and NORM isotopes",
+                80f
+        );
 
-        String title = "Isotope Results";
-        String yLabel = "Count";
-        String xLabel = "Isotope";
+        Map<String, Long> isoCounts = summary != null ? summary.isotopeCountsBySymbol() : Map.of();
+        List<ChartGenerator.HorizontalBarItem> barItems = new ArrayList<>(ReportDataAggregator.STANDARD_ISOTOPES.size());
 
-        DatasetResult result = buildIsotopeDatasetAndTable(laneUID);
-        DefaultCategoryDataset dataset = result.dataset();
-        Map<String, String> tableData = result.tableData();
-
-
-        try {
-            var chart = chartGenerator.createChart(
-                    title,
-                    xLabel,
-                    yLabel,
-                    dataset,
-                    "bar",
-                    PlotOrientation.HORIZONTAL
-            );
-
-            if (chart == null) {
-                document.add(new Paragraph("Isotope chart failed to create"));
-                return;
-            }
-
-            CategoryPlot plot = chart.getCategoryPlot();
-            plot.setRangeAxisLocation(AxisLocation.BOTTOM_OR_LEFT);
-
-            Image image = addChartAsImage(chart);
-
-            document.add(image);
-            document.add(new Paragraph("\n"));
-
-            Table table = tableGenerator.addTable(tableData);
-            document.add(table);
-            document.add(new Paragraph("\n"));
-
-        } catch (IOException e) {
-            module.getLogger().error("Error adding chart to report", e);
-        }
-    }
-
-    private void addAdjudicationDetails() {
-        document.add(new Paragraph("\n"));
-        document.add(new Paragraph("Adjudication Details").setFontSize(12));
-
-        Map<String, List<Map<String, String>>> adjTableData = new LinkedHashMap<>();
-
-        for (var laneUID : laneUIDs.split(",")) {
-            var adjDetailsList = collectAdjudicationDetails(laneUID);
-            adjTableData.put(laneUID, adjDetailsList);
+        for (Map.Entry<String, String> std : ReportDataAggregator.STANDARD_ISOTOPES.entrySet()) {
+            String symbol = std.getKey();
+            String fullName = std.getValue();
+            long count = Math.max(0L, isoCounts.getOrDefault(symbol, 0L));
+            String catLabel = symbol + " (" + fullName + ")";
+            barItems.add(new ChartGenerator.HorizontalBarItem(
+                    catLabel,
+                    count,
+                    intFmt.format(count),
+                    ChartGenerator.COLOR_NEUTRON,
+                    count > 0L
+            ));
         }
 
-        var table = tableGenerator.addListToTable(adjTableData);
-        if (table == null) {
-            document.add(new Paragraph("Failed to add adjudication details to pdf"));
-            return;
-        }
+        chartGenerator.drawHorizontalBarChart(
+                pdf,
+                "Isotope Results",
+                "Count",
+                barItems,
+                List.of(new ChartGenerator.LegendItem("Identified Isotope Count", ChartGenerator.COLOR_NEUTRON)),
+                false,
+                true
+        );
 
-        document.add(table);
-
-        document.add(new Paragraph("\n"));
+        tableGenerator.drawIsotopeGridTable(pdf, isoCounts, ReportDataAggregator.STANDARD_ISOTOPES);
     }
-
-    private  List<Map<String, String>> collectAdjudicationDetails(String laneUID) {
-        List<Map<String, String>> adjDetailsList = new ArrayList<>();
-
-        var query = Utils.queryCommandStatus(module, laneUID, start, end);
-
-        int ixx = 1;
-        while (query.hasNext()) {
-            var entry = query.next();
-            var resultList = entry.getResult().getInlineRecords().stream().toList();
-            var result = resultList.get(0);
-
-            Map<String, String> adjDetailsMap = new LinkedHashMap<>();
-            adjDetailsMap.put("#", String.valueOf(ixx));
-
-            int index = 0;
-            adjDetailsMap.put("Username", result.getStringValue(index++));
-            adjDetailsMap.put("Feedback", result.getStringValue(index++));
-            adjDetailsMap.put("Adjudication Code", result.getStringValue(index++));
-            var isotopeCount = result.getIntValue(index++);
-            adjDetailsMap.put("Isotope Count", String.valueOf(isotopeCount));
-
-            var isotopes = new ArrayList<>();
-            for (int i = 0; i < isotopeCount; i++) {
-                isotopes.add(result.getStringValue(index++));
-            }
-            adjDetailsMap.put("Isotopes", isotopes.toString());
-            adjDetailsMap.put("Secondary Inspection Status", result.getStringValue(index++));
-
-            var fileCount = result.getIntValue(index++);
-            adjDetailsMap.put("File Path Count", String.valueOf(fileCount));
-
-            var filePaths = new ArrayList<>();
-            for (int i = 0; i < fileCount; i++) {
-                filePaths.add(result.getStringValue(index++));
-            }
-            adjDetailsMap.put("File Paths", filePaths.toString());
-            adjDetailsMap.put("Occupancy Obs ID", result.getStringValue(index++));
-            adjDetailsMap.put("Vehicle ID", result.getStringValue(index++));
-
-            adjDetailsList.add(adjDetailsMap);
-            ixx++;
-        }
-
-        return adjDetailsList;
-    }
-
-    private Image addChartAsImage(JFreeChart chart) throws IOException {
-        BufferedImage bufferedImage = chart.createBufferedImage(1200, 600);
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        ImageIO.write(bufferedImage, "png", byteArrayOutputStream);
-
-        byte[] imageBytes = byteArrayOutputStream.toByteArray();
-        Image image = new Image(ImageDataFactory.create(imageBytes)).setAutoScale(true);
-
-        return image;
-    }
-
 }
