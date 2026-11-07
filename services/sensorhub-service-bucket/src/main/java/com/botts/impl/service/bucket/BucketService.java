@@ -24,6 +24,7 @@ import com.botts.impl.service.bucket.handler.DefaultObjectHandler;
 import com.botts.impl.service.bucket.handler.MP4Handler;
 import com.botts.impl.service.bucket.util.UploadPolicy;
 import org.sensorhub.api.common.SensorHubException;
+import org.sensorhub.api.datastore.DataStoreException;
 import org.sensorhub.impl.service.AbstractHttpServiceModule;
 import org.sensorhub.utils.NamedThreadFactory;
 import org.vast.util.Asserts;
@@ -169,6 +170,14 @@ public class BucketService extends AbstractHttpServiceModule<BucketServiceConfig
     @Override
     public IBucketStore getBucketStore() {
         return bucketStore;
+    }
+
+    @Override
+    public synchronized void ensureBucketRegistered(String bucketName) throws DataStoreException {
+        if (bucketStore != null && !bucketStore.bucketExists(bucketName))
+            bucketStore.createBucket(bucketName);
+        if (securityHandler instanceof BucketSecurity sec)
+            sec.addBucket(bucketName);
     }
 
 }

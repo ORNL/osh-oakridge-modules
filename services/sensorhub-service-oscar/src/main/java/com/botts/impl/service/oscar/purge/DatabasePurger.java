@@ -61,7 +61,7 @@ public class DatabasePurger {
 
     private final int occupancyBufferSeconds;
 
-    private static final String DAILY_FILES_BUCKET = "dailyfiles";
+    public static final String DAILY_FILES_BUCKET = "dailyfiles";
 
     private static final int CONNECTION_STATUS_RETENTION_HOURS = 1;
     static final int DELETE_BATCH_SIZE = 5_000;

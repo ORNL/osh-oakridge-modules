@@ -1,5 +1,7 @@
 package com.botts.api.service.bucket;
 
+import org.sensorhub.api.datastore.DataStoreException;
+
 import javax.servlet.http.HttpServletRequest;
 import java.util.concurrent.ExecutorService;
 
@@ -18,5 +20,8 @@ public interface IBucketService {
     IObjectHandler getObjectHandler(String bucketName, String objectKey);
 
     IObjectHandler getObjectHandler(String bucketName, String objectKey, HttpServletRequest request);
+
+    default void ensureBucketRegistered(String bucketName) throws DataStoreException {
+    }
 
 }
