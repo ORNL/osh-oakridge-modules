@@ -49,6 +49,23 @@ Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/mai
 - Pour un RPM, hôte et port ont des champs séparés. La caméra n'a pas de champ de port séparé ; ajoutez un port non standard à l'hôte, par exemple `192.0.2.25:8554`.
 - N'ajoutez pas `rtsp://` à l'hôte d'une caméra de voie. Le Système de voie génère l'URL RTSP.
 
+### Termes clés expliqués
+
+| Terme | Signification en langage clair |
+| --- | --- |
+| **Occupation (`Occupancy`)** | Un passage complet d'un véhicule, d'un conteneur ou d'un piéton dans une voie de détection entre le déclencheur d'entrée (`GS`) et celui de sortie (`GX`). |
+| **CPS (Coups par seconde)** | Taux de comptage brut du détecteur de rayonnement mesuré à chaque intervalle d'échantillonnage pendant le bruit de fond ou l'occupation. |
+| **NSIGMA (`N-Sigma`)** | Nombre d'écarts-types (`σ`) dont le taux de comptage gamma actuel dépasse la moyenne récente du bruit de fond ; permet un déclenchement cohérent des alarmes lorsque le fond varie. |
+| **NORM (Matière radioactive d'origine naturelle)** | Cargaison bénigne contenant des radio-isotopes naturels (tels que le potassium-40 dans les engrais, la litière, la céramique ou les bananes, ou les séries thorium/uranium dans le granit et le carrelage). |
+| **EML (Rapports de métriques d'énergie) et Code `9999`** | Algorithme pour portiques Rapiscan comparant les fenêtres gamma de basse, moyenne et haute énergie pour distinguer le fret **NORM** bénin des sources menaçantes. Lorsqu'une alarme est classée non menaçante, OSCAR enregistre une décision automatique (`Code 9999: EML Non-Threat`). |
+| **WebID et DRF (Fonction de réponse du détecteur)** | **WebID** est le service Sandia Full Spectrum d'identification isotopique des spectres téléversés (`N42`/SPC). Une **DRF** indique à WebID le modèle physique et la géométrie du détecteur utilisé. |
+| **Fichier quotidien et codes (`GB`, `GS`, `GA`, `NS`, `GX`)** | Journal CSV quotidien par voie contenant les messages RPM bruts : `GB`/`NB` = bruit de fond gamma/neutrons, `GS` = début d'occupation, `GC`/`NC` = profil de comptage, `GA`/`NA`/`NS` = alarme gamma/neutrons, `GX` = fin d'occupation, `TT`/`TC` = défaut/rétablissement de sabotage. |
+| **UUID d'événement (`Event UUID`)** | Identifiant unique global attribué à chaque événement d'occupation pour la recherche, l'exportation QR et le suivi dans les rapports et nœuds fédérés. |
+| **Vue opérationnelle (`Operational View`)** | Filtre nommé (`?view=<clé>` ou `/view/<clé>`) limitant le Tableau de bord, les Événements, l'État de santé et le Générateur de rapports d'un poste à un groupe de voies précis. |
+| **Niveau froid Parquet (`PARQUET_PRIMARY`)** | Mode de stockage par défaut d'OSCAR 3.11.0 dans lequel PostgreSQL conserve une fenêtre de transit de 30 minutes et les partitions terminées sont exportées en fichiers Apache Parquet compressés ZSTD (`archive/parquet/`). |
+| **Médias conservés à 5 images** | Pour chaque occupation avec alarme, OSCAR extrait 5 instantanés JPEG (`frame-01.jpg` à `frame-05.jpg`). Après 30 jours, les images secondaires (`01`, `02`, `04`, `05`) sont purgées et l'image centrale (`frame-03.jpg`) est conservée. |
+| **SAN (Nom alternatif du sujet)** | Liste des noms d'hôtes et adresses IP (tels que `oscar.local` et `192.168.0.57`) inscrits dans un certificat HTTPS que le navigateur vérifie avant d'établir la connexion. |
+
 ## 2. Approuver le certificat OSCAR
 
 OSCAR utilise HTTPS. Un déploiement muni de son certificat autosigné affiche un avertissement de confidentialité jusqu'à ce que le poste lui fasse confiance. Un certificat émis par une autorité publique ou d'entreprise déjà approuvée ne nécessite pas cette procédure.
@@ -662,18 +679,20 @@ Les plages prédéfinies sont mises en cache et rechargées après actualisation
 
 ![Générateur de rapports](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
 
-Le générateur crée un PDF dans le bucket `reports` du nœud et l'affiche à droite.
+Le **Générateur de rapports** demande au Service OSCAR du nœud sélectionné de générer un rapport actualisé dans le bucket `reports` (`PDF`, `CSV`, `JSON` ou `Excel (.xlsx)`) et affiche à droite soit le PDF intégré, soit un aperçu tabulaire interactif avec téléchargement direct.
 
-1. Choisissez **Nœud** et type:
-   - **RDS Site**: alarmes/taux, EML supprimées/taux, défauts et capacité libre/utilisable/totale.
-   - **Lane**: statistiques d'alarmes et défauts d'une ou plusieurs voies.
-   - **Adjudication**: répartitions/pourcentages, isotopes et détails par voie.
-   - **Event**: **Alarmes et occupations**, **Alarmes** ou **État de santé**; ce dernier inclut gamma haut/bas, neutron haut et sabotage.
-2. Pour Lane/Adjudication, choisissez une ou plusieurs voies. **Tout sélectionner** bascule tout/aucun.
-3. Choisissez **24 heures**, **7 jours**, **30 jours**, **Ce mois** ou **Plage personnalisée** avec deux dates valides.
-4. **Générer** peut rester accepté/en attente; gardez la page ouverte. Vérifiez le PDF et utilisez zoom, recherche, téléchargement ou impression. Le formulaire se réinitialise, pas l'aperçu.
+1. Choisissez **Nœud** et **Portée du rapport** (**Nœud entier**, **Vue opérationnelle** ou **Voies spécifiques**).
+2. Choisissez le **Type de rapport** :
+   - **RDS Site (`RDS_SITE`)** : synthèse exécutive du site, taux d'occupation et d'alarmes, répartition de suppression EML (`EML Suppressed (9999)` vs `Operator Review Required`), répartition des défauts, capacité de stockage et tableau récapitulatif par voie (sans tableaux redondants).
+   - **Lane (`LANE`)** : indicateurs opérationnels par voie, taux d'alarmes et EML, répartition des défauts et série temporelle quotidienne pour la portée choisie.
+   - **Event (`EVENT`)** : choisissez **Alarmes et occupations**, **Alarmes** ou **État de santé** (`Gamma High`, `Gamma Low`, `Neutron High`, `Tamper`) pour produire les graphiques et tableaux quotidiens.
+   - **Adjudication (`ADJUDICATION`)** : commence par les tableaux cumulés **Toutes les voies sélectionnées (`ALL_LANES`)** (**Disposition** et **Résultats isotopiques**) pour l'ensemble des voies sélectionnées, suivis des sections **Disposition** et **Résultats isotopiques** propres à chaque voie.
+   - **Adjudication Details Extract (`ADJUDICATION_DETAILS`)** : extraction d'audit ligne par ligne des décisions soumises (`Heure de soumission`, `Voie`, `Utilisateur`, `Compteur d'occupation`, `Code d'adjudication`, `Commentaires`, `Inspection secondaire`, `Isotopes`, `ID de véhicule`, `Chemins de fichiers` et `ID d'occupation`).
+3. Choisissez le **Format d'exportation** : **PDF**, **CSV**, **JSON** ou **Excel (`.xlsx`)**.
+4. Choisissez **24 heures**, **7 jours**, **30 jours**, **Ce mois** ou **Plage personnalisée** avec deux dates valides.
+5. Cliquez sur **Générer** et gardez la page ouverte jusqu'à la fin. Consultez le PDF intégré ou l'aperçu tabulaire interactif (`CSV`, `JSON`, `Excel (.xlsx)`) et utilisez le bouton de téléchargement si nécessaire.
 
-Le serveur réessaie jusqu'à trois fois. Le nom encode nœud/type/début/fin; une demande identique peut réutiliser le fichier. Seules les données conservées sont rapportées.
+Chaque demande génère un nouveau fichier et remplace tout rapport antérieur portant les mêmes paramètres afin d'inclure immédiatement les dernières occupations ou adjudications. Seules les données conservées sont rapportées.
 
 ## 11. Fédération de nœuds
 
@@ -694,14 +713,16 @@ Vérifiez voies/événements distants, ligne Nationale, rapport et événement a
 
 ## 12. Conservation des données et stockage
 
-Le profil standard 3.11.0 utilise la base PostgreSQL à plusieurs niveaux. Les enregistrements récents
-et opérationnels restent dans PostgreSQL ; les observations configurées de détecteurs à fort volume
-de plus de deux jours sont copiées par des tâches d'arrière-plan bornées vers des fichiers Parquet
-catalogués et compressés en ZSTD. La suppression vérifiée des lignes chaudes est activée par défaut
-après une parité exacte chaud/froid et un délai de retour arrière d'un jour ; Parquet devient donc
-normalement la seule copie des lignes de base après environ 72 heures. La propriété de l'archive,
-l'intégrité des objets, la parité et les conservations actives de génération ou d'observation sont
-revérifiées avant la suppression et échouent de façon sûre.
+Le profil standard 3.11.0 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet en mode
+`PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Les métadonnées opérationnelles et les flux
+à faible volume restent dans PostgreSQL, tandis que les observations de détecteurs à fort volume sont
+écrites dans des partitions de transit de 30 minutes (`obs_stage_p*`). Cinq minutes après la clôture de
+chaque fenêtre de 30 minutes, des tâches d'arrière-plan exportent la partition vers des fichiers Apache
+Parquet catalogués et compressés en ZSTD (`archive/parquet/`), vérifient la parité exacte des lignes/empreintes
+et suppriment la partition de transit afin de garder PostgreSQL compact. (Les sites configurés explicitement
+en mode `HOT_RETENTION` conservent les lignes chaudes pendant la fenêtre configurée avant de les retirer après
+vérification de parité.) La propriété de l'archive, l'intégrité des objets, la parité et les conservations
+actives sont revérifiées avant toute suppression et échouent de façon sûre.
 
 Chaque pilote RPM exige le journal direct des fichiers quotidiens. Il capture si possible
 l'enregistrement source avant analyse, puis publie la journée terminée sous forme de CSV historique
@@ -729,7 +750,9 @@ exactement cinq JPEG décodables séparément (première image, quart, milieu, t
 image) dès leur découverte. Après une publication réussie, la source est conservée pendant 24 heures
 supplémentaires de délai de retour arrière ; sa suppression normale ne peut donc pas survenir avant
 cette échéance relative à la publication. Tout échec de conversion et toute conservation applicable
-préservent la source. Les événements anciens ou non
+préservent la source. Après 30 jours (`retainedSecondaryFramesDays = 30`), les images secondaires
+(`frame-01.jpg`, `frame-02.jpg`, `frame-04.jpg`, `frame-05.jpg`) sont purgées tandis que l'image clé
+centrale (`frame-03.jpg`) est conservée pendant toute la durée de rétention des médias. Les événements anciens ou non
 convertis gardent la lecture historique. Le nettoyage sous pression ne peut enlever que des
 ensembles de médias retenus complets et éligibles. Il ne supprime ni fichiers quotidiens, rapports,
 décisions, vidéos historiques non cataloguées, ni archives Parquet.
@@ -835,7 +858,7 @@ reprise et destruction des documents.
 | Échec d'adjudication | Choisissez un code; vérifiez nœud/voie, flux de commande et téléversement. Ne renvoyez pas avant de connaître le premier résultat. |
 | WebID sans DRF/résultat | Vérifiez Full Spectrum, DRF, premier/arrière-plan et colonnes avertissement/erreur. La décision reste humaine. |
 | Nationale vide/zéro | Actualisez la plage et vérifiez commande statistique, données conservées et authentification du nœud. |
-| Rapport absent | Complétez nœud/type/plage et voie/type d'événement; vérifiez dates, commande et bucket `reports`. Une demande identique peut réutiliser un fichier. |
+| Rapport absent | Complétez nœud, portée, type de rapport, format (`PDF`, `CSV`, `JSON` ou `XLSX`), plage et voie/type d'événement ; vérifiez dates, commande et bucket `reports`. Chaque demande génère un nouveau fichier et remplace tout fichier antérieur équivalent. |
 | Nœud distant refusé après rechargement | La session exige un cookie valide; Basic exige de ressaisir les secrets. Vérifiez TLS, CORS, chemins, port et droits. |
 | QR d'alarme impossible à générer | Vérifiez la voie et les observations gamma/neutron conservées sur l'intervalle. Si un seul QR ne suffit pas, utilisez le fichier d'alarme téléchargeable. |
 | QR impossible à scanner/importer | Augmentez la luminosité ou utilisez le PNG à sa taille d'origine; sinon importez `.oscar-alarm.json`. Un échec d'intégrité impose un nouvel export, jamais le contournement du contrôle. |

@@ -141,6 +141,11 @@ public class OakridgeSensorI18nTest
         WAPIRZ1Config.class,
         ZSE18Config.class,
         ZW100Config.class,
+        BucketServiceConfig.class,
+        DailyFileJournalServiceConfig.class,
+        BasicSessionConfig.class,
+        OccupancyProcessConfig.class,
+        Rs350OccupancyProcessConfig.class,
         ZwaveCommServiceConfig.class);
 
     private static final List<Class<?>> FORM_CONFIGS = Arrays.asList(

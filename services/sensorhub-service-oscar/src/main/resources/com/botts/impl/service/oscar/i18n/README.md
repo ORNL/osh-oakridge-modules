@@ -49,6 +49,23 @@ Use the release [Quick Start](https://github.com/ORNL/oscar/blob/main/dist/relea
 - Enter a host in the form expected by the field. RPM configuration has separate host and port fields. Camera configuration has no separate port field, so include a non-default port with the camera host when necessary, for example `192.0.2.25:8554`.
 - Do not add `rtsp://` to a lane camera host. The Lane System generates the RTSP URL.
 
+### Key terms explained
+
+| Term | Plain-language meaning |
+| --- | --- |
+| **Occupancy** | One complete passage of a vehicle, container, or pedestrian through a radiation portal lane between the entry (`GS`) and exit (`GX`) triggers. |
+| **CPS (Counts Per Second)** | Raw radiation detector count rate measured each sampling interval during background or occupancy. |
+| **NSIGMA (`N-Sigma`)** | How many standard deviations (`σ`) the current gamma count rate rises above the recent background average; used to trigger gamma alarms consistently as background fluctuates. |
+| **NORM (Naturally Occurring Radioactive Material)** | Benign cargo containing natural radioisotopes (such as potassium-40 in fertilizer, kitty litter, ceramics, or bananas, or thorium/uranium series in granite and tile). |
+| **EML (Energy Metric Ratios) & Code `9999`** | Algorithm for Rapiscan portals that compares low-, mid-, and high-energy gamma windows to distinguish benign **NORM** cargo from concentrated threat sources. When EML classifies an alarm as non-threat, OSCAR logs an automated adjudication (`Code 9999: EML Non-Threat`). |
+| **WebID & DRF (Detector Response Function)** | **WebID** is the Sandia Full Spectrum isotope identification service used to analyze uploaded spectra (`N42`/SPC). A **DRF** tells WebID the physical detector model and geometry used to capture the spectrum. |
+| **Daily File & Record Codes (`GB`, `GS`, `GA`, `NS`, `GX`)** | The per-lane daily CSV log of raw RPM messages: `GB`/`NB` = gamma/neutron background, `GS` = occupancy start, `GC`/`NC` = gamma/neutron count profile, `GA`/`NA`/`NS` = gamma/neutron alarm, `GX` = occupancy end, `TT`/`TC` = tamper fault/clear. |
+| **Event UUID** | Globally unique identifier (`UUID`) assigned to each occupancy event so operators can search, export QR summaries, and trace the exact event across reports and federated nodes. |
+| **Operational View** | A named filter (`?view=<key>` or `/view/<key>`) that scopes a workstation's Dashboard, Events, Status of Health, and Report Generator to a specific group of lanes (for example, `north-gate`). |
+| **Parquet Cold Tier (`PARQUET_PRIMARY`)** | OSCAR 3.11.0's default storage mode where PostgreSQL holds a 30-minute hot staging window and completed 30-minute partitions are exported to ZSTD-compressed Apache Parquet files (`archive/parquet/`) for fast, compact long-term querying. |
+| **Retained 5-Frame Media** | For every alarm occupancy, OSCAR extracts 5 evenly spaced JPEG snapshots (`frame-01.jpg` to `frame-05.jpg`). After 30 days, secondary frames (`01`, `02`, `04`, `05`) are pruned while the midpoint keyframe (`frame-03.jpg`) is preserved. |
+| **SAN (Subject Alternative Name)** | The list of hostnames and IP addresses (such as `oscar.local` and `192.168.0.57`) embedded inside an HTTPS certificate that a browser checks before trusting the connection. |
+
 ## 2. Trust the OSCAR certificate
 
 OSCAR uses HTTPS. A deployment using its generated, self-signed certificate produces a browser privacy warning until the workstation trusts that certificate. A deployment using a certificate from an already trusted organizational or public certificate authority does not require this workflow.
@@ -677,20 +694,27 @@ The Viewer caches the preset ranges for quick switching and refetches them after
 
 ![Report Generator with generated RDS site report](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
 
-The **Report Generator** asks the selected node's OSCAR Service to create a PDF in that node's `reports` bucket, then loads the returned URL in the **Generated Report** pane.
+The **Report Generator** asks the selected node's OSCAR Service to generate a fresh report in that node's `reports` bucket (`PDF`, `CSV`, `JSON`, or `Excel (.xlsx)`) and displays either the embedded PDF or an interactive tabular data preview with a direct download action in the **Generated Report** pane.
 
 1. Select a **Node**.
-2. Select **Report Type**:
-   - **RDS Site Report**: site-wide alarm totals/rates, EML suppression/rate, fault totals, and drive free/usable/total capacity.
-   - **Lane Report**: the selected lane or lanes, with lane-specific alarm and fault statistics.
-   - **Adjudication Report**: the selected lane or lanes, with adjudication disposition counts/percentages, isotope results, and adjudication-detail rows.
-   - **Event Report**: choose **Alarms and Occupancies**, **Alarms**, or **State of Health**. These produce daily charts/tables for the selected event family; State of Health covers gamma-high, gamma-low, neutron-high, and tamper.
-3. For Lane or Adjudication reports, select one or more **Lane** entries. **Select All** toggles the full node lane list; selecting it again clears the list.
-4. Select **Last 24 Hours**, **Last 7 Days**, **Last 30 Days**, **This Month**, or **Custom Range**. Custom requires both date/times and the end cannot precede the start.
-5. Select **Generate Report**. The request may be accepted immediately or remain pending while the server works. Leave the page open until success or a clear failure message.
-6. Review the embedded PDF. Use the browser PDF controls to zoom, search, download, or print. The form resets after generation, while the generated report remains displayed.
+2. Select **Report Scope**:
+   - **Entire Node**: Aggregates across all lanes on the selected node.
+   - **Operational View**: Scopes the report to all lanes assigned to the chosen Operational View key.
+   - **Specific Lanes**: Lets you pick one or more individual lanes (**Select All** toggles the full lane list).
+3. Select **Report Type**:
+   - **RDS Site Report (`RDS_SITE`)**: Site-wide executive KPI summary, occupancy and alarm rates, EML suppression breakdown (`EML Suppressed (9999)` vs. `Operator Review Required`), fault breakdown, storage capacity, and per-lane summary table (with no duplicate data tables).
+   - **Lane Report (`LANE`)**: Per-lane operational KPIs, alarm and EML rates, fault breakdown, and daily time-series activity for the selected scope.
+   - **Event Report (`EVENT`)**: Choose **Alarms and Occupancies**, **Alarms**, or **State of Health** (`Gamma High`, `Gamma Low`, `Neutron High`, `Tamper`) to generate daily time-series charts and tables.
+   - **Adjudication Report (`ADJUDICATION`)**: Starts with the summed **All Selected Lanes (`ALL_LANES`)** **Disposition** and **Isotope Results** summary tables across all lanes in scope, followed by individual **Disposition** and **Isotope Results** sections for each selected lane.
+   - **Adjudication Details Extract (`ADJUDICATION_DETAILS`)**: Full line-by-line audit extract of individual adjudication submissions (`Submission Time`, `Lane`, `Username`, `Occupancy Count`, `Adjudication Code`, `Feedback`, `Secondary InspectionStatus`, `Isotopes`, `Vehicle ID`, `File Paths`, and `Occupancy ID`).
+4. Select **Export Format**: **PDF**, **CSV**, **JSON**, or **Excel (`.xlsx`)**.
+5. Select **Last 24 Hours**, **Last 7 Days**, **Last 30 Days**, **This Month**, or **Custom Range**. Custom requires both start and end date/times, and the end cannot precede the start.
+6. Select **Generate Report**. Leave the page open until generation finishes.
+7. Review the generated report in the right-hand pane:
+   - **PDF** reports render directly in the embedded PDF viewer with browser zoom, print, and download controls.
+   - **CSV**, **JSON**, and **Excel (`.xlsx`)** reports render an inline tabular preview of all report sections alongside a **Download** button.
 
-The server retries a failed report job up to three times. Filenames encode node, report type, start, and end. Requesting the identical node/type/time combination can return the already stored report instead of overwriting it. Reports reflect retained data only; missing/expired source data cannot be reconstructed by the report generator.
+Every report request generates a fresh file and overwrites any earlier file with the same node, type, format, and time window so newly logged occupancies or adjudications are always included immediately. Reports reflect retained data only; missing or expired source data cannot be reconstructed by the report generator.
 
 ## 11. Node federation
 
@@ -724,12 +748,15 @@ Duplicate names and duplicate address/port pairs are rejected. **Edit** changes 
 
 ## 12. Data retention and storage behavior
 
-The standard 3.11.0 profile uses the tiered PostgreSQL database. Recent and operational records stay
-in PostgreSQL; configured high-volume detector observations older than two days are copied in
-bounded background jobs to cataloged, ZSTD-compressed Parquet. Verified hot-row deletion is enabled
-by default after exact hot/cold parity and a one-day rollback grace, so Parquet normally becomes the
-only base-row copy after about 72 hours. Archive ownership, object integrity, parity, and active
-generation or observation holds are rechecked before deletion and fail closed.
+The standard 3.11.0 profile uses the tiered PostgreSQL + Apache Parquet architecture in `PARQUET_PRIMARY`
+mode (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Operational metadata and low-volume streams remain in
+PostgreSQL, while high-volume detector observations land in 30-minute PostgreSQL staging partitions
+(`obs_stage_p*`). Five minutes after each 30-minute window closes, bounded background jobs export the
+completed window to cataloged, ZSTD-compressed Apache Parquet (`archive/parquet/`), verify exact row/hash
+parity, and drop the staging partition so the live PostgreSQL working set stays compact. (Sites that
+explicitly configure `HOT_RETENTION` retain hot PostgreSQL rows for the configured multi-day window plus
+rollback grace before retiring them after parity verification.) Archive ownership, object integrity,
+parity, and active generation or observation holds are rechecked before deletion and fail closed.
 
 Each RPM driver requires the direct daily-file journal. It captures the source record before
 parsing where possible and publishes the completed day as an immutable legacy CSV plus SHA-256
@@ -752,7 +779,9 @@ Eligible alarm clips are queued for asynchronous conversion to exactly five inde
 JPEGs (first, quarter, middle, three-quarter, last) as soon as they are discovered. After successful
 publication, the source video remains for a further 24-hour rollback grace, so normal source
 deletion cannot occur before that publication-relative deadline; every conversion failure and
-applicable hold preserves it. Old or unconverted events
+applicable hold preserves it. After 30 days (`retainedSecondaryFramesDays = 30`), secondary frames
+(`frame-01.jpg`, `frame-02.jpg`, `frame-04.jpg`, `frame-05.jpg`) are pruned while the midpoint
+keyframe (`frame-03.jpg`) is preserved for the full media retention window. Old or unconverted events
 retain legacy playback. Storage-pressure cleanup can remove only complete, eligible retained-media
 sets. It does not remove daily files, reports, adjudications, legacy uncataloged video, or the
 Parquet archive.
@@ -856,7 +885,7 @@ records-destruction requirements.
 | Adjudication fails | Confirm a code was selected, the lane/node is reachable, the adjudication control stream exists, and any evidence upload completed. Do not repeatedly submit until the original result is known. |
 | WebID controls have no DRF/results | Verify internet access to the configured Sandia Full Spectrum service, select a DRF and foreground/background type, and inspect the returned warning/error columns. Manual adjudication remains the operator's responsibility. |
 | National row is zero/missing | Refresh the intended range, verify that node's OSCAR statistics control stream and retained data, and correct node authentication/connectivity. |
-| Report does not generate | Select node/type/range and required lane/event type, verify start precedes end, then check the node report control stream and `reports` bucket. An identical request may reuse an existing file. |
+| Report does not generate | Select node, scope, report type, export format (`PDF`, `CSV`, `JSON`, or `XLSX`), time range, and required lane/view/event type, verify start precedes end, then check the node report control stream and `reports` bucket. Every request generates a fresh file and overwrites any prior file for the same parameters. |
 | Federated node disappears or rejects requests after reload | Session nodes need a valid remote cookie; Basic-only secrets are intentionally memory-only and must be re-entered. Verify TLS, CORS, paths, port, and remote authorization. |
 | Alarm QR cannot be generated | Confirm the event's lane is available and its gamma or neutron datastream has retained observations for the event interval. Very large optional metadata may exceed one-code capacity; use the downloadable alarm file when QR transfer is not possible. |
 | Alarm QR will not scan/import | Increase display brightness or use the downloaded PNG at original size. Otherwise import the `.oscar-alarm.json` file. An integrity failure means the package is incomplete or changed; obtain a new export rather than bypassing validation. |
