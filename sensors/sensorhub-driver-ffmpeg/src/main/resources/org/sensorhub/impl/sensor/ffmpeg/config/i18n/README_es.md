@@ -1,16 +1,23 @@
 # Controlador de vídeo FFmpeg
 
-Este controlador publica vídeo desde un archivo o un flujo de red compatible con FFmpeg.
+El **Controlador de vídeo FFmpeg** se conecta a una transmisión de cámara IP (RTSP/HTTP) o a un archivo de vídeo, sirve vídeo en vivo de baja latencia al Visor OSCAR y extrae fotogramas JPEG de evidencia retenidos (`frame-01.jpg` a `frame-05.jpg`) cuando ocurre una alarma de ocupación.
+
+## Términos en lenguaje claro
+
+| Término | Significado |
+| --- | --- |
+| **Fotograma clave / Intervalo GOP (`1–2 s`)** | Un fotograma de vídeo completo de referencia (`I-frame`). Se recomienda configurar la cámara con un fotograma clave cada `1–2 segundos` (`GOP 30–60` a `30 fps`) para que el vídeo en vivo inicie de inmediato y las capturas de alarma coincidan con el paso del vehículo. |
+| **Medios retenidos de 5 fotogramas** | En cada ocupación con alarma, OSCAR extrae 5 fotogramas JPEG distribuidos uniformemente. Tras 30 días (`retainedSecondaryFramesDays = 30`), se depuran los fotogramas secundarios (`01`, `02`, `04`, `05`) y se conserva el fotograma central (`frame-03.jpg`). |
+| **Proxy RTSP en bucle local (`mediamtx`)** | Cuando el modo de transmisión en vivo en el Servicio OSCAR es `RTSP_PROXY` o `HYBRID`, OSCAR envía los fotogramas H.264 al servidor local `mediamtx` (`127.0.0.1:8554`) para que varios operadores vean vídeo sin abrir conexiones duplicadas hacia la cámara física. |
 
 ## Conexión
 
-- Establezca **Ruta del archivo** para un vídeo grabado o **Cadena de conexión** para un flujo en directo.
-- Para reproducir un archivo, configure la frecuencia de fotogramas, el tamaño del búfer y la repetición opcional.
-- Para un flujo de red, seleccione TCP cuando sea necesario; de lo contrario, el controlador usa UDP.
-- Active **Ignorar marcas de tiempo** cuando la fuente no contenga marcas de tiempo utilizables.
+- **Cadena de conexión (`Connection String`)** / **Ruta de archivo (`File Path`)**: Defina la cadena de conexión para una cámara RTSP/HTTP en vivo o la ruta de archivo para vídeo grabado.
+- **Usar TCP (`Use TCP`)**: Actívelo para cámaras RTSP cuando la red requiera transporte TCP fiable.
+- **Ignorar marcas de tiempo de datos (`Ignore Data Timestamps`)**: Actívelo cuando el reloj interno de la cámara no sea fiable para que OSCAR asigne la hora del servidor.
 
 ## Salidas
 
-- Active **HLS** para publicar una salida de ruta de archivo HLS.
-- Active **Fotogramas de vídeo** para publicar fotogramas binarios.
-- Configure el ID del flujo, la posición de la fuente, el tiempo de espera y la reconexión según sea necesario.
+- **Fotogramas de vídeo (`Video Frames`)**: Publica fotogramas H.264 para visualización en vivo y extracción de los 5 fotogramas de evidencia en alarmas.
+- **HLS**: Publica una salida HLS cuando se requiere reproducción basada en segmentos.
+- Configure el ID de flujo, el tiempo de espera de conexión y el comportamiento de reconexión según sea necesario.

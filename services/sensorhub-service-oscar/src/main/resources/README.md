@@ -49,13 +49,13 @@ pre-3.11.0 backup.
 - OSCAR client config (urn:ornl:oscar:client:config)
 - Adjudication records (urn:ornl:oscar:adjudication:xxx) under each lane
 - Report generation retrieval command (urn:ornl:oscar:reports)
-  - POST (api/controlstreams/{id}/commands) {"startTime": "xxx", "endTime": "xxx", "reportType": "xxx"}
+  - POST (api/controlstreams/{id}/commands) `{"parameters": {"startTime": "xxx", "endTime": "xxx", "reportType": "RDS_SITE|LANE|EVENT|ADJUDICATION|ADJUDICATION_DETAILS", "reportFormat": "PDF|CSV|JSON|XLSX", "eventType": "ALL", "laneUids": "...", "viewKey": "..."}}`
 - DataStream/Observation for site diagram image path and bounding box
 
 **System diagram**
 - urn:ornl:oscar:node:{id}
     - "clientConfig" (list of nodes; keep current data structure)
-    - "requestReport" CMD (params: startTime, endTime, reportType)
+    - "requestReport" CMD (params: startTime, endTime, reportType, reportFormat, eventType, laneUids, viewKey)
     - "siteInfo" DS
         - "siteDiagramPath" (string)
         - "siteBoundingBox" ([lat, lon], [lat, lon])

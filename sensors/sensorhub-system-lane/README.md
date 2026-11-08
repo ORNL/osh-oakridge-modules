@@ -23,12 +23,14 @@ Click 'Add New Module' and select 'Lane System' from the list of available modul
 **- Lane Options Config:**
 - Click `Add` to configure the submodules 
   - *Initial RPM Config:*
-    - Click `Add` and select between the `Rapiscan` and the `Aspect` RPMs. To configure the RPMs you need to know the host IP and port of that the device. The `Aspect` RPM has an additional configuration.
-      - **Rapiscan/ Aspect RPM**
+    - Click `Add` and select between the `Rapiscan`, `Aspect`, and `RS350` RPMs. To configure the RPMs, enter the host IP and TCP port of the device (`10001` typical for Rapiscan, `502` typical for Aspect Modbus, `1627` typical for RS-350).
+      - **Rapiscan / Aspect / RS-350 RPM**
         - Remote Host:
         - Remote Port:
+      - **Rapiscan RPM (Specific)**
+        - EML Configuration: Enable and configure Energy Metric Ratios (`EML Enabled`, `One Panel Mode`, `Custom Parameters`, `Use Auto Accumulate Time`) when an EML `.jar` plugin is loaded in OSCAR Service.
       - **Aspect RPM (Specific)**
-        - Address Range:
+        - Address Range: Modbus register range (`From` and `To`).
 
   - *Initial Camera Config:*
     - Click `Add` and select between the `Axis`, `Sony` and the `Custom` video cameras. To configure the video cameras you need the host IP of the device. If applicable, you can add the username and password of the camera. Additional configurations may be necessary for different camera types. 

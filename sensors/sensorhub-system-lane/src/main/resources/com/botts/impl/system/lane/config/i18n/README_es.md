@@ -1,16 +1,29 @@
 # Sistema de sensores de carril
 
-El Sistema de carril crea un sistema principal para un monitor de portal radiológico (RPM) y una o varias cámaras de carril.
+El **Sistema de sensores de carril** crea un contenedor principal para un monitor de pórtico de radiación (RPM), su proceso de ocupación y hasta cuatro cámaras de carril.
+
+## Términos en lenguaje claro
+
+| Término | Significado |
+| --- | --- |
+| **Clave de vista operativa (`Operational View Key`)** | Etiqueta opcional (por ejemplo, `north-gate` o `cargo-inbound`) que agrupa este carril en una vista de trabajo para operadores en el Visor OSCAR. |
+| **Relaciones de métricas de energía (`EML`)** | Algoritmo opcional para Rapiscan que compara conteos gamma de baja, media y alta energía para distinguir radiación natural de carga (**NORM**, auto-adjudicada como `Code 9999: EML Non-Threat`) frente a fuentes de amenaza. |
+| **Rango de direcciones Modbus** | Rango de registros (`Desde` y `Hasta`) utilizado por los controladores Aspect sobre TCP/IP. |
 
 ## Configuración general
 
-- Asigne al carril un nombre de módulo y un ID únicos.
-- Introduzca su latitud y longitud fijas cuando se conozcan.
-- Active **Eliminar datos al quitar el carril** solo si al quitar un carril también deben eliminarse sus registros almacenados.
+- **Nombre del módulo** e **ID único de carril**: Asigne al carril un nombre visible único y un identificador único.
+- **Clave de vista operativa**: Clave opcional para asignar el carril a una vista operativa definida en el Servicio OSCAR.
+- **Ubicación**: Introduzca la latitud y longitud fijas del carril (o coloque el marcador en el plano del sitio).
+- **Eliminar datos al quitar el carril**: Actívelo **solo** cuando eliminar el carril también deba borrar sus registros históricos almacenados.
 
 ## Opciones del carril
 
-- En **Configuración inicial del RPM**, seleccione Aspect, Rapiscan o RS-350 e introduzca el host y el puerto del dispositivo. Aspect también necesita un intervalo de direcciones Modbus.
-- En **Configuración inicial de cámaras**, añada cada cámara Sony, Axis o personalizada e introduzca su host, nombre de usuario y contraseña cuando sean necesarios.
-- Para cámaras Axis, seleccione el códec del flujo. Para cámaras personalizadas, introduzca la ruta posterior al host y puerto de la cámara.
-- Revise todos los módulos secundarios generados antes de guardar el carril.
+- **Configuración inicial de RPM**:
+  - Seleccione **Rapiscan**, **Aspect** o **RS-350** e introduzca el host/IP y el puerto TCP.
+  - Para **Aspect**, indique también el rango de direcciones Modbus.
+  - Para **Rapiscan**, configure **EML** si el nodo tiene cargado un complemento `.jar` de EML.
+- **Configuración inicial de cámaras**:
+  - Añada hasta **4** cámaras **Sony**, **Axis** o **Custom** por carril.
+  - Para cámaras **Axis**, seleccione el códec de transmisión (`H.264`). Para cámaras **Custom**, introduzca la ruta RTSP/HTTP posterior al host y puerto.
+- Haga clic en **Aplicar** y **Guardar** en la barra superior para crear e iniciar los módulos hijos.

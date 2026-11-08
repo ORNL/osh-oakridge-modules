@@ -718,7 +718,13 @@ public class ReportTests {
 
                 String adjText = new PDFTextStripper().getText(doc);
                 assertTrue(adjText.contains("Adjudication Report"));
+                assertTrue(adjText.contains("Disposition - All Selected Lanes"));
+                assertTrue(adjText.contains("Isotope Results - All Selected Lanes"));
                 assertTrue(adjText.contains("lane-50"));
+                assertTrue(
+                        "All Selected Lanes summary must appear before the first individual lane section",
+                        adjText.indexOf("Disposition - All Selected Lanes") < adjText.indexOf("Disposition - " + laneUid)
+                );
                 assertTrue(adjText.contains("Code 15: Port Authority Hold"));
                 assertTrue(adjText.contains("EML Non-Threat"));
                 assertTrue(adjText.contains("Cs-137 (Cesium137)"));
@@ -935,6 +941,7 @@ public class ReportTests {
                 submitReportCommand(commandDesc, 307, ReportCmdType.ADJUDICATION_CSV, windowStart, windowEnd, laneUid, EventReportType.NONE),
                 ".csv",
                 "Lane Name,Lane UID,Section,Code / Isotope,Label,Group,Count,Percent (%)",
+                "All Selected Lanes (1),ALL_LANES,Disposition",
                 "Cs-137"
         );
         JsonObject adjJson = readBucketJson(
@@ -943,9 +950,10 @@ public class ReportTests {
         assertEquals("ADJUDICATION", adjJson.get("reportType").getAsString());
         assertEquals(2L, adjJson.getAsJsonObject("summary").get("totalRecords").getAsLong());
         assertTrue(adjJson.getAsJsonArray("records").size() > 5);
+        assertEquals("ALL_LANES", adjJson.getAsJsonArray("records").get(0).getAsJsonObject().get("laneUid").getAsString());
         assertBucketXlsxContains(
                 submitReportCommand(commandDesc, 309, ReportCmdType.ADJUDICATION_XLSX, windowStart, windowEnd, laneUid, EventReportType.NONE),
-                "Disposition Summary"
+                "ALL_LANES"
         );
 
         // EVENT CSV / JSON / XLSX

@@ -1,16 +1,29 @@
 # Lane Sensor System
 
-The Lane System creates a parent system for one radiation portal monitor (RPM) and one or more lane cameras.
+The **Lane Sensor System** creates a parent lane container for one Radiation Portal Monitor (RPM), its occupancy data process, and up to four lane cameras.
 
-## General configuration
+## Plain-Language Terms
 
-- Give the lane a unique module name and unique ID.
-- Enter its fixed latitude and longitude when known.
-- Enable **Delete Data on Lane Removal** only when removing a lane should also delete its stored records.
+| Term | Meaning |
+| --- | --- |
+| **Operational View Key** | An optional tag (for example, `north-gate` or `cargo-inbound`) that groups this lane into a named operator workspace in the OSCAR Viewer. |
+| **Energy Metric Ratios (EML)** | Optional Rapiscan algorithm that compares low-, mid-, and high-energy gamma counts to distinguish natural cargo radiation (**NORM**, auto-adjudicated as `Code 9999: EML Non-Threat`) from concentrated threat sources. |
+| **Modbus Address Range** | Register range (`From` and `To`) used by Aspect RPM controllers over TCP/IP. |
 
-## Lane options
+## General Configuration
 
-- Under **Initial RPM Configuration**, select Aspect, Rapiscan, or RS-350 and enter the device host and port. Aspect also requires a Modbus address range.
-- Under **Initial Camera Configuration**, add each Sony, Axis, or Custom camera and enter its host, username, and password when required.
-- For Axis cameras, select the stream codec. For Custom cameras, enter the path after the camera host and port.
-- Review all generated child modules before saving the lane.
+- **Module Name** and **Lane UID**: Give the lane a unique display name and unique ID (`id` suffix appended to `urn:osh:system:lane:`).
+- **Operational View Key**: Optional view key used to assign this lane to an Operational View in OSCAR Service.
+- **Location**: Enter the lane's fixed latitude and longitude (or place the lane pin on the Site Diagram in OSCAR Service).
+- **Delete Data on Lane Removal**: Enable **only** when deleting this lane should also permanently purge its historical stored records.
+
+## Lane Options
+
+- **Initial RPM Configuration**:
+  - Select **Rapiscan**, **Aspect**, or **RS-350** and enter the device IP/host and TCP port (`10001` typical for Rapiscan, `502` typical for Aspect Modbus, `1627` typical for RS-350).
+  - For **Aspect**, enter the Modbus address range (`From` and `To`).
+  - For **Rapiscan**, configure **EML Configuration** (`EML Enabled`, `One Panel Mode`, `Custom Parameters`, and `Use Auto Accumulate Time`) if the node has an uploaded `.jar` EML plugin.
+- **Initial Camera Configuration**:
+  - Add up to **4** **Sony**, **Axis**, or **Custom** cameras per lane.
+  - For **Axis** cameras, select the stream codec (`H.264`). For **Custom** cameras, enter the RTSP/HTTP stream path after the host and port.
+- Click **Apply** and **Save** in the top toolbar so SensorHub creates and starts the child RPM, occupancy process, and camera modules.
