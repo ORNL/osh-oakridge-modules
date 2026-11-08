@@ -19,6 +19,7 @@ import org.sensorhub.impl.system.CommandStreamTransactionHandler;
 import org.sensorhub.impl.system.SystemDatabaseTransactionHandler;
 import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
 import org.sensorhub.impl.utils.rad.eml.PendingEmlAutoAdjudicationRegistry;
+import org.sensorhub.impl.utils.rad.eml.PendingExtendedOccupancyAutoAdjudicationRegistry;
 import org.sensorhub.impl.utils.rad.model.Adjudication;
 import org.sensorhub.impl.utils.rad.model.Occupancy;
 import org.sensorhub.impl.utils.rad.model.OccupancyExtended;
@@ -100,13 +101,49 @@ public final class EmlAutoAdjudicationHelper implements AutoCloseable {
 
             DataComponent struct = resolveRecordStructure(obs);
             Occupancy occupancy = OccupancyExtended.readOccupancy(struct, obs.getResult());
+
+            PendingExtendedOccupancyAutoAdjudicationRegistry.ExtendedOccupancyEvaluation extEval =
+                    PendingExtendedOccupancyAutoAdjudicationRegistry.claim(
+                            producerUid, occupancy.getSamplingTime(), occupancy.getOccupancyCount());
+            if (extEval == null
+                    && occupancy.getAdjudicatedIds() != null
+                    && occupancy.getAdjudicatedIds().contains(Adjudication.EXTENDED_OCCUPANCY_GAMMA_MARKER)) {
+                extEval = PendingExtendedOccupancyAutoAdjudicationRegistry.ExtendedOccupancyEvaluation.create(
+                        occupancy.getEndTime() - occupancy.getStartTime(),
+                        laneSystem.getExtendedOccupancyThresholdMinutes(),
+                        occupancy.getMaxGammaCount());
+            }
+            if (extEval != null) {
+                PendingEmlAutoAdjudicationRegistry.remove(
+                        producerUid, occupancy.getSamplingTime(), occupancy.getOccupancyCount());
+                final var capturedExtEval = extEval;
+                if (!stopped) {
+                    worker.execute(() -> submitAutoAdjudication(
+                            producerUid,
+                            obs,
+                            occupancy,
+                            Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE,
+                            Adjudication.EXTENDED_OCCUPANCY_AUTO_ADJUDICATOR_USERNAME,
+                            capturedExtEval.feedback(),
+                            "Extended Occupancy Gamma Alarm"));
+                }
+                continue;
+            }
+
             EmlEvaluationResult eval = PendingEmlAutoAdjudicationRegistry.claim(
                     producerUid, occupancy.getSamplingTime(), occupancy.getOccupancyCount());
             if (eval == null)
                 continue;
 
             if (!stopped) {
-                worker.execute(() -> submitAutoAdjudication(producerUid, obs, occupancy, eval));
+                worker.execute(() -> submitAutoAdjudication(
+                        producerUid,
+                        obs,
+                        occupancy,
+                        Adjudication.EML_NON_THREAT_CODE,
+                        Adjudication.EML_AUTO_ADJUDICATOR_USERNAME,
+                        eval.toAdjudicationFeedback(),
+                        "EML Non-Threat"));
             }
         }
     }
@@ -115,19 +152,22 @@ public final class EmlAutoAdjudicationHelper implements AutoCloseable {
             String producerUid,
             IObsData obs,
             Occupancy occupancy,
-            EmlEvaluationResult eval) {
+            int adjudicationCode,
+            String senderUsername,
+            String feedback,
+            String label) {
         try {
             BigId obsKey = resolvePersistedObsId(producerUid, obs, occupancy);
             if (obsKey == null) {
-                logger.warn("Could not locate persisted occupancy ID for EML Non-Threat auto-adjudication on {}",
-                        laneSystem.getUniqueIdentifier());
+                logger.warn("Could not locate persisted occupancy ID for {} auto-adjudication on {}",
+                        label, laneSystem.getUniqueIdentifier());
                 return;
             }
 
             String encodedObsId = obsIdEncoder.encodeID(obsKey);
             Adjudication adjudication = new Adjudication.Builder()
-                    .feedback(eval.toAdjudicationFeedback())
-                    .adjudicationCode(Adjudication.EML_NON_THREAT_CODE)
+                    .feedback(feedback)
+                    .adjudicationCode(adjudicationCode)
                     .isotopes(List.of())
                     .secondaryInspectionStatus(Adjudication.SecondaryInspectionStatus.NONE)
                     .filePaths(List.of())
@@ -145,7 +185,7 @@ public final class EmlAutoAdjudicationHelper implements AutoCloseable {
             }
 
             var cmd = new CommandData.Builder()
-                    .withSender(Adjudication.EML_AUTO_ADJUDICATOR_USERNAME)
+                    .withSender(senderUsername)
                     .withCommandStream(cmdTxn.getCommandStreamKey().getInternalID())
                     .withParams(Adjudication.fromAdjudication(adjudication))
                     .build();
@@ -157,16 +197,16 @@ public final class EmlAutoAdjudicationHelper implements AutoCloseable {
                     TimeUnit.SECONDS).get(10, TimeUnit.SECONDS);
 
             if (status.getStatusCode() != ICommandStatus.CommandStatusCode.COMPLETED) {
-                logger.warn("EML Non-Threat auto-adjudication returned {} on {}: {}",
-                        status.getStatusCode(), laneSystem.getUniqueIdentifier(), status.getMessage());
+                logger.warn("{} auto-adjudication returned {} on {}: {}",
+                        label, status.getStatusCode(), laneSystem.getUniqueIdentifier(), status.getMessage());
             } else {
-                logger.info("Auto-adjudicated occupancy {} on {} as EML Non-Threat (releaseProb={})",
-                        encodedObsId, laneSystem.getConfiguration().name, eval.releaseProbability());
+                logger.info("Auto-adjudicated occupancy {} on {} as {} (code={})",
+                        encodedObsId, laneSystem.getConfiguration().name, label, adjudicationCode);
             }
         } catch (Exception e) {
             if (!stopped) {
-                logger.error("Failed to persist EML Non-Threat auto-adjudication on {}",
-                        laneSystem.getUniqueIdentifier(), e);
+                logger.error("Failed to persist {} auto-adjudication on {}",
+                        label, laneSystem.getUniqueIdentifier(), e);
             }
         }
     }

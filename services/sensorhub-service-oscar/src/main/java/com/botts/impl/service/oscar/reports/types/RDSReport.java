@@ -167,6 +167,7 @@ public class RDSReport extends Report {
             channelBreakdown.put("Gamma-High Fault", intFmt.format(metrics.gammaHighFault));
             channelBreakdown.put("Gamma-Low Fault", intFmt.format(metrics.gammaLowFault));
             channelBreakdown.put("Neutron-High Fault", intFmt.format(metrics.neutronHighFault));
+            channelBreakdown.put("Extended Occupancy Fault", intFmt.format(metrics.extendedOccupancyFault));
             channelBreakdown.put("Tamper", intFmt.format(metrics.tamper));
             tableGenerator.drawSummaryTable(pdf, channelBreakdown);
 
@@ -205,6 +206,7 @@ public class RDSReport extends Report {
             XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Gamma-High", String.valueOf(metrics.gammaHighFault), "count", "", ""));
             XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Gamma-Low", String.valueOf(metrics.gammaLowFault), "count", "", ""));
             XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Neutron-High", String.valueOf(metrics.neutronHighFault), "count", "", ""));
+            XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Extended Occupancy", String.valueOf(metrics.extendedOccupancyFault), "count", "", ""));
             XlsxWorkbookWriter.writeCsvRow(writer, List.of("Fault Statistics", "Total Faults & Tampers", String.valueOf(metrics.totalFaultsAndTamper()), "count", "", ""));
 
             for (StorageVolumeRow vol : storageVolumes) {
@@ -252,6 +254,7 @@ public class RDSReport extends Report {
             jw.name("gammaHighFault").value(metrics.gammaHighFault);
             jw.name("gammaLowFault").value(metrics.gammaLowFault);
             jw.name("neutronHighFault").value(metrics.neutronHighFault);
+            jw.name("extendedOccupancyFault").value(metrics.extendedOccupancyFault);
             jw.name("storageVolumeCount").value(storageVolumes.size());
             jw.endObject();
 
@@ -268,6 +271,7 @@ public class RDSReport extends Report {
             writeJsonMetricRecord(jw, "Fault Statistics", "Gamma-High", String.valueOf(metrics.gammaHighFault), "count", "");
             writeJsonMetricRecord(jw, "Fault Statistics", "Gamma-Low", String.valueOf(metrics.gammaLowFault), "count", "");
             writeJsonMetricRecord(jw, "Fault Statistics", "Neutron-High", String.valueOf(metrics.neutronHighFault), "count", "");
+            writeJsonMetricRecord(jw, "Fault Statistics", "Extended Occupancy", String.valueOf(metrics.extendedOccupancyFault), "count", "");
             writeJsonMetricRecord(jw, "Fault Statistics", "Total Faults & Tampers", String.valueOf(metrics.totalFaultsAndTamper()), "count", "");
             for (StorageVolumeRow vol : storageVolumes) {
                 writeJsonMetricRecord(
@@ -322,6 +326,7 @@ public class RDSReport extends Report {
                 List.of(CellValue.text("Fault Statistics"), CellValue.text("Gamma-High"), CellValue.integer(metrics.gammaHighFault), CellValue.text("count")),
                 List.of(CellValue.text("Fault Statistics"), CellValue.text("Gamma-Low"), CellValue.integer(metrics.gammaLowFault), CellValue.text("count")),
                 List.of(CellValue.text("Fault Statistics"), CellValue.text("Neutron-High"), CellValue.integer(metrics.neutronHighFault), CellValue.text("count")),
+                List.of(CellValue.text("Fault Statistics"), CellValue.text("Extended Occupancy"), CellValue.integer(metrics.extendedOccupancyFault), CellValue.text("count")),
                 List.of(CellValue.text("Fault Statistics"), CellValue.text("Total Faults & Tampers"), CellValue.integer(metrics.totalFaultsAndTamper()), CellValue.text("count"))
         );
 

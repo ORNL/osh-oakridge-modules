@@ -149,7 +149,7 @@ public class LaneReport extends Report {
                             intFmt.format(totals.totalFaultsAndTamper()),
                             String.format(Locale.US, "Tamper: %s | Faults: %s",
                                     intFmt.format(totals.tamper),
-                                    intFmt.format(totals.gammaHighFault + totals.gammaLowFault + totals.neutronHighFault)),
+                                    intFmt.format(totals.gammaHighFault + totals.gammaLowFault + totals.neutronHighFault + totals.extendedOccupancyFault)),
                             ChartGenerator.COLOR_TAMPER
                     )
             ));
@@ -206,7 +206,8 @@ public class LaneReport extends Report {
                 String.valueOf(m.tamper),
                 String.valueOf(m.gammaHighFault),
                 String.valueOf(m.gammaLowFault),
-                String.valueOf(m.neutronHighFault)
+                String.valueOf(m.neutronHighFault),
+                String.valueOf(m.extendedOccupancyFault)
         );
     }
 
@@ -245,6 +246,7 @@ public class LaneReport extends Report {
             jw.name("gammaHighFault").value(totals.gammaHighFault);
             jw.name("gammaLowFault").value(totals.gammaLowFault);
             jw.name("neutronHighFault").value(totals.neutronHighFault);
+            jw.name("extendedOccupancyFault").value(totals.extendedOccupancyFault);
             jw.endObject();
 
             jw.name("records").beginArray();
@@ -268,6 +270,7 @@ public class LaneReport extends Report {
                 jw.name("gammaHighFault").value(m.gammaHighFault);
                 jw.name("gammaLowFault").value(m.gammaLowFault);
                 jw.name("neutronHighFault").value(m.neutronHighFault);
+                jw.name("extendedOccupancyFault").value(m.extendedOccupancyFault);
                 jw.endObject();
             }
             jw.endArray();
@@ -287,7 +290,7 @@ public class LaneReport extends Report {
         List<String> headers = laneColumnHeaders();
         List<Double> widths = List.of(
                 22.0, 28.0, 18.0, 16.0, 16.0, 16.0, 20.0, 18.0,
-                22.0, 18.0, 20.0, 14.0, 14.0, 14.0, 16.0
+                22.0, 18.0, 20.0, 14.0, 14.0, 14.0, 16.0, 20.0
         );
 
         List<List<CellValue>> laneRows = new ArrayList<>(perLane.size() + 1);
@@ -335,7 +338,8 @@ public class LaneReport extends Report {
                 CellValue.integer(m.tamper),
                 CellValue.integer(m.gammaHighFault),
                 CellValue.integer(m.gammaLowFault),
-                CellValue.integer(m.neutronHighFault)
+                CellValue.integer(m.neutronHighFault),
+                CellValue.integer(m.extendedOccupancyFault)
         );
     }
 
@@ -355,7 +359,8 @@ public class LaneReport extends Report {
                 "Tamper",
                 "Gamma-High",
                 "Gamma-Low",
-                "Neutron-High"
+                "Neutron-High",
+                "Extended Occupancy"
         );
     }
 
@@ -398,6 +403,7 @@ public class LaneReport extends Report {
         row.put("G-High", intFmt.format(m.gammaHighFault));
         row.put("G-Low", intFmt.format(m.gammaLowFault));
         row.put("N-High", intFmt.format(m.neutronHighFault));
+        row.put("Ext-Occ", intFmt.format(m.extendedOccupancyFault));
         return row;
     }
 }

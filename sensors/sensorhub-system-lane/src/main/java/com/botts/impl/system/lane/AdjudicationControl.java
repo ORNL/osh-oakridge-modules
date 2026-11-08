@@ -166,7 +166,9 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
     protected boolean isAdjudicationCodeSupported(int code) {
         if (code < 0)
             return false;
-        if (code <= 11 || code == Adjudication.EML_NON_THREAT_CODE)
+        if (code <= 11
+                || code == Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE
+                || code == Adjudication.EML_NON_THREAT_CODE)
             return true;
 
         // Resolve on each submission so service configuration updates and module

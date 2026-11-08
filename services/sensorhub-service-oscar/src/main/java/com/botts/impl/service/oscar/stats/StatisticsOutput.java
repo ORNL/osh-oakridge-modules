@@ -45,11 +45,12 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
     public static String gammaNeutronAlarmCQL = "gammaAlarm = true AND neutronAlarm = true";
     public static String gammaAlarmCQL = "gammaAlarm = true AND neutronAlarm = false";
     public static String neutronAlarmCQL = "gammaAlarm = false AND neutronAlarm = true";
-    public static String faultCQL = "alarmState = 'Fault - Neutron High' OR alarmState = 'Fault - Gamma Low' OR alarmState = 'Fault - Gamma High'";
+    public static String faultCQL = "alarmState = 'Fault - Neutron High' OR alarmState = 'Fault - Gamma Low' OR alarmState = 'Fault - Gamma High' OR alarmState = 'Fault - Extended Occupancy'";
     public static String gammaFaultCQL = "alarmState = 'Fault - Gamma Low' OR alarmState = 'Fault - Gamma High'";
     public static String gammaHighFaultCQL = "alarmState = 'Fault - Gamma High'";
     public static String gammaLowFaultCQL = "alarmState = 'Fault - Gamma Low'";
     public static String neutronFaultCQL = "alarmState = 'Fault - Neutron High'";
+    public static String extendedOccupancyFaultCQL = "alarmState = 'Fault - Extended Occupancy'";
     public static String tamperCQL = "tamperStatus = true";
 
     // RS350 alarm CQL filters (AlarmOutput uses alarmCategoryCode field)
@@ -101,6 +102,7 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
                 RADHelper.DEF_GAMMA,
                 RADHelper.DEF_NEUTRON,
                 RADHelper.DEF_ALARM,
+                RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT,
                 RADHelper.DEF_TAMPER,
                 DEF_ALARM_CATEGORY
         };
@@ -434,7 +436,7 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
         long numGammaFaults = countObservations(database, gammaFaultCQL, timeRange, laneUIDs, RADHelper.DEF_GAMMA, RADHelper.DEF_ALARM);
         long numNeutronFaults = countObservations(database, neutronFaultCQL, timeRange, laneUIDs, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM);
         long numTampers = countObservations(database, tamperCQL, timeRange, laneUIDs, RADHelper.DEF_TAMPER);
-        long numFaults = countObservations(database, faultCQL, timeRange, laneUIDs, RADHelper.DEF_GAMMA, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM) + numTampers;
+        long numFaults = countObservations(database, faultCQL, timeRange, laneUIDs, RADHelper.DEF_GAMMA, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM, RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT) + numTampers;
 
         // RS350 alarm counts from raw AlarmOutput (uses alarmCategoryCode observed property)
         long numRS350GammaAlarms = countObservations(database, rs350GammaAlarmCQL, timeRange, laneUIDs, DEF_ALARM_CATEGORY);

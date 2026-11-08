@@ -83,6 +83,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     private static final Set<Class<?>> WEBID_SENSORS = Set.of(RS350Sensor.class);
     private static final String DEFAULT_XMLID_PREFIX = "lane";
     public static final String OPERATIONAL_VIEW_KEYWORD_PREFIX = "oscar:view:";
+    public static final String EXTENDED_OCCUPANCY_THRESHOLD_KEYWORD_PREFIX = "oscar:extended-occupancy-threshold-min:";
     private static final String OPERATIONAL_VIEW_KEY_PATTERN = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
 
     AbstractSensorModule<?> existingRPMModule = null;
@@ -127,6 +128,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     @Override
     protected void doInit() throws SensorHubException {
         validateOperationalViewKeys();
+        validateExtendedOccupancyThreshold();
         cancelLaneEventSubscription();
         shutdownThreadPool();
         threadPool = Executors.newSingleThreadExecutor();
@@ -197,6 +199,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         addOutput(n42Output, false);
 
         occupancyStatusOutput = new OccupancyStatusOutput(this);
+        occupancyStatusOutput.setExtendedOccupancyThresholdMinutes(getExtendedOccupancyThresholdMinutes());
         addOutput(occupancyStatusOutput, false);
 
         adjudicationControl = new AdjudicationControl(this);
@@ -260,21 +263,53 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         synchronized (sensorDescLock) {
             super.updateSensorDescription();
 
-            if (config == null || getConfiguration().operationalViewKeys == null)
+            if (config == null)
                 return;
 
             var keywords = new SMLFactory().newKeywordList();
-            getConfiguration().operationalViewKeys.stream()
-                    .filter(Objects::nonNull)
-                    .map(String::trim)
-                    .filter(key -> key.matches(OPERATIONAL_VIEW_KEY_PATTERN))
-                    .distinct()
-                    .sorted()
-                    .map(key -> OPERATIONAL_VIEW_KEYWORD_PREFIX + key)
-                    .forEach(keywords::addKeyword);
+            if (getConfiguration().operationalViewKeys != null) {
+                getConfiguration().operationalViewKeys.stream()
+                        .filter(Objects::nonNull)
+                        .map(String::trim)
+                        .filter(key -> key.matches(OPERATIONAL_VIEW_KEY_PATTERN))
+                        .distinct()
+                        .sorted()
+                        .map(key -> OPERATIONAL_VIEW_KEYWORD_PREFIX + key)
+                        .forEach(keywords::addKeyword);
+            }
+            keywords.addKeyword(EXTENDED_OCCUPANCY_THRESHOLD_KEYWORD_PREFIX + getExtendedOccupancyThresholdMinutes());
 
             if (keywords.getNumKeywords() > 0)
                 sensorDescription.addKeywords(keywords);
+        }
+    }
+
+    public int getExtendedOccupancyThresholdMinutes() {
+        if (config == null || getConfiguration().extendedOccupancyThresholdMinutes <= 0) {
+            return LaneConfig.DEFAULT_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES;
+        }
+        return Math.min(
+                LaneConfig.MAX_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES,
+                getConfiguration().extendedOccupancyThresholdMinutes);
+    }
+
+    private void validateExtendedOccupancyThreshold() throws SensorHubException {
+        if (getConfiguration() == null)
+            return;
+        int configured = getConfiguration().extendedOccupancyThresholdMinutes;
+        if (configured == 0) {
+            getConfiguration().extendedOccupancyThresholdMinutes = LaneConfig.DEFAULT_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES;
+            return;
+        }
+        if (configured < LaneConfig.MIN_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES
+                || configured > LaneConfig.MAX_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES) {
+            throw new SensorHubException(
+                    "Extended occupancy threshold must be between "
+                            + LaneConfig.MIN_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES
+                            + " and "
+                            + LaneConfig.MAX_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES
+                            + " minutes: "
+                            + configured);
         }
     }
 
@@ -354,6 +389,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         }
         if (occupancyProducer != null) {
             occupancyWrapper = new OccupancyWrapper(getParentHub(), occupancyProducer, occupancyStatusOutput);
+            occupancyWrapper.setExtendedOccupancyThresholdMinutes(getExtendedOccupancyThresholdMinutes());
             if (occupancyProducer.getCurrentState() == ModuleEvent.ModuleState.STARTED)
                 occupancyWrapper.start();
             //occupancyWrapper.videoNamePrefix = BASE_VIDEO_DIRECTORY + "lane" + getConfiguration().groupID + "/";
@@ -375,7 +411,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             emlAutoAdjudicationHelper.stop();
             emlAutoAdjudicationHelper = null;
         }
-        if (occupancyProducer instanceof RapiscanSensor) {
+        if (occupancyProducer != null) {
             emlAutoAdjudicationHelper = new EmlAutoAdjudicationHelper(this, occupancyProducer, obsStore);
         }
 
@@ -575,6 +611,17 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             }
 
             else if (event.getType().equals(ModuleEvent.Type.CONFIG_CHANGED)) {
+                if (Objects.equals(event.getModule(), this)) {
+                    int thresholdMinutes = getExtendedOccupancyThresholdMinutes();
+                    if (occupancyStatusOutput != null) {
+                        occupancyStatusOutput.setExtendedOccupancyThresholdMinutes(thresholdMinutes);
+                    }
+                    if (occupancyWrapper != null) {
+                        occupancyWrapper.setExtendedOccupancyThresholdMinutes(thresholdMinutes);
+                    }
+                    updateSensorDescription();
+                }
+
                 // FFmpeg config changed events
                 if (event.getModule() instanceof FFMPEGSensor ffmpegDriver) {
                     // Let's only handle our own ffmpeg children

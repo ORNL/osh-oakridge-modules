@@ -25,6 +25,12 @@ public class RADHelper extends GeoPosHelper {
     public static final String DEF_ADJUDICATION = getRadUri("AdjudicationCode");
     public static final String DEF_EML_ANALYSIS = getRadUri("EMLGammaAlert");
     public static final String DEF_EML_SCAN = getRadUri("EMLRPMGammaAlert");
+    public static final String DEF_OCCUPANCY_STATUS = getRadUri("OccupancyStatus");
+    public static final String DEF_OCCUPANCY_START_TIME = getRadUri("OccupancyStartTime");
+    public static final String DEF_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES = getRadUri("ExtendedOccupancyThresholdMinutes");
+    public static final String DEF_EXTENDED_OCCUPANCY_FAULT = getRadUri("ExtendedOccupancyFault");
+    public static final String DEF_EXTENDED_OCCUPANCY_ALARM_STATE = getRadUri("ExtendedOccupancyAlarmState");
+    public static final String FAULT_EXTENDED_OCCUPANCY = "Fault - Extended Occupancy";
     public static final String DEF_VIDEO = getRadUri("");
     public static final String DEF_COMM = getRadUri("");
 

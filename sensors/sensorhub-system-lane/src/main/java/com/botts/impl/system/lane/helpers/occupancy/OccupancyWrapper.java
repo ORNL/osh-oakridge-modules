@@ -3,6 +3,7 @@ package com.botts.impl.system.lane.helpers.occupancy;
 import com.botts.impl.process.rs350.occupancy.Rs350OccupancyProcessModule;
 import com.botts.impl.sensor.aspect.AspectSensor;
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
+import com.botts.impl.system.lane.config.LaneConfig;
 import com.botts.impl.system.lane.helpers.occupancy.state.*;
 import net.opengis.swe.v20.*;
 import org.sensorhub.api.ISensorHub;
@@ -14,7 +15,11 @@ import org.sensorhub.api.datastore.obs.IObsStore;
 import org.sensorhub.api.event.EventUtils;
 import org.sensorhub.impl.sensor.ffmpeg.FFMPEGSensorBase;
 import org.sensorhub.impl.sensor.ffmpeg.controls.FileControl;
+import org.sensorhub.impl.utils.rad.eml.PendingEmlAutoAdjudicationRegistry;
+import org.sensorhub.impl.utils.rad.eml.PendingExtendedOccupancyAutoAdjudicationRegistry;
+import org.sensorhub.impl.utils.rad.model.Adjudication;
 import org.sensorhub.impl.utils.rad.model.Occupancy;
+import org.sensorhub.impl.utils.rad.model.OccupancyExtended;
 import org.sensorhub.impl.utils.rad.output.OccupancyOutput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,19 +32,33 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 public class OccupancyWrapper {
     public static final String DAILYFILE_NAME = "dailyFile";
 
     private static final Logger logger = LoggerFactory.getLogger(OccupancyWrapper.class);
+    private static final ScheduledExecutorService EXTENDED_OCCUPANCY_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "oscar-extended-occupancy-watchdog");
+                t.setDaemon(true);
+                return t;
+            });
+
     private final CopyOnWriteArrayList<FFMPEGSensorBase<?>> cameras = new CopyOnWriteArrayList<>();
     private IDataProducerModule<?> rpm;
     private volatile StateManager stateManager;
     private final OccupancyStatusOutput occupancyStatusOutput;
     private final CameraRecordingCoordinator recordingCoordinator = new CameraRecordingCoordinator();
-    private final ObservationHelper observationHelper = new ObservationHelper(recordingCoordinator);
+    private final ObservationHelper observationHelper = new ObservationHelper(
+            recordingCoordinator,
+            this::evaluateCompletedOccupancy);
     Instant startTime = Instant.now();
     Instant endTime = Instant.now();
     ISensorHub hub;
@@ -55,6 +74,10 @@ public class OccupancyWrapper {
     private boolean hasValidOccupancyState = false;
     private boolean occupancyActive = false;
     private Instant occupancyStartedAt = null;
+    private boolean extendedOccupancyFaultLogged = false;
+    private long occupancyEpoch = 0;
+    private ScheduledFuture<?> extendedOccupancyFaultTimer = null;
+    private volatile int extendedOccupancyThresholdMinutes = LaneConfig.DEFAULT_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES;
 
     public OccupancyWrapper(ISensorHub hub) {
         this(hub, (OccupancyStatusOutput) null);
@@ -63,6 +86,9 @@ public class OccupancyWrapper {
     public OccupancyWrapper(ISensorHub hub, OccupancyStatusOutput occupancyStatusOutput) {
         this.hub = hub;
         this.occupancyStatusOutput = occupancyStatusOutput;
+        if (occupancyStatusOutput != null) {
+            this.extendedOccupancyThresholdMinutes = occupancyStatusOutput.getExtendedOccupancyThresholdMinutes();
+        }
     }
 
     public OccupancyWrapper(ISensorHub hub, IDataProducerModule<?> rpm) {
@@ -137,6 +163,8 @@ public class OccupancyWrapper {
         synchronized (lifecycleLock) {
             started = false;
             lifecycleGeneration++;
+            occupancyEpoch++;
+            cancelExtendedOccupancyFaultTimerLocked();
             if (stateManager != null)
                 stateManager.clearListeners();
             dailySubscription = dailyFileSubscription;
@@ -381,6 +409,9 @@ public class OccupancyWrapper {
             hasValidOccupancyState = false;
             occupancyActive = false;
             occupancyStartedAt = null;
+            extendedOccupancyFaultLogged = false;
+            occupancyEpoch++;
+            cancelExtendedOccupancyFaultTimerLocked();
         }
         if (previousStateManager != null)
             previousStateManager.clearListeners();
@@ -403,13 +434,20 @@ public class OccupancyWrapper {
 
     public void removeRpmSensor() {
         stop();
+        IDataProducerModule<?> prevRpm = rpm;
         rpm = null;
         rpmObs = null;
         stateManager = null;
+        if (prevRpm != null && prevRpm.getUniqueIdentifier() != null) {
+            PendingExtendedOccupancyAutoAdjudicationRegistry.clearProducer(prevRpm.getUniqueIdentifier());
+        }
         synchronized (lifecycleLock) {
             hasValidOccupancyState = false;
             occupancyActive = false;
             occupancyStartedAt = null;
+            extendedOccupancyFaultLogged = false;
+            occupancyEpoch++;
+            cancelExtendedOccupancyFaultTimerLocked();
         }
     }
 
@@ -421,6 +459,70 @@ public class OccupancyWrapper {
         cameras.clear();
     }
 
+    public int getExtendedOccupancyThresholdMinutes() {
+        return extendedOccupancyThresholdMinutes;
+    }
+
+    public void setExtendedOccupancyThresholdMinutes(int thresholdMinutes) {
+        int clamped = Math.max(
+                LaneConfig.MIN_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES,
+                Math.min(LaneConfig.MAX_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES, thresholdMinutes));
+        this.extendedOccupancyThresholdMinutes = clamped;
+        if (occupancyStatusOutput != null) {
+            occupancyStatusOutput.setExtendedOccupancyThresholdMinutes(clamped);
+        }
+    }
+
+    private Duration getExtendedOccupancyThreshold() {
+        return Duration.ofMinutes(Math.max(
+                LaneConfig.MIN_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES,
+                extendedOccupancyThresholdMinutes));
+    }
+
+    private boolean hasExceededExtendedOccupancyThreshold(Instant start, Instant sampleTime) {
+        if (start == null || sampleTime == null)
+            return false;
+        return !sampleTime.isBefore(start.plus(getExtendedOccupancyThreshold()));
+    }
+
+    private void cancelExtendedOccupancyFaultTimerLocked() {
+        if (extendedOccupancyFaultTimer != null) {
+            extendedOccupancyFaultTimer.cancel(false);
+            extendedOccupancyFaultTimer = null;
+        }
+    }
+
+    private void scheduleExtendedOccupancyFaultTimerLocked(long expectedOccupancyEpoch, Instant activeStart, Instant observationTime) {
+        cancelExtendedOccupancyFaultTimerLocked();
+        if (!started || activeStart == null)
+            return;
+        Duration threshold = getExtendedOccupancyThreshold();
+        Duration elapsed = observationTime != null && observationTime.isAfter(activeStart)
+                ? Duration.between(activeStart, observationTime)
+                : Duration.ZERO;
+        long delayMillis = Math.max(1L, threshold.minus(elapsed).toMillis());
+        extendedOccupancyFaultTimer = EXTENDED_OCCUPANCY_SCHEDULER.schedule(
+                () -> onExtendedOccupancyDeadlineReached(expectedOccupancyEpoch, activeStart),
+                delayMillis,
+                TimeUnit.MILLISECONDS);
+    }
+
+    private void onExtendedOccupancyDeadlineReached(long expectedOccupancyEpoch, Instant expectedStart) {
+        Instant faultSampleTime;
+        synchronized (lifecycleLock) {
+            if (!started || !occupancyActive || extendedOccupancyFaultLogged || occupancyEpoch != expectedOccupancyEpoch)
+                return;
+            extendedOccupancyFaultLogged = true;
+            extendedOccupancyFaultTimer = null;
+            Instant thresholdInstant = expectedStart.plus(getExtendedOccupancyThreshold());
+            Instant now = Instant.now();
+            faultSampleTime = now.isAfter(thresholdInstant) ? now : thresholdInstant;
+        }
+        if (occupancyStatusOutput != null) {
+            occupancyStatusOutput.publish(faultSampleTime, true, expectedStart, true);
+        }
+    }
+
     boolean processDailyFile(DataComponent dailyFile, Instant observationTime) {
         return processDailyFile(stateManager, dailyFile, observationTime);
     }
@@ -430,30 +532,139 @@ public class OccupancyWrapper {
                 || !manager.updateDailyFile(dailyFile, observationTime))
             return false;
 
-        boolean shouldPublish;
+        boolean shouldPublish = false;
+        boolean publishFault = false;
         boolean isOccupied = manager.hasActiveOccupancy();
         Instant activeStart;
         synchronized (lifecycleLock) {
             if (manager != stateManager)
                 return false;
 
-            shouldPublish = !hasValidOccupancyState || isOccupied != occupancyActive;
-            if (shouldPublish) {
-                if (isOccupied && (!hasValidOccupancyState || !occupancyActive))
+            boolean transition = !hasValidOccupancyState || isOccupied != occupancyActive;
+            if (transition) {
+                shouldPublish = true;
+                if (isOccupied) {
                     occupancyStartedAt = manager.getOccupancyStartTimeHint() != null
                             ? manager.getOccupancyStartTimeHint()
                             : observationTime;
-                else if (!isOccupied)
+                    occupancyActive = true;
+                    hasValidOccupancyState = true;
+                    long currentEpoch = ++occupancyEpoch;
+                    if (hasExceededExtendedOccupancyThreshold(occupancyStartedAt, observationTime)) {
+                        extendedOccupancyFaultLogged = true;
+                        publishFault = true;
+                        cancelExtendedOccupancyFaultTimerLocked();
+                    } else {
+                        extendedOccupancyFaultLogged = false;
+                        publishFault = false;
+                        scheduleExtendedOccupancyFaultTimerLocked(currentEpoch, occupancyStartedAt, observationTime);
+                    }
+                } else {
                     occupancyStartedAt = null;
-
-                occupancyActive = isOccupied;
-                hasValidOccupancyState = true;
+                    occupancyActive = false;
+                    hasValidOccupancyState = true;
+                    extendedOccupancyFaultLogged = false;
+                    publishFault = false;
+                    occupancyEpoch++;
+                    cancelExtendedOccupancyFaultTimerLocked();
+                }
+            } else if (isOccupied && !extendedOccupancyFaultLogged
+                    && hasExceededExtendedOccupancyThreshold(occupancyStartedAt, observationTime)) {
+                extendedOccupancyFaultLogged = true;
+                shouldPublish = true;
+                publishFault = true;
+                cancelExtendedOccupancyFaultTimerLocked();
             }
             activeStart = occupancyStartedAt;
         }
 
         if (shouldPublish && occupancyStatusOutput != null)
-            occupancyStatusOutput.publish(observationTime, isOccupied, activeStart);
+            occupancyStatusOutput.publish(observationTime, isOccupied, activeStart, publishFault);
+        return true;
+    }
+
+    void evaluateCompletedOccupancy(Occupancy occupancy) {
+        if (occupancy == null)
+            return;
+
+        double thresholdSeconds = getExtendedOccupancyThreshold().toSeconds();
+        double durationSeconds = occupancy.getEndTime() - occupancy.getStartTime();
+        boolean isExtendedBySpan = Double.isFinite(durationSeconds) && durationSeconds >= thresholdSeconds;
+
+        boolean isExtended;
+        boolean publishLateFault = false;
+        Instant lateFaultSampleTime = null;
+        Instant lateFaultStart = null;
+        String producerUid;
+
+        synchronized (lifecycleLock) {
+            producerUid = rpm != null ? rpm.getUniqueIdentifier() : null;
+            boolean isExtendedByActiveStart = !isExtendedBySpan
+                    && occupancyStartedAt != null
+                    && occupancy.getSamplingTime() > 0
+                    && (occupancy.getSamplingTime() - (occupancyStartedAt.toEpochMilli() / 1000.0)) >= thresholdSeconds;
+
+            isExtended = extendedOccupancyFaultLogged || isExtendedBySpan || isExtendedByActiveStart;
+            if (isExtended && !extendedOccupancyFaultLogged) {
+                extendedOccupancyFaultLogged = true;
+                cancelExtendedOccupancyFaultTimerLocked();
+                publishLateFault = true;
+                lateFaultStart = occupancy.getStartTime() > 0
+                        ? Instant.ofEpochMilli(Math.round(occupancy.getStartTime() * 1000.0))
+                        : (occupancyStartedAt != null ? occupancyStartedAt : Instant.now());
+                double endEpochSec = occupancy.getEndTime() > 0
+                        ? occupancy.getEndTime()
+                        : occupancy.getSamplingTime();
+                lateFaultSampleTime = endEpochSec > 0
+                        ? Instant.ofEpochMilli(Math.round(endEpochSec * 1000.0))
+                        : Instant.now();
+            }
+        }
+
+        if (publishLateFault && occupancyStatusOutput != null) {
+            occupancyStatusOutput.publish(lateFaultSampleTime, true, lateFaultStart, true);
+        }
+
+        if (isExtended && isGammaOnlyAlarm(occupancy)) {
+            double effectiveDuration = isExtendedBySpan ? durationSeconds : Math.max(thresholdSeconds, durationSeconds);
+            var eval = PendingExtendedOccupancyAutoAdjudicationRegistry.ExtendedOccupancyEvaluation.create(
+                    effectiveDuration,
+                    extendedOccupancyThresholdMinutes,
+                    occupancy.getMaxGammaCount());
+
+            if (occupancy.getAdjudicatedIds() != null) {
+                occupancy.getAdjudicatedIds().removeIf(Adjudication.EML_NON_THREAT_MARKER::equals);
+            }
+            if (producerUid != null) {
+                PendingEmlAutoAdjudicationRegistry.remove(
+                        producerUid,
+                        occupancy.getSamplingTime(),
+                        occupancy.getOccupancyCount());
+            }
+            if (occupancy.getAdjudicatedIds() == null
+                    || !occupancy.getAdjudicatedIds().contains(Adjudication.EXTENDED_OCCUPANCY_GAMMA_MARKER)) {
+                occupancy.addAdjudicatedId(Adjudication.EXTENDED_OCCUPANCY_GAMMA_MARKER);
+            }
+            occupancy.recordAdjudicationCode(Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE);
+
+            if (producerUid != null && !producerUid.isBlank()) {
+                PendingExtendedOccupancyAutoAdjudicationRegistry.register(
+                        producerUid,
+                        occupancy.getSamplingTime(),
+                        occupancy.getOccupancyCount(),
+                        eval);
+            }
+        }
+    }
+
+    private static boolean isGammaOnlyAlarm(Occupancy occupancy) {
+        if (occupancy == null || !occupancy.hasGammaAlarm() || occupancy.hasNeutronAlarm())
+            return false;
+        if (occupancy instanceof OccupancyExtended extended) {
+            String category = extended.getAlarmCategory();
+            if (category != null && category.toLowerCase(Locale.ROOT).contains("neutron"))
+                return false;
+        }
         return true;
     }
 
@@ -466,11 +677,15 @@ public class OccupancyWrapper {
         private final Object lock = new Object();
         private final OccupancyRecordingRegistry recordings = new OccupancyRecordingRegistry();
         private final CameraRecordingCoordinator coordinator;
+        private final Consumer<Occupancy> completedOccupancyEvaluator;
         private boolean active;
         private long lifecycleEpoch;
 
-        private ObservationHelper(CameraRecordingCoordinator coordinator) {
+        private ObservationHelper(
+                CameraRecordingCoordinator coordinator,
+                Consumer<Occupancy> completedOccupancyEvaluator) {
             this.coordinator = coordinator;
+            this.completedOccupancyEvaluator = completedOccupancyEvaluator;
         }
 
         public void register(CameraRecordingCoordinator.Recording recording) {
@@ -518,6 +733,10 @@ public class OccupancyWrapper {
                 if (!active)
                     return;
                 callbackEpoch = lifecycleEpoch;
+            }
+
+            if (completedOccupancyEvaluator != null) {
+                completedOccupancyEvaluator.accept(occupancy);
             }
 
             OccupancyRecordingRegistry.Resolution resolution =

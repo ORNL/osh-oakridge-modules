@@ -58,6 +58,7 @@ public class ChartGenerator {
     public static final Color COLOR_EML_SUPPRESSED = new Color(13, 148, 136); // #0D9488 Teal
     public static final Color COLOR_GAMMA_LOW = new Color(245, 158, 11);      // #F59E0B Amber
     public static final Color COLOR_TAMPER = new Color(217, 119, 6);          // #D97706 Deep Orange
+    public static final Color COLOR_EXTENDED_OCCUPANCY = new Color(124, 58, 237); // #7C3AED Purple
     public static final Color COLOR_OCCUPANCY_LINE = new Color(3, 105, 161);  // #0369A1 Ocean Blue
 
     // Disposition group palette
