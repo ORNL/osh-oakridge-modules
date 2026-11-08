@@ -255,6 +255,23 @@ public class MpegTsProcessor extends Thread {
     private ExecutorService frameQueueSubmitter;
 
     /**
+     * Bounded native packet cache of the most recent completed GOP (>= 1.1s) plus the current
+     * in-progress GOP so newly opened live HLS streams (.m3u8) can immediately mux a complete
+     * initial segment without waiting 1-2 future camera GOPs.
+     */
+    static final int MAX_HLS_SEED_GOP_PACKETS = 300;
+    static final int MAX_HLS_SEED_GOP_BYTES = 8 * 1024 * 1024;
+    static final double MIN_HLS_ROTATION_DURATION_SECONDS = 1.1;
+
+    private final Object hlsSeedLock = new Object();
+    private Deque<AVPacket> previousHlsGop = new ArrayDeque<>();
+    private Deque<AVPacket> currentHlsGop = new ArrayDeque<>();
+    private int previousHlsGopBytes = 0;
+    private int currentHlsGopBytes = 0;
+    private long currentHlsGopStartOrderingTs = AV_NOPTS_VALUE;
+    private long lastHlsSeedOrderingTs = AV_NOPTS_VALUE;
+
+    /**
      * Name of thread
      */
     private static final String WORKER_THREAD_NAME = "STREAM-PROCESSOR";
@@ -614,6 +631,7 @@ public class MpegTsProcessor extends Thread {
         } finally {
             avFormatContext = null;
             videoStreamMetadata.clear();
+            clearHlsSeedCache();
         }
     }
 
@@ -1195,6 +1213,18 @@ public class MpegTsProcessor extends Thread {
         return false;
     }
 
+    /**
+     * @return true if any listener is registered under the given delivery mode
+     */
+    public boolean hasRegisteredListener(DeliveryMode mode) {
+        for (var subscription : videoSubscriptions) {
+            if (subscription.mode() == mode) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public void run() {
         try {
@@ -1203,6 +1233,7 @@ public class MpegTsProcessor extends Thread {
                 throwIfTranscoderFailed();
                 logger.info("End of MISB TS stream");
                 if (loop) {
+                    clearHlsSeedCache();
                     avformat.av_seek_frame(avFormatContext, 0, 0, avformat.AVSEEK_FLAG_ANY);
                 }
             }
@@ -1212,13 +1243,11 @@ public class MpegTsProcessor extends Thread {
         }
     }
 
-    private void submitPacketToListeners(AVPacket avPacket, Set<DeliveryMode> targetModes) {
-
+    private DataBufferRecord toDataBufferRecord(AVPacket avPacket) {
         boolean isKeyFrame = (avPacket.flags() & avcodec.AV_PKT_FLAG_KEY) != 0;
 
-        // Process video packet
         byte[] dataBuffer = new byte[avPacket.size()];
-        avPacket.data().get(dataBuffer);
+        avPacket.data().position(0).get(dataBuffer);
 
         // Prepend the SPS/PPS header to key frames so each one can be decoded standalone
         if (isKeyFrame && spsPpsHeader != null) {
@@ -1228,7 +1257,6 @@ public class MpegTsProcessor extends Thread {
             dataBuffer = combined;
         }
 
-        // Pass data buffer to interested listeners
         AVRational packetTimeBase = avPacket.time_base();
         int packetTimeBaseNumerator = videoStreamTimeBaseNumerator;
         int packetTimeBaseDenominator = videoStreamTimeBaseDenominator;
@@ -1239,7 +1267,7 @@ public class MpegTsProcessor extends Thread {
         double packetTimeBaseUnits = (double) packetTimeBaseNumerator / packetTimeBaseDenominator;
         double presentationTimestamp = presentationTimestamp(
                 avPacket.pts(), avPacket.dts(), packetTimeBaseUnits);
-        notifyVideoDataBufferListeners(new DataBufferRecord(
+        return new DataBufferRecord(
                 presentationTimestamp,
                 dataBuffer,
                 isKeyFrame,
@@ -1247,7 +1275,115 @@ public class MpegTsProcessor extends Thread {
                 avPacket.dts(),
                 avPacket.duration(),
                 packetTimeBaseNumerator,
-                packetTimeBaseDenominator), targetModes);
+                packetTimeBaseDenominator);
+    }
+
+    private void submitPacketToListeners(AVPacket avPacket, Set<DeliveryMode> targetModes) {
+        notifyVideoDataBufferListeners(toDataBufferRecord(avPacket), targetModes);
+    }
+
+    void recordHlsSeedPacket(AVPacket avPacket) {
+        if (avPacket == null || avPacket.isNull() || avPacket.size() <= 0) {
+            return;
+        }
+        long pts = avPacket.pts();
+        long dts = avPacket.dts();
+        if (!hasUsablePacketTimestamp(pts, dts)) {
+            return;
+        }
+        long orderingTs = dts != AV_NOPTS_VALUE ? dts : pts;
+        boolean isKeyFrame = (avPacket.flags() & avcodec.AV_PKT_FLAG_KEY) != 0;
+
+        synchronized (hlsSeedLock) {
+            if (lastHlsSeedOrderingTs != AV_NOPTS_VALUE && orderingTs <= lastHlsSeedOrderingTs) {
+                clearHlsSeedCacheLocked();
+            }
+            if (!isKeyFrame && currentHlsGop.isEmpty()) {
+                return;
+            }
+            if (isKeyFrame && !currentHlsGop.isEmpty()) {
+                double timeBaseSeconds = resolvePacketTimeBaseSeconds(avPacket);
+                double currentSpanSeconds = (currentHlsGopStartOrderingTs != AV_NOPTS_VALUE && timeBaseSeconds > 0.0)
+                        ? (orderingTs - currentHlsGopStartOrderingTs) * timeBaseSeconds
+                        : (currentHlsGop.size() / 30.0);
+                if (currentSpanSeconds >= MIN_HLS_ROTATION_DURATION_SECONDS
+                        || currentHlsGop.size() >= MAX_HLS_SEED_GOP_PACKETS / 2
+                        || currentHlsGopBytes >= MAX_HLS_SEED_GOP_BYTES / 2) {
+                    drainPacketQueue(previousHlsGop);
+                    previousHlsGop = currentHlsGop;
+                    previousHlsGopBytes = currentHlsGopBytes;
+                    currentHlsGop = new ArrayDeque<>();
+                    currentHlsGopBytes = 0;
+                    currentHlsGopStartOrderingTs = orderingTs;
+                }
+            }
+            if (currentHlsGop.isEmpty()) {
+                currentHlsGopStartOrderingTs = orderingTs;
+            }
+            if (currentHlsGop.size() >= MAX_HLS_SEED_GOP_PACKETS
+                    || currentHlsGopBytes + avPacket.size() > MAX_HLS_SEED_GOP_BYTES) {
+                clearHlsSeedCacheLocked();
+                if (!isKeyFrame) {
+                    return;
+                }
+                currentHlsGopStartOrderingTs = orderingTs;
+            }
+            AVPacket cloned = avcodec.av_packet_clone(avPacket);
+            if (cloned == null || cloned.isNull()) {
+                return;
+            }
+            currentHlsGop.addLast(cloned);
+            currentHlsGopBytes += cloned.size();
+            lastHlsSeedOrderingTs = orderingTs;
+        }
+    }
+
+    private double resolvePacketTimeBaseSeconds(AVPacket avPacket) {
+        AVRational packetTimeBase = avPacket.time_base();
+        int num = videoStreamTimeBaseNumerator;
+        int den = videoStreamTimeBaseDenominator;
+        if (packetTimeBase != null && packetTimeBase.num() > 0 && packetTimeBase.den() > 0) {
+            num = packetTimeBase.num();
+            den = packetTimeBase.den();
+        }
+        return (num > 0 && den > 0) ? ((double) num / (double) den) : 0.0;
+    }
+
+    /**
+     * Returns an ordered snapshot of the cached keyframe-aligned GOP packets so a newly opened
+     * live HLS stream can immediately mux its initial segment without waiting for 1-2 future
+     * camera keyframe intervals.
+     */
+    public List<DataBufferRecord> snapshotHlsSeedPackets() {
+        synchronized (hlsSeedLock) {
+            int total = previousHlsGop.size() + currentHlsGop.size();
+            if (total == 0) {
+                return List.of();
+            }
+            List<DataBufferRecord> records = new ArrayList<>(total);
+            for (AVPacket packet : previousHlsGop) {
+                records.add(toDataBufferRecord(packet));
+            }
+            for (AVPacket packet : currentHlsGop) {
+                records.add(toDataBufferRecord(packet));
+            }
+            return records;
+        }
+    }
+
+    void clearHlsSeedCache() {
+        synchronized (hlsSeedLock) {
+            clearHlsSeedCacheLocked();
+        }
+    }
+
+    private void clearHlsSeedCacheLocked() {
+        drainPacketQueue(previousHlsGop);
+        drainPacketQueue(currentHlsGop);
+        previousHlsGopBytes = 0;
+        currentHlsGopBytes = 0;
+        currentHlsGopStartOrderingTs = AV_NOPTS_VALUE;
+        lastHlsSeedOrderingTs = AV_NOPTS_VALUE;
     }
 
     private void deliverVideoPacket(AVPacket packet) {
@@ -1448,6 +1584,7 @@ public class MpegTsProcessor extends Thread {
             drainAndFreeFrameQueueLocked();
             fileFrameQueue = null;
         }
+        clearHlsSeedCache();
     }
 
     void submitPacketToFrameQueue(AVPacket avPacket) {
@@ -1629,6 +1766,16 @@ public class MpegTsProcessor extends Thread {
 
                 AVPacket deliveryPacket = demuxPacket;
                 try {
+                    // Only the selected, metadata-validated video stream is delivered.
+                    if (demuxPacket.stream_index() != videoStreamId) {
+                        continue;
+                    }
+
+                    if (!doTranscode && hasRegisteredListener(DeliveryMode.LIVE_ONLY)
+                            && hasUsablePacketTimestamp(demuxPacket.pts(), demuxPacket.dts())) {
+                        recordHlsSeedPacket(demuxPacket);
+                    }
+
                     // Discard the frame if no listeners are writing and no pre-roll is configured.
                     boolean isWriting = hasWritingListener();
                     boolean frameBufferEnabled = isFrameBufferEnabled();
@@ -1642,11 +1789,6 @@ public class MpegTsProcessor extends Thread {
                         if (encoder != null) {
                             drainPacketQueue(encoder.getOutQueue());
                         }
-                        continue;
-                    }
-
-                    // Only the selected, metadata-validated video stream is delivered.
-                    if (demuxPacket.stream_index() != videoStreamId) {
                         continue;
                     }
 
@@ -1689,6 +1831,10 @@ public class MpegTsProcessor extends Thread {
                     if (!hasUsablePacketTimestamp(deliveryPacket.pts(), deliveryPacket.dts())) {
                         logger.debug("Skipping video packet without usable PTS/DTS timestamps");
                         continue;
+                    }
+
+                    if (doTranscode && hasRegisteredListener(DeliveryMode.LIVE_ONLY)) {
+                        recordHlsSeedPacket(deliveryPacket);
                     }
 
                     deliverVideoPacket(deliveryPacket);

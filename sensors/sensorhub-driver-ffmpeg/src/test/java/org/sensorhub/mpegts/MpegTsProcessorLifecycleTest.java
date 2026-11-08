@@ -301,6 +301,65 @@ public class MpegTsProcessorLifecycleTest {
     }
 
     @Test
+    public void hlsSeedCacheRetainsCompletedAndCurrentGopAndClearsCleanly() {
+        var processor = new MpegTsProcessor("unused");
+        try {
+            // Non-keyframes before the first keyframe are ignored
+            AVPacket leadingP = timedPacket(10, 0, false);
+            try {
+                processor.recordHlsSeedPacket(leadingP);
+            } finally {
+                av_packet_free(leadingP);
+            }
+            assertTrue(processor.snapshotHlsSeedPackets().isEmpty());
+
+            // First GOP starting at t=100ms, spanning 1.2s (up to t=1300ms)
+            for (int i = 0; i < 12; i++) {
+                long ts = 100 + (i * 100L);
+                AVPacket pkt = timedPacket(i + 1, ts, i == 0);
+                try {
+                    processor.recordHlsSeedPacket(pkt);
+                } finally {
+                    av_packet_free(pkt);
+                }
+            }
+
+            // Next keyframe at t=1300ms rotates the 1.2s GOP into previousHlsGop and starts currentHlsGop
+            AVPacket secondKey = timedPacket(20, 1_300L, true);
+            AVPacket trailingP = timedPacket(21, 1_400L, false);
+            try {
+                processor.recordHlsSeedPacket(secondKey);
+                processor.recordHlsSeedPacket(trailingP);
+            } finally {
+                av_packet_free(secondKey);
+                av_packet_free(trailingP);
+            }
+
+            List<DataBufferRecord> snapshot = processor.snapshotHlsSeedPackets();
+            assertEquals(14, snapshot.size());
+            assertTrue("First seeded packet must be an IDR keyframe", snapshot.get(0).isKeyFrame());
+            assertTrue("Rotated current-GOP boundary must be an IDR keyframe", snapshot.get(12).isKeyFrame());
+            assertEquals(100L, snapshot.get(0).getPacketDts());
+            assertEquals(1_400L, snapshot.get(13).getPacketDts());
+
+            processor.clearHlsSeedCache();
+            assertTrue(processor.snapshotHlsSeedPackets().isEmpty());
+        } finally {
+            processor.clearHlsSeedCache();
+        }
+    }
+
+    private static AVPacket timedPacket(int marker, long timestampMillis, boolean keyFrame) {
+        AVPacket packet = markerPacket(marker);
+        packet.pts(timestampMillis);
+        packet.dts(timestampMillis);
+        if (keyFrame) {
+            packet.flags(packet.flags() | AV_PKT_FLAG_KEY);
+        }
+        return packet;
+    }
+
+    @Test
     public void nonH264TranscoderStopsAndDeliversOwnedPackets() throws Exception {
         String fixture = System.getenv("MJPEG_TEST_FILE");
         org.junit.Assume.assumeTrue("Set MJPEG_TEST_FILE for the native non-H264 regression",

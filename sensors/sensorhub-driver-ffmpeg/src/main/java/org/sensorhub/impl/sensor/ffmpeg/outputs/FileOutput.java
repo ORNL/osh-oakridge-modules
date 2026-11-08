@@ -33,6 +33,7 @@ import org.vast.swe.SWEHelper;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -68,7 +69,9 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
     private long packetsWritten;
     private volatile long recordingGeneration;
     private volatile long packetsDroppedBeforeInitialKeyFrame;
+    private volatile long seededPacketsWritten;
     private boolean waitingForInitialKeyFrame;
+    private long lastSeededOrderingTimestamp = AV_NOPTS_VALUE;
     private boolean headerWritten;
     private volatile IOException writeFailure;
     private WriteCallback writeCallback;
@@ -120,11 +123,46 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
         if (!isWriting() || writeFailure != null) {
             return;
         }
+        synchronized (contextLock) {
+            if (!isWriting() || outputContext == null) {
+                logger.debug("Output closed before packet could be written. Packet dropped.");
+                return;
+            }
+            if (writeFailure != null) {
+                return;
+            }
+            if (lastSeededOrderingTimestamp != AV_NOPTS_VALUE && record.hasPacketTiming()) {
+                long orderingTs = record.getPacketDts() != AV_NOPTS_VALUE
+                        ? record.getPacketDts() : record.getPacketPts();
+                if (orderingTs != AV_NOPTS_VALUE) {
+                    long maxDuplicateDeltaTicks = inputTimeBase.num() > 0 && inputTimeBase.den() > 0
+                            ? Math.max(1L, (2L * inputTimeBase.den()) / inputTimeBase.num())
+                            : 180_000L;
+                    if (orderingTs <= lastSeededOrderingTimestamp
+                            && (lastSeededOrderingTimestamp - orderingTs) <= maxDuplicateDeltaTicks) {
+                        return;
+                    }
+                    lastSeededOrderingTimestamp = AV_NOPTS_VALUE;
+                }
+            }
+            writeDataBufferRecordLocked(record);
+        }
+    }
+
+    private void writeDataBufferRecordLocked(DataBufferRecord record) {
         var data = record.getDataBuffer();
 
         if (data == null || data.length == 0) {
             recordWriteFailure(new IOException("Video packet has no data"));
             return;
+        }
+
+        if (waitingForInitialKeyFrame && !record.isKeyFrame()) {
+            packetsDroppedBeforeInitialKeyFrame++;
+            return;
+        }
+        if (waitingForInitialKeyFrame) {
+            waitingForInitialKeyFrame = false;
         }
 
         AVPacket avPacket = av_packet_alloc();
@@ -145,35 +183,17 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
             if (record.isKeyFrame())
                 avPacket.flags(avPacket.flags() | AV_PKT_FLAG_KEY);
 
-            synchronized (contextLock) {
-                if (!isWriting() || outputContext == null) {
-                    logger.debug("Output closed before packet could be written. Packet dropped.");
-                    return;
-                }
-                if (writeFailure != null) {
-                    return;
-                }
+            AVRational packetTimeBase = populatePacketTiming(avPacket, record);
+            normalizeAndRescalePacket(avPacket, packetTimeBase);
+            avPacket.stream_index(outputVideoStream.index());
+            avPacket.pos(-1);
 
-                if (waitingForInitialKeyFrame && !record.isKeyFrame()) {
-                    packetsDroppedBeforeInitialKeyFrame++;
-                    return;
-                }
-                if (waitingForInitialKeyFrame) {
-                    waitingForInitialKeyFrame = false;
-                }
-
-                AVRational packetTimeBase = populatePacketTiming(avPacket, record);
-                normalizeAndRescalePacket(avPacket, packetTimeBase);
-                avPacket.stream_index(outputVideoStream.index());
-                avPacket.pos(-1);
-
-                int writeRet = av_interleaved_write_frame(outputContext, avPacket);
-                if (writeRet < 0) {
-                    recordWriteFailure(ffmpegIOException("Could not write video packet", writeRet));
-                } else {
-                    packetsWritten++;
-                    recordingReadiness.packetWritten(recordingGeneration);
-                }
+            int writeRet = av_interleaved_write_frame(outputContext, avPacket);
+            if (writeRet < 0) {
+                recordWriteFailure(ffmpegIOException("Could not write video packet", writeRet));
+            } else {
+                packetsWritten++;
+                recordingReadiness.packetWritten(recordingGeneration);
             }
         } catch (IOException e) {
             recordWriteFailure(e);
@@ -219,12 +239,14 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
                 this.headerWritten = false;
                 this.packetsWritten = 0;
                 this.packetsDroppedBeforeInitialKeyFrame = 0;
+                this.seededPacketsWritten = 0;
                 this.timestampDiscontinuityLogged = false;
                 // A newly opened recording must not begin in the middle of a GOP. Besides being
                 // independently decodable, the first successfully muxed keyframe is the readiness
                 // boundary used by FileControl before it acknowledges the open command.
                 this.waitingForInitialKeyFrame = fileName.endsWith(".m3u8")
                         || (deliveryMode == DeliveryMode.BUFFERED && fileName.endsWith(".mp4"));
+                this.lastSeededOrderingTimestamp = AV_NOPTS_VALUE;
                 this.timestampNormalizer.reset();
 
                 seekableBuffer = null;
@@ -295,6 +317,25 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
                 // FFmpeg's log level is process-wide. Do not change it for one recording and
                 // inadvertently hide (or amplify) diagnostics from the other camera streams.
                 recordingGeneration = recordingReadiness.start();
+                if (this.fileName.endsWith(".m3u8")) {
+                    List<DataBufferRecord> seedRecords = processor.snapshotHlsSeedPackets();
+                    long packetsBeforeSeed = packetsWritten;
+                    for (DataBufferRecord seedRecord : seedRecords) {
+                        writeDataBufferRecordLocked(seedRecord);
+                        if (writeFailure != null) {
+                            throw writeFailure;
+                        }
+                    }
+                    seededPacketsWritten = Math.max(0L, packetsWritten - packetsBeforeSeed);
+                    if (!seedRecords.isEmpty()) {
+                        DataBufferRecord lastSeed = seedRecords.get(seedRecords.size() - 1);
+                        if (lastSeed.hasPacketTiming()) {
+                            long dts = lastSeed.getPacketDts();
+                            long pts = lastSeed.getPacketPts();
+                            lastSeededOrderingTimestamp = dts != AV_NOPTS_VALUE ? dts : pts;
+                        }
+                    }
+                }
                 doFileWrite.set(true);
 
             } catch (Exception e) {
@@ -594,6 +635,11 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
         return packetsDroppedBeforeInitialKeyFrame;
     }
 
+    /** Number of cached GOP packets written during {@link #openFile(String)} to seed a new HLS output at an IDR. */
+    public long getSeededPacketsWritten() {
+        return seededPacketsWritten;
+    }
+
     /**
      * Finalizes an output and requires at least one packet to have been written.
      *
@@ -749,6 +795,7 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
 
         headerWritten = false;
         waitingForInitialKeyFrame = false;
+        lastSeededOrderingTimestamp = AV_NOPTS_VALUE;
         return failure;
     }
 

@@ -789,8 +789,9 @@ public abstract class ConnectionTest {
                             Files.size(manifestPath) > 0);
                 }
                 Path segmentPath = waitForHlsSegment(manifestPath, 15_000L);
-                assertTrue("HLS did not drop the mid-GOP packets preceding the next keyframe",
-                        hlsControl.getFileOutput().getPacketsDroppedBeforeInitialKeyFrame() > 0);
+                assertTrue("HLS did not align mid-GOP startup to an IDR keyframe via GOP seeding or mid-GOP packet dropping",
+                        hlsControl.getFileOutput().getSeededPacketsWritten() > 0
+                                || hlsControl.getFileOutput().getPacketsDroppedBeforeInitialKeyFrame() > 0);
                 assertTrue("HLS manifest does not declare independent media segments",
                         Files.readString(manifestPath).contains("#EXT-X-INDEPENDENT-SEGMENTS"));
                 assertIndependentlyDecodableHlsSegment(segmentPath);
