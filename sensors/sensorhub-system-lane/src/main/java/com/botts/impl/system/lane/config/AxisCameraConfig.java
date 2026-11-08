@@ -10,7 +10,7 @@ import org.sensorhub.api.config.DisplayInfo;
 public class AxisCameraConfig extends FFMpegConfig{
 
     public enum CodecEndpoint {
-        H264("/axis-media/media.amp?adjustablelivestream=1&resolution=640x480&videocodec=h264&videokeyframeinterval=15"),
+        H264("/axis-media/media.amp?adjustablelivestream=1&resolution=640x480&videocodec=h264&videokeyframeinterval=15&fps=30"),
         MJPEG("/axis-media/media.amp?adjustablelivestream=1&resolution=640x480&videocodec=jpeg");
 
         private final String path;

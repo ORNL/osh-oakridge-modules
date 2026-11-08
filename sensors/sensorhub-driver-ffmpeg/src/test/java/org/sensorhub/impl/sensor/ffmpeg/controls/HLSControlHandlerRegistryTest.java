@@ -82,6 +82,43 @@ public class HLSControlHandlerRegistryTest {
         org.junit.Assert.assertTrue(fileThreadName.startsWith("OSCAR-file-control-"));
     }
 
+    @Test
+    public void listMatchingHlsObjectsScopesCleanupToStreamDirectoryWithoutFullBucketWalk() throws Exception {
+        AtomicInteger fullBucketCalls = new AtomicInteger();
+        AtomicInteger scopedCalls = new AtomicInteger();
+        IBucketStore scopedStore = (IBucketStore) Proxy.newProxyInstance(
+                IBucketStore.class.getClassLoader(),
+                new Class<?>[]{IBucketStore.class},
+                (proxy, method, args) -> {
+                    if ("listObjects".equals(method.getName()) && args != null && args.length == 1) {
+                        fullBucketCalls.incrementAndGet();
+                        throw new AssertionError("Full-bucket listObjects(bucket) must not be called for scoped HLS paths");
+                    }
+                    if ("listObjects".equals(method.getName()) && args != null && args.length == 2) {
+                        scopedCalls.incrementAndGet();
+                        assertEquals("videos", args[0]);
+                        assertEquals("streams/urn-osh-sensor-ffmpeg-lane-01-0", args[1]);
+                        return java.util.List.of(
+                                "streams/urn-osh-sensor-ffmpeg-lane-01-0/live.m3u8",
+                                "streams/urn-osh-sensor-ffmpeg-lane-01-0/live0.ts",
+                                "streams/urn-osh-sensor-ffmpeg-lane-01-0/live1.ts",
+                                "streams/urn-osh-sensor-ffmpeg-lane-01-0/unrelated.mp4"
+                        );
+                    }
+                    return defaultValue(method.getReturnType());
+                });
+
+        var matched = HLSControl.listMatchingHlsObjects(
+                scopedStore, "videos", "streams/urn-osh-sensor-ffmpeg-lane-01-0/live.m3u8");
+        assertEquals(0, fullBucketCalls.get());
+        assertEquals(1, scopedCalls.get());
+        assertEquals(java.util.List.of(
+                "streams/urn-osh-sensor-ffmpeg-lane-01-0/live.m3u8",
+                "streams/urn-osh-sensor-ffmpeg-lane-01-0/live0.ts",
+                "streams/urn-osh-sensor-ffmpeg-lane-01-0/live1.ts"
+        ), matched);
+    }
+
     private static final class TestBucketService implements IBucketService {
         private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
         private final AtomicInteger registrationCount = new AtomicInteger();

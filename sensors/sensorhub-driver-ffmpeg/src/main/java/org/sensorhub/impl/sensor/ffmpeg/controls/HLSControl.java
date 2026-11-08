@@ -18,7 +18,9 @@ import org.vast.swe.SWEHelper;
 import java.lang.ref.WeakReference;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -281,18 +283,35 @@ public class HLSControl<FFmpegConfigType extends FFMPEGConfig> extends AbstractS
 
         hlsHandler.removeControl(streamName, this);
         try {
-            int extensionIndex = streamName.lastIndexOf('.');
-            String streamPrefix = extensionIndex > 0
-                    ? streamName.substring(0, extensionIndex) : streamName;
-            var matchingObjects = bucketStore.listObjects(VIDEO_BUCKET).stream()
-                    .filter(name -> name.startsWith(streamPrefix))
-                    .toList();
+            var matchingObjects = listMatchingHlsObjects(bucketStore, VIDEO_BUCKET, streamName);
             for (String hlsFile : matchingObjects) {
                 bucketStore.deleteObject(VIDEO_BUCKET, hlsFile);
             }
         } catch (Exception cleanupError) {
             logger.warn("Exception during HLS cleanup for {}", streamName, cleanupError);
         }
+    }
+
+    static List<String> listMatchingHlsObjects(
+            IBucketStore bucketStore, String bucketName, String streamName) throws DataStoreException {
+        if (streamName == null || streamName.isBlank()) {
+            return List.of();
+        }
+        String normalizedStreamName = streamName.replace('\\', '/');
+        int extensionIndex = normalizedStreamName.lastIndexOf('.');
+        String streamPrefix = extensionIndex > 0
+                ? normalizedStreamName.substring(0, extensionIndex) : normalizedStreamName;
+        Path streamParent = Paths.get(normalizedStreamName).getParent();
+        List<String> candidates = streamParent != null
+                ? bucketStore.listObjects(bucketName, streamParent.toString().replace('\\', '/'))
+                : bucketStore.listObjects(bucketName);
+        if (candidates == null) {
+            return List.of();
+        }
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(name -> name.replace('\\', '/').startsWith(streamPrefix))
+                .toList();
     }
 
     @Override

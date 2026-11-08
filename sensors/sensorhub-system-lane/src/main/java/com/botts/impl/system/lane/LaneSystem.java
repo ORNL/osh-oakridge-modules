@@ -785,7 +785,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     }
     
     private FFMPEGConfig createFFmpegConfig(FFMpegConfig ffmpegConfig, int videoIndex) {
-        String defaultAxis = "/axis-media/media.amp?adjustablelivestream=1&resolution=640x480&videocodec=h264&videokeyframeinterval=15";
+        String defaultAxis = AxisCameraConfig.CodecEndpoint.H264.getPath();
 
         Asserts.checkNotNull(ffmpegConfig.remoteHost);
 
@@ -816,7 +816,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         endpoint.append(normalizeStreamPath(path, defaultAxis));
 
         config.connection.useTCP = true;
-        config.connection.fps = 24;
+        config.connection.fps = 30;
         config.name = getConfiguration().name + " - Camera " + videoIndex;
         config.serialNumber = "lane:" + getConfiguration().uniqueID + ":" + videoIndex;
         config.autoStart = true;
