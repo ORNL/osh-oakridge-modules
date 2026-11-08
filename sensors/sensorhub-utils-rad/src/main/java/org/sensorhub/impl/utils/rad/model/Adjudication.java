@@ -11,6 +11,15 @@ import java.util.OptionalInt;
 
 public class Adjudication {
 
+    /** Reserved automated disposition code for Extended Occupancy Gamma Alarm auto-adjudications. */
+    public static final int EXTENDED_OCCUPANCY_GAMMA_CODE = 9998;
+
+    /** Marker stored in Occupancy.adjudicatedIds prior to publication for Extended Occupancy Gamma Alarm auto-adjudications. */
+    public static final String EXTENDED_OCCUPANCY_GAMMA_MARKER = "extended-occupancy-gamma";
+
+    /** Sender/username recorded on automated Extended Occupancy Gamma Alarm adjudication commands. */
+    public static final String EXTENDED_OCCUPANCY_AUTO_ADJUDICATOR_USERNAME = "AUTO";
+
     /** Reserved automated disposition code for EML Non-Threat releases. */
     public static final int EML_NON_THREAT_CODE = 9999;
 
@@ -25,6 +34,15 @@ public class Adjudication {
 
     /** Prefix separating human-readable adjudication summary text from structured EML JSON metadata in feedback. */
     public static final String EML_METADATA_PREFIX = "EML_METADATA:";
+
+    public static boolean isSyntheticMarker(String value) {
+        if (value == null)
+            return false;
+        String trimmed = value.trim();
+        return EML_NON_THREAT_MARKER.equals(trimmed)
+                || EXTENDED_OCCUPANCY_GAMMA_MARKER.equals(trimmed)
+                || parseAdjudicationCodeMarker(trimmed).isPresent();
+    }
 
     public static String adjudicationCodeMarker(int code) {
         if (code < 0)

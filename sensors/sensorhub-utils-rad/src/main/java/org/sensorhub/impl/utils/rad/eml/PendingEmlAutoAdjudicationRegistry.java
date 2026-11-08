@@ -49,6 +49,10 @@ public final class PendingEmlAutoAdjudicationRegistry {
         return null;
     }
 
+    public static void remove(String producerUid, double samplingTimeSeconds, int occupancyCount) {
+        claim(producerUid, samplingTimeSeconds, occupancyCount);
+    }
+
     public static void clearProducer(String producerUid) {
         if (producerUid == null)
             return;

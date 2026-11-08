@@ -198,7 +198,7 @@ public final class AdjudicationCodeMarkerBackfill {
             }
             if (obsId == null)
                 continue;
-            if (applyMarkerIfMissing(obsStore, obsId, entry.getValue(), false))
+            if (applyMarkerIfMissing(obsStore, obsId, entry.getValue(), null))
                 updatedOccupancies++;
         }
 
@@ -226,7 +226,35 @@ public final class AdjudicationCodeMarkerBackfill {
         for (BigId obsId : emlObsIds) {
             if (stopRequested)
                 return updatedOccupancies;
-            if (applyMarkerIfMissing(obsStore, obsId, Adjudication.EML_NON_THREAT_CODE, true))
+            if (applyMarkerIfMissing(obsStore, obsId, Adjudication.EML_NON_THREAT_CODE, Adjudication.EML_NON_THREAT_MARKER))
+                updatedOccupancies++;
+        }
+
+        if (stopRequested)
+            return updatedOccupancies;
+
+        ObsFilter extOccFilter = new ObsFilter.Builder()
+                .withDataStreams(new DataStreamFilter.Builder()
+                        .withObservedProperties(RADHelper.DEF_OCCUPANCY)
+                        .build())
+                .withCQLFilter("adjudicatedIds='" + Adjudication.EXTENDED_OCCUPANCY_GAMMA_MARKER + "'")
+                .build();
+        List<BigId> extOccObsIds = new ArrayList<>();
+        try (var stream = obsStore.selectKeys(extOccFilter)) {
+            var it = stream.iterator();
+            while (it.hasNext()) {
+                if (stopRequested)
+                    return updatedOccupancies;
+                extOccObsIds.add(it.next());
+            }
+        } catch (Exception e) {
+            logger.debug("Skipping Extended Occupancy Gamma marker scan during adjudication code backfill: {}", e.getMessage());
+        }
+
+        for (BigId obsId : extOccObsIds) {
+            if (stopRequested)
+                return updatedOccupancies;
+            if (applyMarkerIfMissing(obsStore, obsId, Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE, Adjudication.EXTENDED_OCCUPANCY_GAMMA_MARKER))
                 updatedOccupancies++;
         }
 
@@ -237,7 +265,7 @@ public final class AdjudicationCodeMarkerBackfill {
         return updatedOccupancies;
     }
 
-    private boolean applyMarkerIfMissing(IObsStore obsStore, BigId obsId, int code, boolean requireEmlMarker) {
+    private boolean applyMarkerIfMissing(IObsStore obsStore, BigId obsId, int code, String requiredMarker) {
         try {
             IObsData obs = obsStore.get(obsId);
             if (obs == null || obs.getResult() == null)
@@ -250,7 +278,7 @@ public final class AdjudicationCodeMarkerBackfill {
                 return false;
 
             Occupancy occupancy = OccupancyExtended.readOccupancy(recordStructure, obs.getResult());
-            if (requireEmlMarker && !occupancy.getAdjudicatedIds().contains(Adjudication.EML_NON_THREAT_MARKER))
+            if (requiredMarker != null && !occupancy.getAdjudicatedIds().contains(requiredMarker))
                 return false;
             // Never overwrite an occupancy that already received a live "code:<n>" marker.
             if (occupancy.hasAdjudicationCodeMarker())

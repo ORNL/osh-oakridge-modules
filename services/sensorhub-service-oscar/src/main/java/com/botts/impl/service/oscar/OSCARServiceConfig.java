@@ -42,6 +42,9 @@ public class OSCARServiceConfig extends ServiceConfig {
         for (var entry : customAdjudicationCodes) {
             if (entry == null || entry.code <= 11)
                 throw new IllegalArgumentException("Custom disposition codes must be greater than 11; codes 0-11 are reserved.");
+            if (entry.code == Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE)
+                throw new IllegalArgumentException("Disposition code " + Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE
+                        + " is reserved for automated Extended Occupancy Gamma Alarm adjudications.");
             if (entry.code == Adjudication.EML_NON_THREAT_CODE)
                 throw new IllegalArgumentException("Disposition code " + Adjudication.EML_NON_THREAT_CODE
                         + " is reserved for automated EML Non-Threat adjudications.");

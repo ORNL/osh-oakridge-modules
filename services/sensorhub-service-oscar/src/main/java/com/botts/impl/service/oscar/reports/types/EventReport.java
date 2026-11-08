@@ -173,6 +173,7 @@ public class EventReport extends Report {
                     "Gamma High",
                     "Gamma Low",
                     "Neutron High",
+                    "Extended Occupancy",
                     "Tamper",
                     "Total SOH Events"
             );
@@ -188,6 +189,7 @@ public class EventReport extends Report {
                     "Gamma High",
                     "Gamma Low",
                     "Neutron High",
+                    "Extended Occupancy",
                     "Tamper"
             );
         };
@@ -220,6 +222,7 @@ public class EventReport extends Report {
                     String.valueOf(m.gammaHighFault),
                     String.valueOf(m.gammaLowFault),
                     String.valueOf(m.neutronHighFault),
+                    String.valueOf(m.extendedOccupancyFault),
                     String.valueOf(m.tamper),
                     String.valueOf(m.totalFaultsAndTamper())
             );
@@ -235,6 +238,7 @@ public class EventReport extends Report {
                     String.valueOf(m.gammaHighFault),
                     String.valueOf(m.gammaLowFault),
                     String.valueOf(m.neutronHighFault),
+                    String.valueOf(m.extendedOccupancyFault),
                     String.valueOf(m.tamper)
             );
         };
@@ -274,6 +278,7 @@ public class EventReport extends Report {
             jw.name("gammaHighFault").value(totals.gammaHighFault);
             jw.name("gammaLowFault").value(totals.gammaLowFault);
             jw.name("neutronHighFault").value(totals.neutronHighFault);
+            jw.name("extendedOccupancyFault").value(totals.extendedOccupancyFault);
             jw.name("tamper").value(totals.tamper);
             jw.endObject();
 
@@ -287,6 +292,7 @@ public class EventReport extends Report {
                     jw.name("gammaHighFault").value(m.gammaHighFault);
                     jw.name("gammaLowFault").value(m.gammaLowFault);
                     jw.name("neutronHighFault").value(m.neutronHighFault);
+                    jw.name("extendedOccupancyFault").value(m.extendedOccupancyFault);
                     jw.name("tamper").value(m.tamper);
                     jw.name("totalSohEvents").value(m.totalFaultsAndTamper());
                 } else if (eventType == EventReportType.ALARMS) {
@@ -380,6 +386,7 @@ public class EventReport extends Report {
                     CellValue.integer(m.gammaHighFault),
                     CellValue.integer(m.gammaLowFault),
                     CellValue.integer(m.neutronHighFault),
+                    CellValue.integer(m.extendedOccupancyFault),
                     CellValue.integer(m.tamper),
                     CellValue.integer(m.totalFaultsAndTamper())
             );
@@ -395,6 +402,7 @@ public class EventReport extends Report {
                     CellValue.integer(m.gammaHighFault),
                     CellValue.integer(m.gammaLowFault),
                     CellValue.integer(m.neutronHighFault),
+                    CellValue.integer(m.extendedOccupancyFault),
                     CellValue.integer(m.tamper)
             );
         };
@@ -598,9 +606,11 @@ public class EventReport extends Report {
                         ChartGenerator.COLOR_GAMMA_LOW
                 ),
                 new PdfDocumentBuilder.KpiCard(
-                        "Neutron High & Tamper",
-                        intFmt.format(totals.neutronHighFault + totals.tamper),
-                        "N-High: " + intFmt.format(totals.neutronHighFault) + " | Tamper: " + intFmt.format(totals.tamper),
+                        "Neutron High, Ext. Occ & Tamper",
+                        intFmt.format(totals.neutronHighFault + totals.extendedOccupancyFault + totals.tamper),
+                        "N-High: " + intFmt.format(totals.neutronHighFault)
+                                + " | Ext: " + intFmt.format(totals.extendedOccupancyFault)
+                                + " | Tamper: " + intFmt.format(totals.tamper),
                         ChartGenerator.COLOR_NEUTRON
                 )
         ));
@@ -609,6 +619,7 @@ public class EventReport extends Report {
         List<Long> ghVals = new ArrayList<>(dates.size());
         List<Long> glVals = new ArrayList<>(dates.size());
         List<Long> nhVals = new ArrayList<>(dates.size());
+        List<Long> extVals = new ArrayList<>(dates.size());
         List<Long> tamperVals = new ArrayList<>(dates.size());
         Map<String, Map<String, String>> tableByDate = new LinkedHashMap<>();
 
@@ -617,17 +628,19 @@ public class EventReport extends Report {
             ghVals.add(m.gammaHighFault);
             glVals.add(m.gammaLowFault);
             nhVals.add(m.neutronHighFault);
+            extVals.add(m.extendedOccupancyFault);
             tamperVals.add(m.tamper);
 
             Map<String, String> row = new LinkedHashMap<>();
             row.put("Gamma High", String.valueOf(m.gammaHighFault));
             row.put("Gamma Low", String.valueOf(m.gammaLowFault));
             row.put("Neutron High", String.valueOf(m.neutronHighFault));
+            row.put("Extended Occupancy", String.valueOf(m.extendedOccupancyFault));
             row.put("Tamper", String.valueOf(m.tamper));
             tableByDate.put(date, row);
         }
 
-        pdf.drawSectionHeader("State of Health (SOH) by UTC Day", "Daily detector fault and tamper occurrences", 245f);
+        pdf.drawSectionHeader("State of Health (SOH) by UTC Day", "Daily detector fault, extended occupancy fault, and tamper occurrences", 245f);
         chartGenerator.drawStackedBarChart(
                 pdf,
                 "SOH",
@@ -638,6 +651,7 @@ public class EventReport extends Report {
                         new ChartGenerator.StackedSeries("Gamma High", ChartGenerator.COLOR_GAMMA, ghVals),
                         new ChartGenerator.StackedSeries("Gamma Low", ChartGenerator.COLOR_GAMMA_LOW, glVals),
                         new ChartGenerator.StackedSeries("Neutron High", ChartGenerator.COLOR_NEUTRON, nhVals),
+                        new ChartGenerator.StackedSeries("Extended Occupancy", ChartGenerator.COLOR_EXTENDED_OCCUPANCY, extVals),
                         new ChartGenerator.StackedSeries("Tamper", ChartGenerator.COLOR_TAMPER, tamperVals)
                 )
         );

@@ -29,8 +29,15 @@ import java.util.List;
  */
 public class LaneConfig extends SensorSystemConfig {
 
+    public static final int DEFAULT_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES = 1;
+    public static final int MIN_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES = 1;
+    public static final int MAX_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES = 1440;
+
     @DisplayInfo(desc = "Operational view keys that may display this lane. Use lowercase letters, numbers, and hyphens only.")
     public List<String> operationalViewKeys = new ArrayList<>();
+
+    @DisplayInfo(label = "Extended Occupancy Threshold (min)", desc = "Duration in minutes (1-1440) before an active occupancy is logged as an extended occupancy fault (default: 1 minute).")
+    public int extendedOccupancyThresholdMinutes = DEFAULT_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES;
 
     @DisplayInfo(desc = "Additional options when creating an RPM lane.")
     public LaneOptionsConfig laneOptionsConfig;

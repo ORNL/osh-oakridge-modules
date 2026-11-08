@@ -136,13 +136,14 @@ public final class ReportDataAggregator {
         public long gammaHighFault;
         public long gammaLowFault;
         public long neutronHighFault;
+        public long extendedOccupancyFault;
 
         public long totalAlarms() {
             return gammaAlarm + neutronAlarm + gammaNeutronAlarm;
         }
 
         public long totalFaultsAndTamper() {
-            return tamper + gammaHighFault + gammaLowFault + neutronHighFault;
+            return tamper + gammaHighFault + gammaLowFault + neutronHighFault + extendedOccupancyFault;
         }
 
         public double alarmOccupancyRatePct() {
@@ -166,6 +167,7 @@ public final class ReportDataAggregator {
             this.gammaHighFault += other.gammaHighFault;
             this.gammaLowFault += other.gammaLowFault;
             this.neutronHighFault += other.neutronHighFault;
+            this.extendedOccupancyFault += other.extendedOccupancyFault;
         }
     }
 
@@ -347,9 +349,14 @@ public final class ReportDataAggregator {
                 .withCQLFilter(Utils.tamperCQL)
                 .build());
 
-        // 4. Gamma & Neutron faults single pass with CQL pushdown
+        // 4. Gamma, Neutron & Extended Occupancy faults single pass with CQL pushdown
         DataStreamFilter faultDsFilter = buildScopedDataStreamFilter(
-                scopedLanes, RADHelper.DEF_GAMMA, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM);
+                scopedLanes,
+                RADHelper.DEF_GAMMA,
+                RADHelper.DEF_NEUTRON,
+                RADHelper.DEF_ALARM,
+                RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT,
+                RADHelper.DEF_EXTENDED_OCCUPANCY_ALARM_STATE);
         Map<BigId, Integer> alarmIdxCache = new HashMap<>();
         try (Stream<IObsData> stream = db.getObservationStore().select(new ObsFilter.Builder()
                 .withResultTimeDuring(start, end)
@@ -410,7 +417,9 @@ public final class ReportDataAggregator {
                             RADHelper.DEF_TAMPER,
                             RADHelper.DEF_GAMMA,
                             RADHelper.DEF_NEUTRON,
-                            RADHelper.DEF_ALARM
+                            RADHelper.DEF_ALARM,
+                            RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT,
+                            RADHelper.DEF_EXTENDED_OCCUPANCY_ALARM_STATE
                     )
                     .build();
 
@@ -434,7 +443,9 @@ public final class ReportDataAggregator {
                     }
                     if (containsDefinition(struct, RADHelper.DEF_GAMMA)
                             || containsDefinition(struct, RADHelper.DEF_NEUTRON)
-                            || containsDefinition(struct, RADHelper.DEF_ALARM)) {
+                            || containsDefinition(struct, RADHelper.DEF_ALARM)
+                            || containsDefinition(struct, RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT)
+                            || containsDefinition(struct, RADHelper.DEF_EXTENDED_OCCUPANCY_ALARM_STATE)) {
                         faultStreamToLane.put(dsId, laneUid);
                         faultStateIdx.put(dsId, extractAlarmStateIndex(struct));
                     }
@@ -683,7 +694,12 @@ public final class ReportDataAggregator {
                 }
             } else if (eventType == EventReportType.SOH) {
                 DataStreamFilter faultDsFilter = buildScopedDataStreamFilter(
-                        scopedLanes, RADHelper.DEF_GAMMA, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM);
+                        scopedLanes,
+                        RADHelper.DEF_GAMMA,
+                        RADHelper.DEF_NEUTRON,
+                        RADHelper.DEF_ALARM,
+                        RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT,
+                        RADHelper.DEF_EXTENDED_OCCUPANCY_ALARM_STATE);
                 Map<BigId, Integer> alarmIdxCache = new HashMap<>();
                 try (Stream<IObsData> stream = db.getObservationStore().select(new ObsFilter.Builder()
                         .withResultTimeDuring(start, end)
@@ -758,7 +774,11 @@ public final class ReportDataAggregator {
             customSorted.removeIf(Objects::isNull);
             customSorted.sort(Comparator.comparingInt(c -> c.code));
             for (AdjudicationCodeConfig custom : customSorted) {
-                if (custom.code > 11 && custom.code != Adjudication.EML_NON_THREAT_CODE && custom.label != null && !custom.label.isBlank()) {
+                if (custom.code > 11
+                        && custom.code != Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE
+                        && custom.code != Adjudication.EML_NON_THREAT_CODE
+                        && custom.label != null
+                        && !custom.label.isBlank()) {
                     String fullLabel = custom.label.trim().startsWith("Code ")
                             ? custom.label.trim()
                             : ("Code " + custom.code + ": " + custom.label.trim());
@@ -767,6 +787,10 @@ public final class ReportDataAggregator {
             }
         }
 
+        specByCode.put(
+                Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE,
+                new DispositionCodeSpec(Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE, "Extended Occupancy Gamma Alarm", "Automated")
+        );
         specByCode.put(
                 Adjudication.EML_NON_THREAT_CODE,
                 new DispositionCodeSpec(Adjudication.EML_NON_THREAT_CODE, "EML Non-Threat", "Automated")
@@ -853,7 +877,7 @@ public final class ReportDataAggregator {
 
                     DispositionCodeSpec matchedSpec = specByCode.get(code);
                     String formattedCode = (matchedSpec != null && !matchedSpec.label().isBlank())
-                            ? (code == Adjudication.EML_NON_THREAT_CODE
+                            ? ((code == Adjudication.EML_NON_THREAT_CODE || code == Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE)
                                 ? (code + " (" + matchedSpec.label() + ")")
                                 : matchedSpec.label())
                             : String.valueOf(code);
@@ -1050,6 +1074,7 @@ public final class ReportDataAggregator {
             case "Fault - Gamma High" -> metrics.gammaHighFault++;
             case "Fault - Gamma Low" -> metrics.gammaLowFault++;
             case "Fault - Neutron High" -> metrics.neutronHighFault++;
+            case "Fault - Extended Occupancy" -> metrics.extendedOccupancyFault++;
             default -> {
                 // Non-fault foreground states ignored
             }
@@ -1138,6 +1163,7 @@ public final class ReportDataAggregator {
         return findLeadingScalarIndex(
                 struct,
                 c -> RADHelper.DEF_ALARM.equalsIgnoreCase(c.getDefinition())
+                        || RADHelper.DEF_EXTENDED_OCCUPANCY_ALARM_STATE.equalsIgnoreCase(c.getDefinition())
                         || (c.getName() != null && c.getName().toLowerCase().contains("alarmstate")),
                 1
         );

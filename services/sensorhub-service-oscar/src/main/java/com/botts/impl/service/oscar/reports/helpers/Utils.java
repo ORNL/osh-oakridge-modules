@@ -37,11 +37,12 @@ public class Utils {
     public static String gammaAlarmCQL = "gammaAlarm = true AND neutronAlarm = false";
     public static String neutronAlarmCQL = "gammaAlarm = false AND neutronAlarm = true";
     public static String anyOccupancyAlarmCQL = "gammaAlarm = true OR neutronAlarm = true";
-    public static String faultCQL = "alarmState = 'Fault - Neutron High' OR alarmState = 'Fault - Gamma Low' OR alarmState = 'Fault - Gamma High'";
+    public static String faultCQL = "alarmState = 'Fault - Neutron High' OR alarmState = 'Fault - Gamma Low' OR alarmState = 'Fault - Gamma High' OR alarmState = 'Fault - Extended Occupancy'";
     public static String gammaFaultCQL = "alarmState = 'Fault - Gamma Low' OR alarmState = 'Fault - Gamma High'";
     public static String gammaHighFaultCQL = "alarmState = 'Fault - Gamma High'";
     public static String gammaLowFaultCQL = "alarmState = 'Fault - Gamma Low'";
     public static String neutronFaultCQL = "alarmState = 'Fault - Neutron High'";
+    public static String extendedOccupancyFaultCQL = "alarmState = 'Fault - Extended Occupancy'";
     public static String tamperCQL = "tamperStatus = true";
     public static String emlSuppressedCQL = "result = 'RELEASE' OR result = 1";
 
