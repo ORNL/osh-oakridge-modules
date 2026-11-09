@@ -72,10 +72,15 @@ public class DatabasePurger {
     private static final String OUTPUT_DAILY_FILE = "dailyFile";
     private static final String OUTPUT_SPEED = "speed";
     private static final String OUTPUT_CONNECTION_STATUS = "connectionStatus";
+    private static final String OUTPUT_OCCUPANCY_STATUS = "occupancyStatus";
     private static final String OUTPUT_GAMMA_COUNTS = "gammaCounts";
     private static final String OUTPUT_NEUTRON_COUNTS = "neutronCounts";
     private static final String OUTPUT_GAMMA_THRESHOLD = "gammaThreshold";
     private static final String OUTPUT_OCCUPANCY = OccupancyOutput.NAME;
+    private static final String OUTPUT_EML_CONTEXTUAL = "emlContextual";
+    private static final String OUTPUT_EML_SCAN_CONTEXTUAL = "emlScanContextual";
+    private static final String OUTPUT_EML_ANALYSIS = "emlAnalysis";
+    private static final String CLEAR_OCCUPANCY_ALARM_STATE = "Clear";
 
     // RS350 data stream output names
     private static final String OUTPUT_BACKGROUND_REPORT = "backgroundReport";
@@ -360,6 +365,9 @@ public class DatabasePurger {
         log.info("Starting hourly purge task...");
 
         if (!runHourlyPurgePhase("connection-status purge", this::purgeOldConnectionStatus))
+            return;
+
+        if (!runHourlyPurgePhase("occupancy-status purge", this::purgeOldOccupancyStatus))
             return;
 
         if (observationLifecycleDelegated) {
@@ -739,6 +747,152 @@ public class DatabasePurger {
             log.info("Purged {} Connection Status observations older than {}", deleted, cutoff);
     }
 
+    public void purgeOldOccupancyStatus() {
+        runCancellableMaintenance(this::purgeOldOccupancyStatusWithinScope);
+    }
+
+    void purgeOldOccupancyStatusWithinScope() {
+        if (shouldStopPurge())
+            return;
+        Set<BigId> ids = getDataStreamIdsByOutputNames(OUTPUT_OCCUPANCY_STATUS);
+        if (ids.isEmpty()) {
+            log.debug("No Occupancy Status dataStreams found");
+            return;
+        }
+
+        Set<BigId> preservedLatestIds = new HashSet<>();
+        Map<BigId, Instant> latestTimeByStream = new HashMap<>();
+        var latestFilter = new ObsFilter.Builder()
+                .withDataStreams(ids)
+                .withLatestResult()
+                .build();
+        try (var latestEntries = database.getObservationStore().selectEntries(latestFilter)) {
+            latestEntries.forEach(entry -> recordLatestOccupancyStatusEntry(
+                    entry, preservedLatestIds, latestTimeByStream));
+        }
+        if (latestTimeByStream.size() < ids.size()) {
+            for (BigId streamId : ids) {
+                if (shouldStopPurge() || latestTimeByStream.containsKey(streamId))
+                    continue;
+                var perStreamLatest = new ObsFilter.Builder()
+                        .withDataStreams(streamId)
+                        .withLatestResult()
+                        .withLimit(1)
+                        .build();
+                try (var latestEntries = database.getObservationStore().selectEntries(perStreamLatest)) {
+                    latestEntries.forEach(entry -> recordLatestOccupancyStatusEntry(
+                            entry, preservedLatestIds, latestTimeByStream));
+                }
+            }
+        }
+
+        Instant cutoff = clock.instant().minus(Duration.ofHours(connectionStatusRetentionHours));
+        long deleted = deleteRoutineOccupancyStatusInTimeRange(
+                ids, preservedLatestIds, latestTimeByStream, Instant.EPOCH, cutoff);
+        if (shouldStopPurge())
+            log.debug("Occupancy Status purge cancelled after deleting {} observations", deleted);
+        else
+            log.info("Purged {} routine Clear Occupancy Status observations older than {}", deleted, cutoff);
+    }
+
+    private static void recordLatestOccupancyStatusEntry(
+            Map.Entry<BigId, org.sensorhub.api.data.IObsData> entry,
+            Set<BigId> preservedLatestIds,
+            Map<BigId, Instant> latestTimeByStream) {
+        if (entry.getKey() != null)
+            preservedLatestIds.add(entry.getKey());
+        if (entry.getValue() != null && entry.getValue().getDataStreamID() != null
+                && entry.getValue().getPhenomenonTime() != null) {
+            latestTimeByStream.merge(
+                    entry.getValue().getDataStreamID(),
+                    entry.getValue().getPhenomenonTime(),
+                    (a, b) -> a.isAfter(b) ? a : b);
+        }
+    }
+
+    static boolean isRoutineClearOccupancyStatus(org.sensorhub.api.data.IObsData obs) {
+        if (obs == null || obs.getResult() == null)
+            return false;
+        int atomCount = obs.getResult().getAtomCount();
+        if (atomCount == 3)
+            return true;
+        if (atomCount < 6)
+            return false;
+        boolean extendedFault = obs.getResult().getBooleanValue(4);
+        String alarmState = obs.getResult().getStringValue(5);
+        return !extendedFault && CLEAR_OCCUPANCY_ALARM_STATE.equals(alarmState);
+    }
+
+    private long deleteRoutineOccupancyStatusInTimeRange(
+            Set<BigId> dataStreamIds,
+            Set<BigId> preservedLatestIds,
+            Map<BigId, Instant> latestTimeByStream,
+            Instant start,
+            Instant end) {
+        if (dataStreamIds.isEmpty() || !start.isBefore(end))
+            return 0;
+
+        long totalDeleted = 0;
+        for (BigId streamId : dataStreamIds) {
+            if (shouldStopPurge())
+                return totalDeleted;
+            Set<BigId> singleStream = Set.of(streamId);
+            Instant latestTime = latestTimeByStream.get(streamId);
+            Instant cursorStart = start;
+            while (!shouldStopPurge() && cursorStart.isBefore(end)) {
+                Instant windowStart = cursorStart;
+                var candidates = new ObsFilter.Builder()
+                        .withDataStreams(singleStream)
+                        .withPhenomenonTime(halfOpenTimeRange(windowStart, end))
+                        .withLimit(DELETE_BATCH_SIZE)
+                        .build();
+
+                List<BigId> observationIds = new ArrayList<>();
+                Instant maxScannedTime = null;
+                int scanned = 0;
+                try (var entries = database.getObservationStore().selectEntries(candidates)) {
+                    for (var it = entries.iterator(); it.hasNext(); ) {
+                        var entry = it.next();
+                        scanned++;
+                        Instant pt = entry.getValue().getPhenomenonTime();
+                        if (pt != null && (maxScannedTime == null || pt.isAfter(maxScannedTime)))
+                            maxScannedTime = pt;
+                        if (preservedLatestIds.contains(entry.getKey())
+                                || Objects.equals(latestTime, pt))
+                            continue;
+                        if (!isInsideHalfOpenWindow(pt, windowStart, end)
+                                || !isRoutineClearOccupancyStatus(entry.getValue()))
+                            continue;
+                        observationIds.add(entry.getKey());
+                    }
+                }
+                if (shouldStopPurge() || scanned == 0)
+                    break;
+
+                if (!observationIds.isEmpty()) {
+                    long deleted = database.getObservationStore().removeEntries(
+                            new ObsFilter.Builder()
+                                    .withInternalIDs(observationIds)
+                                    .withDataStreams(singleStream)
+                                    .withPhenomenonTime(halfOpenTimeRange(windowStart, end))
+                                    .withValuePredicate(obs -> Objects.equals(streamId, obs.getDataStreamID())
+                                            && isInsideHalfOpenWindow(obs.getPhenomenonTime(), windowStart, end)
+                                            && isRoutineClearOccupancyStatus(obs)
+                                            && !Objects.equals(latestTime, obs.getPhenomenonTime()))
+                                    .build());
+                    if (deleted > observationIds.size())
+                        throw new IllegalStateException("Observation store deleted more rows than the selected batch");
+                    totalDeleted += deleted;
+                }
+                if (scanned < DELETE_BATCH_SIZE)
+                    break;
+                cursorStart = (maxScannedTime == null || !maxScannedTime.isAfter(windowStart))
+                        ? windowStart.plusMillis(1) : maxScannedTime;
+            }
+        }
+        return totalDeleted;
+    }
+
     /**
      * Catches up completed daily-file windows in oldest-first order.  The journal owns the
      * per-feed high-water mark, so a restart never has to scan from epoch and a long outage is
@@ -988,7 +1142,10 @@ public class DatabasePurger {
             OUTPUT_SPEED,
             OUTPUT_BACKGROUND_REPORT,
             OUTPUT_FOREGROUND_REPORT,
-            OUTPUT_STATUS
+            OUTPUT_STATUS,
+            OUTPUT_EML_CONTEXTUAL,
+            OUTPUT_EML_SCAN_CONTEXTUAL,
+            OUTPUT_EML_ANALYSIS
         );
 
         if (streamsByLane.isEmpty()) {
@@ -1077,55 +1234,65 @@ public class DatabasePurger {
         }
 
         long totalDeleted = 0;
-        while (!shouldStopPurge()) {
-            var candidates = new ObsFilter.Builder()
-                    .withDataStreams(dataStreamIds)
-                    .withPhenomenonTime(halfOpenTimeRange(start, end))
-                    .withLimit(DELETE_BATCH_SIZE)
-                    .build();
-
-            List<BigId> observationIds;
-            try (var entries = database.getObservationStore().selectEntries(candidates)) {
-                observationIds = entries
-                        .filter(entry -> isInsideHalfOpenWindow(
-                                entry.getValue().getPhenomenonTime(), start, end))
-                        .map(Map.Entry::getKey)
-                        .toList();
-            }
+        for (BigId streamId : dataStreamIds) {
             if (shouldStopPurge())
                 return totalDeleted;
-            if (observationIds.isEmpty())
-                return totalDeleted;
+            Set<BigId> singleStream = Set.of(streamId);
+            Instant cursorStart = start;
+            while (!shouldStopPurge() && cursorStart.isBefore(end)) {
+                Instant windowStart = cursorStart;
+                var candidates = new ObsFilter.Builder()
+                        .withDataStreams(singleStream)
+                        .withPhenomenonTime(halfOpenTimeRange(windowStart, end))
+                        .withLimit(DELETE_BATCH_SIZE)
+                        .build();
 
-            // Selection and deletion are separate datastore calls.  Reapply every eligibility
-            // predicate in the delete itself so a concurrent update cannot move a selected row
-            // outside the retention window (or to another stream) and still have it removed by
-            // ID.  Stores that translate filters to SQL perform this as one predicate-guarded
-            // DELETE; the H2 store applies the same filter while holding its mutation lock.
-            long deleted = database.getObservationStore().removeEntries(
-                    new ObsFilter.Builder()
-                            .withInternalIDs(observationIds)
-                            .withDataStreams(dataStreamIds)
-                            .withPhenomenonTime(halfOpenTimeRange(start, end))
-                            // Revalidate in the datastore after selection. Some stores optimize
-                            // internal-ID removal and otherwise bypass secondary filter fields;
-                            // this bounded predicate protects rows concurrently moved out of the
-                            // immutable retention window. The ID list caps the candidate set, so
-                            // it does not cause the unbounded multi-stream scan avoided above.
-                            .withValuePredicate(obs -> dataStreamIds.contains(
-                                    obs.getDataStreamID()) && isInsideHalfOpenWindow(
-                                    obs.getPhenomenonTime(), start, end))
-                            .build());
-            if (deleted == 0) {
-                // Every candidate may legitimately have become ineligible after selection.  Stop
-                // this pass rather than spinning on a datastore that cannot currently progress;
-                // the next scheduled pass will discover any still-eligible rows.
-                log.debug("Selected observation batch became ineligible before guarded deletion");
-                return totalDeleted;
+                List<BigId> observationIds = new ArrayList<>();
+                Instant maxBatchTime = null;
+                int scanned = 0;
+                try (var entries = database.getObservationStore().selectEntries(candidates)) {
+                    for (var it = entries.iterator(); it.hasNext(); ) {
+                        var entry = it.next();
+                        scanned++;
+                        Instant pt = entry.getValue().getPhenomenonTime();
+                        if (!isInsideHalfOpenWindow(pt, windowStart, end))
+                            continue;
+                        observationIds.add(entry.getKey());
+                        if (pt != null && (maxBatchTime == null || pt.isAfter(maxBatchTime)))
+                            maxBatchTime = pt;
+                    }
+                }
+                if (shouldStopPurge())
+                    return totalDeleted;
+                if (observationIds.isEmpty())
+                    break;
+
+                // Selection and deletion are separate datastore calls. Reapply every eligibility
+                // predicate in the delete itself so a concurrent update cannot move a selected row
+                // outside the retention window (or to another stream) and still have it removed by
+                // ID. Stores that translate filters to SQL perform this as one predicate-guarded
+                // DELETE; the H2 store applies the same filter while holding its mutation lock.
+                long deleted = database.getObservationStore().removeEntries(
+                        new ObsFilter.Builder()
+                                .withInternalIDs(observationIds)
+                                .withDataStreams(singleStream)
+                                .withPhenomenonTime(halfOpenTimeRange(windowStart, end))
+                                .withValuePredicate(obs -> Objects.equals(streamId,
+                                        obs.getDataStreamID()) && isInsideHalfOpenWindow(
+                                        obs.getPhenomenonTime(), windowStart, end))
+                                .build());
+                if (deleted == 0) {
+                    log.debug("Selected observation batch became ineligible before guarded deletion");
+                    break;
+                }
+                if (deleted > observationIds.size())
+                    throw new IllegalStateException("Observation store deleted more rows than the selected batch");
+                totalDeleted += deleted;
+                if (scanned < DELETE_BATCH_SIZE)
+                    break;
+                cursorStart = (maxBatchTime == null || !maxBatchTime.isAfter(windowStart))
+                        ? windowStart.plusMillis(1) : maxBatchTime;
             }
-            if (deleted > observationIds.size())
-                throw new IllegalStateException("Observation store deleted more rows than the selected batch");
-            totalDeleted += deleted;
         }
         return totalDeleted;
     }

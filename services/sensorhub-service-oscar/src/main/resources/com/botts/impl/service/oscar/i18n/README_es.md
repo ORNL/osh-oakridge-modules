@@ -715,15 +715,24 @@ Verifique carriles/eventos del remoto, su fila Nacional, un informe y un evento 
 ## 12. Retención de datos y almacenamiento
 
 El perfil estándar 3.11.0 utiliza la arquitectura por niveles PostgreSQL + Apache Parquet en modo
-`PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Los metadatos operativos y flujos de
-bajo volumen permanecen en PostgreSQL, mientras que las observaciones de detectores de gran volumen
-se escriben en particiones temporales de 30 minutos (`obs_stage_p*`). Cinco minutos después del cierre
-de cada ventana de 30 minutos, trabajos de fondo exportan la partición a archivos Apache Parquet
-catalogados y comprimidos con ZSTD (`archive/parquet/`), verifican la paridad exacta de filas/hashes y
-retiran la partición temporal para mantener compacto PostgreSQL. (Los sitios que configuran
-explícitamente `HOT_RETENTION` conservan filas calientes durante los días configurados más el margen de
-reversión antes de retirarlas). Antes de eliminar se vuelven a comprobar, con fallo seguro, la propiedad
-del archivo, la integridad de los objetos, la paridad y las retenciones activas.
+`PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Los metadatos operativos y los flujos
+probatorios permanentes (`occupancy`, `adjudication` de solo adición, `report`, `nationalSummary`)
+permanecen en PostgreSQL `ONLY oscar.obs`, mientras que las 12 salidas inmutables de gran volumen de
+detectores, estado, informes y EML (`gammaCounts`, `gammaThreshold`, `neutronCounts`, `setupGamma`,
+`setupNeutron`, `speed`, `backgroundReport`, `foregroundReport`, `status`, `emlContextual`,
+`emlScanContextual`, `emlAnalysis`) se escriben en particiones temporales de 30 minutos (`osg_*`). Cinco
+minutos después del cierre de cada ventana de 30 minutos, trabajos de fondo exportan la partición a
+archivos Apache Parquet catalogados y comprimidos con ZSTD (`archive/datasets/observations/`), verifican
+la paridad exacta de filas/hashes y retiran la partición temporal para mantener compacto PostgreSQL (y al
+iniciar, OSCAR reconcilia las rutas existentes y exporta retroactivamente a Parquet cualquier fila heredada
+sin archivar en la tabla principal para esas 12 salidas). Cada hora, OSCAR también depura las filas
+`connectionStatus` con más de 1 hora (conservando siempre la última por flujo), las filas rutinarias `Clear`
+de `occupancyStatus` con más de 1 hora (conservando la última por flujo y todas las filas de fallo/alarma)
+y los comandos operativos transitorios en `cmd_commands`/`cmd_status` con más de 24 horas (conservando
+permanentemente los comandos de auditoría `%adjudicate%`). (Los sitios que configuran explícitamente
+`HOT_RETENTION` conservan filas calientes durante los días configurados más el margen de reversión antes
+de retirarlas). Antes de eliminar se vuelven a comprobar, con fallo seguro, la propiedad del archivo, la
+integridad de los objetos, la paridad y las retenciones activas.
 
 Cada controlador RPM requiere el diario directo de archivos diarios. Captura el registro fuente
 antes del análisis cuando es posible y publica el día terminado como CSV heredado inmutable más un

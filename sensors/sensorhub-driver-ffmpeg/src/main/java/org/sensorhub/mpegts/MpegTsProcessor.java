@@ -1613,7 +1613,7 @@ public class MpegTsProcessor extends Thread {
         fileFrameQueue.add(newPacket);
     }
 
-    private boolean isFrameBufferEnabled() {
+    public boolean isFrameBufferEnabled() {
         synchronized (frameQueueLock) {
             return fileFrameQueue != null;
         }
@@ -1771,7 +1771,8 @@ public class MpegTsProcessor extends Thread {
                         continue;
                     }
 
-                    if (!doTranscode && hasRegisteredListener(DeliveryMode.LIVE_ONLY)
+                    if (!doTranscode
+                            && (hasRegisteredListener(DeliveryMode.LIVE_ONLY) || hasRegisteredListener(DeliveryMode.BUFFERED))
                             && hasUsablePacketTimestamp(demuxPacket.pts(), demuxPacket.dts())) {
                         recordHlsSeedPacket(demuxPacket);
                     }
@@ -1833,7 +1834,7 @@ public class MpegTsProcessor extends Thread {
                         continue;
                     }
 
-                    if (doTranscode && hasRegisteredListener(DeliveryMode.LIVE_ONLY)) {
+                    if (doTranscode && (hasRegisteredListener(DeliveryMode.LIVE_ONLY) || hasRegisteredListener(DeliveryMode.BUFFERED))) {
                         recordHlsSeedPacket(deliveryPacket);
                     }
 

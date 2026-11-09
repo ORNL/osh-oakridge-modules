@@ -1007,6 +1007,104 @@ public class DatabasePurgerSafetyTest {
                 .withDataStreams(dataStream).build()).toList();
     }
 
+    @Test
+    public void occupancyStatusPurgeDeletesOldClearRowsWhilePreservingExtendedFaultsAndLatestPerStream() throws Exception {
+        BigId activeSystem = addSystem(null, "urn:test:lane:occ-status-active");
+        BigId activeStream = addDataStream(activeSystem, "urn:test:lane:occ-status-active",
+                "occupancyStatus", occupancyStatusStructure());
+        BigId idleSystem = addSystem(null, "urn:test:lane:occ-status-idle");
+        BigId idleStream = addDataStream(idleSystem, "urn:test:lane:occ-status-idle",
+                "occupancyStatus", occupancyStatusStructure());
+        BigId legacySystem = addSystem(null, "urn:test:lane:occ-status-legacy");
+        BigId legacyStream = addDataStream(legacySystem, "urn:test:lane:occ-status-legacy",
+                "occupancyStatus", legacyOccupancyStatusStructure());
+
+        Instant threeHoursAgo = NOW.minusSeconds(3 * 3600);
+        Instant twoHoursAgo = NOW.minusSeconds(2 * 3600);
+        Instant ninetyMinutesAgo = NOW.minusSeconds(90 * 60);
+        Instant tenMinutesAgo = NOW.minusSeconds(10 * 60);
+
+        addOccupancyStatus(activeStream, threeHoursAgo, true, threeHoursAgo, false, "Clear");
+        addOccupancyStatus(activeStream, twoHoursAgo, true, threeHoursAgo, true, "Fault - Extended Occupancy");
+        addOccupancyStatus(activeStream, ninetyMinutesAgo, false, null, false, "Clear");
+        addOccupancyStatus(activeStream, tenMinutesAgo, false, null, false, "Clear");
+
+        // On the idle lane, the latest observation is older than the 1-hour cutoff, so it must be preserved.
+        addOccupancyStatus(idleStream, threeHoursAgo, true, threeHoursAgo, false, "Clear");
+        addOccupancyStatus(idleStream, twoHoursAgo, false, null, false, "Clear");
+
+        // Pre-6-field legacy 3-field occupancyStatus stream: old rows purged, latest preserved.
+        addLegacyOccupancyStatus(legacyStream, threeHoursAgo, true, threeHoursAgo);
+        addLegacyOccupancyStatus(legacyStream, twoHoursAgo, false, null);
+
+        DatabasePurger purger = new DatabasePurger(database, bucketStore, 0, null,
+                ZoneOffset.UTC, Clock.fixed(NOW, ZoneOffset.UTC), true, 50, 1);
+        purger.purgeOldOccupancyStatus();
+
+        List<IObsData> activeRemaining = observations(activeStream);
+        assertEquals("Active stream must retain the historical Extended Occupancy fault and the recent Clear observation",
+                2, activeRemaining.size());
+        assertEquals(twoHoursAgo, activeRemaining.get(0).getPhenomenonTime());
+        assertTrue(activeRemaining.get(0).getResult().getBooleanValue(4));
+        assertEquals("Fault - Extended Occupancy", activeRemaining.get(0).getResult().getStringValue(5));
+        assertEquals(tenMinutesAgo, activeRemaining.get(1).getPhenomenonTime());
+
+        List<IObsData> idleRemaining = observations(idleStream);
+        assertEquals("Idle stream must retain its latest observation even when older than the cutoff",
+                1, idleRemaining.size());
+        assertEquals(twoHoursAgo, idleRemaining.get(0).getPhenomenonTime());
+
+        List<IObsData> legacyRemaining = observations(legacyStream);
+        assertEquals("Legacy 3-field stream must purge old rows and retain its latest observation",
+                1, legacyRemaining.size());
+        assertEquals(twoHoursAgo, legacyRemaining.get(0).getPhenomenonTime());
+    }
+
+    private DataComponent legacyOccupancyStatusStructure() {
+        RADHelper helper = new RADHelper();
+        return helper.createRecord()
+                .name("occupancyStatus")
+                .addField("samplingTime", helper.createPrecisionTimeStamp())
+                .addField("isOccupied", helper.createBoolean().name("isOccupied").build())
+                .addField("occupancyStartTime", helper.createTime().asPhenomenonTimeIsoUTC().name("occupancyStartTime").build())
+                .build();
+    }
+
+    private void addLegacyOccupancyStatus(BigId dataStream, Instant sampleTime, boolean isOccupied, Instant startTime) {
+        DataComponent structure = legacyOccupancyStatusStructure();
+        var block = structure.createDataBlock();
+        block.setDoubleValue(0, sampleTime.getEpochSecond());
+        block.setBooleanValue(1, isOccupied);
+        block.setDoubleValue(2, startTime != null ? startTime.getEpochSecond() : 0.0);
+        addObservation(dataStream, sampleTime, block);
+    }
+
+    private DataComponent occupancyStatusStructure() {
+        RADHelper helper = new RADHelper();
+        return helper.createRecord()
+                .name("occupancyStatus")
+                .addField("samplingTime", helper.createPrecisionTimeStamp())
+                .addField("isOccupied", helper.createBoolean().name("isOccupied").build())
+                .addField("occupancyStartTime", helper.createTime().asPhenomenonTimeIsoUTC().name("occupancyStartTime").build())
+                .addField("extendedOccupancyThresholdMinutes", helper.createCount().name("extendedOccupancyThresholdMinutes").build())
+                .addField("extendedOccupancyFault", helper.createBoolean().name("extendedOccupancyFault").build())
+                .addField("alarmState", helper.createCategory().name("alarmState").build())
+                .build();
+    }
+
+    private void addOccupancyStatus(BigId dataStream, Instant sampleTime, boolean isOccupied,
+                                    Instant startTime, boolean fault, String alarmState) {
+        DataComponent structure = occupancyStatusStructure();
+        var block = structure.createDataBlock();
+        block.setDoubleValue(0, sampleTime.getEpochSecond());
+        block.setBooleanValue(1, isOccupied);
+        block.setDoubleValue(2, startTime != null ? startTime.getEpochSecond() : 0.0);
+        block.setIntValue(3, 30);
+        block.setBooleanValue(4, fault);
+        block.setStringValue(5, alarmState);
+        addObservation(dataStream, sampleTime, block);
+    }
+
     private static final class ToggleJournal implements IDailyFileJournalService {
         private final AtomicBoolean ready = new AtomicBoolean(true);
         private final AtomicBoolean published = new AtomicBoolean();
