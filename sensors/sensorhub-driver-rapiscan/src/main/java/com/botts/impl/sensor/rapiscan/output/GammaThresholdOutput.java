@@ -156,8 +156,16 @@ public class GammaThresholdOutput extends AbstractSensorOutput<RapiscanSensor> i
         if(e instanceof DataEvent) {
             DataEvent dataEvent = (DataEvent) e;
             // Set n value to the value received from Setup Gamma 1
-            nVal = dataEvent.getSource().getLatestRecord().getIntValue(5);
+            nVal = dataEvent.getSource().getLatestRecord().getDoubleValue(5);
         }
+    }
+
+    public double getNSigma() {
+        return nVal;
+    }
+
+    public void setNSigma(double nSigma) {
+        this.nVal = nSigma;
     }
 
 }

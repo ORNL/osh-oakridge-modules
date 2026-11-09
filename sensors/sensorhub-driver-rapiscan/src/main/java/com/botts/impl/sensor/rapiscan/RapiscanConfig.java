@@ -59,8 +59,8 @@ public class RapiscanConfig extends SensorConfig {
     @DisplayInfo(desc = "Setup Gamma Configuration", label = "Setup values from RPM hardware (if applicable)")
     public SetupGammaConfig setupGammaConfig = new SetupGammaConfig();
 
-//    @DisplayInfo(desc = "Setup Neutron Configuration", label = "Setup values from RPM hardware (if applicable)")
-//    public SetupNeutronConfig setupNeutronConfig = new SetupNeutronConfig();
+    @DisplayInfo(desc = "Setup Neutron Configuration", label = "Neutron setup values from RPM hardware (if applicable)")
+    public SetupNeutronConfig setupNeutronConfig = new SetupNeutronConfig();
 
     @DisplayInfo(desc = "EML Lane Settings")
     public EMLConfig emlConfig = new EMLConfig();

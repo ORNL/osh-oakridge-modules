@@ -70,6 +70,10 @@ public class SetupNeutronOutput extends AbstractSensorOutput<RapiscanSensor> {
     }
 
     public void onNewMessage(String[] setupNeutron1, String[] setupNeutron2){
+        if (setupNeutron1 == null || setupNeutron1.length < 7
+                || setupNeutron2 == null || setupNeutron2.length < 5) {
+            return;
+        }
         if (latestRecord == null) {
 
             dataBlock = dataStruct.createDataBlock();
@@ -78,20 +82,36 @@ public class SetupNeutronOutput extends AbstractSensorOutput<RapiscanSensor> {
 
             dataBlock = latestRecord.renew();
         }
-        int index =0;
-        dataBlock.setLongValue(index++,System.currentTimeMillis()/1000);
-        dataBlock.setIntValue(index++, Integer.parseInt(setupNeutron1[1])); //high bg
-        dataBlock.setIntValue(index++, Integer.parseInt(setupNeutron1[2])); //max intervals
-        dataBlock.setIntValue(index++, Integer.parseInt(setupNeutron1[3])); //alpha val
-        dataBlock.setIntValue(index++, Integer.parseInt(setupNeutron1[4])); //zmax value
-        dataBlock.setIntValue(index++, Integer.parseInt(setupNeutron1[5])); //sequential intervals
-        dataBlock.setIntValue(index++, Integer.parseInt(setupNeutron1[6])); //background time
+        int highBg = Integer.parseInt(setupNeutron1[1].trim());
+        int maxIntervals = Integer.parseInt(setupNeutron1[2].trim());
+        double alphaVal = Double.parseDouble(setupNeutron1[3].trim());
+        double zMaxVal = Double.parseDouble(setupNeutron1[4].trim());
+        int seqIntervals = Integer.parseInt(setupNeutron1[5].trim());
+        int bgTime = Integer.parseInt(setupNeutron1[6].trim());
 
-        dataBlock.setFloatValue(index++, Float.parseFloat(setupNeutron2[1]));
-        dataBlock.setFloatValue(index++, Float.parseFloat(setupNeutron2[2]));
-        dataBlock.setFloatValue(index++, Float.parseFloat(setupNeutron2[3]));
-        dataBlock.setFloatValue(index++, Float.parseFloat(setupNeutron2[4]));
+        float controlLowDiscrim = Float.parseFloat(setupNeutron2[1].trim());
+        float controlHighDiscrim = Float.parseFloat(setupNeutron2[2].trim());
+        float slaveLowDiscrim = Float.parseFloat(setupNeutron2[3].trim());
+        float slaveHighDiscrim = Float.parseFloat(setupNeutron2[4].trim());
+
+        int index = 0;
+        dataBlock.setLongValue(index++, System.currentTimeMillis() / 1000);
+        dataBlock.setIntValue(index++, highBg); //high bg
+        dataBlock.setIntValue(index++, maxIntervals); //max intervals
+        dataBlock.setDoubleValue(index++, alphaVal); //alpha val
+        dataBlock.setDoubleValue(index++, zMaxVal); //zmax value
+        dataBlock.setIntValue(index++, seqIntervals); //sequential intervals
+        dataBlock.setIntValue(index++, bgTime); //background time
+
+        dataBlock.setFloatValue(index++, controlLowDiscrim);
+        dataBlock.setFloatValue(index++, controlHighDiscrim);
+        dataBlock.setFloatValue(index++, slaveLowDiscrim);
+        dataBlock.setFloatValue(index++, slaveHighDiscrim);
 //        dataBlock.setStringValue(index++, setupNeutron2[5]);
+
+        if (parentSensor != null) {
+            parentSensor.onSetupNeutronReceived(setupNeutron1, setupNeutron2);
+        }
 
         latestRecord = dataBlock;
         eventHandler.publish(new DataEvent(System.currentTimeMillis(), SetupNeutronOutput.this, dataBlock));

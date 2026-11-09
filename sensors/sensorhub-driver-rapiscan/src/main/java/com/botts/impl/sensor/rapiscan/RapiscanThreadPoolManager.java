@@ -70,6 +70,10 @@ public class RapiscanThreadPoolManager {
         return heartbeatPool.scheduleAtFixedRate(task, initialDelay, period, unit);
     }
 
+    public ScheduledFuture<?> scheduleDelayedTask(Runnable task, long delay, TimeUnit unit) {
+        return heartbeatPool.schedule(task, delay, unit);
+    }
+
     public Future<?> submitProcessing(Runnable task) {
         return processingPool.submit(task);
     }

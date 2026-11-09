@@ -66,7 +66,7 @@ Settings for VM250 lanes, only configure these settings if the lane requires the
 - **Collimated:** Check if the lane is collimated.
 - **Supplemental Algorithm:** If checked, this will initiate the eml service for the driver. 
 
-### Setup Values from RPM Hardware
-- **Intervals:**
-- **Occupancy Holdin:**
-- **NSigma**
+### Setup Values from RPM Hardware (`SetupGammaConfig` & `SetupNeutronConfig`)
+When the RPM emits its daily setup messages (`SG1`, `SG2`, `SG3` for gamma and `SN1`, `SN2` for neutron) in the daily-file stream:
+- All gamma parameters (`highBackgroundFault`, `lowBackgroundFault`, `intervals`, `occupancyHoldin`, `nsigma`, `detectors`, `controlLowLevelDiscriminator`, `controlUpperLevelDiscriminator`, `relayOutput`, `algorithm`, `softwareVersion`, `slaveLowLevelDiscriminator`, `slaveUpperLevelDiscriminator`, `backgroundTime`, `backgroundSigma`, `firmwareVersion`) and neutron parameters (`highBackgroundFault`, `maxIntervals`, `alphaValue`, `zMaxValue`, `sequentialIntervals`, `backgroundTime`, `controlLowLevelDiscriminator`, `controlUpperLevelDiscriminator`, `slaveLowLevelDiscriminator`, `slaveUpperLevelDiscriminator`) overwrite the RPM's configuration in memory immediately and propagate to runtime dependents (`GammaThresholdOutput` and `EMLService`).
+- Persistence to `config.json` is change-detected and coalesced asynchronously off the TCP message reader thread via `RapiscanConfigSaver`, so unchanged daily broadcasts perform zero disk I/O and simultaneous midnight updates across 50+ lanes coalesce into a single background commit.

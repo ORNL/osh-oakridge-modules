@@ -8,6 +8,6 @@ The Rapiscan driver connects to an RPM over TCP and publishes gamma, neutron, oc
 - Under **Communication Settings**, add a TCP provider and enter the RPM host and port.
 - Configure connection timeouts, retry behavior, and reachability checks.
 - Enter the sensor position when it is not inherited from a lane system.
-- Use **RPM Hardware Setup** for the gamma interval, occupancy hold-in, and N-sigma threshold values.
+- Use **RPM Gamma Hardware Setup** and **RPM Neutron Hardware Setup** for the gamma and neutron hardware parameters; when the RPM publishes its daily setup messages (`SG1`–`SG3` and `SN1`–`SN2`) in the daily-file stream, the driver automatically updates these parameters in memory and coalesces any changes into an asynchronous `config.json` update without blocking the real-time stream.
 - Enable **EML Analysis** only for a VM250 EML lane after uploading the external EML plugin archive in **Services > OSCAR Service Module > EML Plugin Path**, then enter its collimation state and width. Non-threat EML alarms (`RELEASE`) are suppressed from the Dashboard and automatically adjudicated as **EML Non-Threat** (code `9999`) with queryable EML metadata.
 - Enable **Auto Start** to start the driver with the node.

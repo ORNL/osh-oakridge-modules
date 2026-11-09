@@ -8,6 +8,6 @@ El controlador Rapiscan se conecta a un RPM mediante TCP y publica datos gamma, 
 - En **Configuración de comunicación**, añada un proveedor TCP e introduzca el host y el puerto del RPM.
 - Configure los tiempos de espera, los reintentos y la comprobación de accesibilidad.
 - Introduzca la posición del sensor cuando no se herede de un sistema de carril.
-- Use **Configuración del hardware RPM** para el intervalo gamma, la retención de ocupación y el valor umbral N sigma.
+- Use **Configuración gamma del hardware RPM** y **Configuración de neutrones del hardware RPM** para los parámetros de hardware gamma y de neutrones; cuando el RPM publica sus mensajes diarios de configuración (`SG1`–`SG3` y `SN1`–`SN2`) en el flujo de archivos diarios, el controlador actualiza automáticamente estos parámetros en memoria y agrupa cualquier cambio en una actualización asíncrona de `config.json` sin bloquear el flujo en tiempo real.
 - Active **Análisis EML** solo para un carril EML VM250 tras cargar el complemento EML externo en **Servicios > Módulo de servicio OSCAR > Ruta del complemento EML**, e introduzca su estado de colimación y ancho. Las alarmas sin amenaza EML (`RELEASE`) se omiten del panel y se adjudican automáticamente como **Sin amenaza EML** (código `9999`) con metadatos consultables.
 - Active **Inicio automático** para iniciar el controlador con el nodo.

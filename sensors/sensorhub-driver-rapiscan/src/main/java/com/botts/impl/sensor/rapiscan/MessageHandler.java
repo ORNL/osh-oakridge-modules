@@ -1,6 +1,8 @@
 package com.botts.impl.sensor.rapiscan;
 
 
+import com.botts.impl.sensor.rapiscan.output.SetupGammaOutput;
+import com.botts.impl.sensor.rapiscan.output.SetupNeutronOutput;
 import com.opencsv.CSVReader;
 import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
 import org.sensorhub.impl.utils.rad.eml.PendingEmlAutoAdjudicationRegistry;
@@ -436,21 +438,42 @@ public class MessageHandler {
 
             case "SP" -> parentSensor.getSpeedOutput().onNewMessage(csvLine);
 
-            case "SG1" -> setupGamma1 = csvLine;
-
-            case "SG2"-> setupGamma2 = csvLine;
-
-            case "SG3" -> {
-                parentSensor.getSetupGammaOutput().onNewMessage(setupGamma1, setupGamma2, csvLine);
-                setupGamma1 = new String[]{""};
-                setupGamma2 = new String[]{""};
+            case "SG1" -> {
+                setupGamma1 = csvLine;
+                parentSensor.onSetupGamma1Received(csvLine);
             }
 
-            case "SN1" -> setupNeutron1 = csvLine;
+            case "SG2" -> {
+                setupGamma2 = csvLine;
+                parentSensor.onSetupGamma2Received(csvLine);
+            }
+
+            case "SG3" -> {
+                SetupGammaOutput setupGammaOut = parentSensor.getSetupGammaOutput();
+                if (setupGammaOut != null
+                        && setupGamma1 != null && setupGamma1.length >= 6
+                        && setupGamma2 != null && setupGamma2.length >= 7) {
+                    setupGammaOut.onNewMessage(setupGamma1, setupGamma2, csvLine);
+                } else {
+                    parentSensor.onSetupGamma3Received(csvLine);
+                }
+                setupGamma1 = null;
+                setupGamma2 = null;
+            }
+
+            case "SN1" -> {
+                setupNeutron1 = csvLine;
+                parentSensor.onSetupNeutron1Received(csvLine);
+            }
 
             case "SN2" -> {
-                parentSensor.getSetupNeutronOutput().onNewMessage(setupNeutron1, csvLine);
-                setupNeutron1 = new String[]{""};
+                SetupNeutronOutput setupNeutronOut = parentSensor.getSetupNeutronOutput();
+                if (setupNeutronOut != null && setupNeutron1 != null && setupNeutron1.length >= 7) {
+                    setupNeutronOut.onNewMessage(setupNeutron1, csvLine);
+                } else {
+                    parentSensor.onSetupNeutron2Received(csvLine);
+                }
+                setupNeutron1 = null;
             }
         }
 

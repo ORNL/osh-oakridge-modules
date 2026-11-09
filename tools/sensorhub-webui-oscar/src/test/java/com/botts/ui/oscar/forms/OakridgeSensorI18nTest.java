@@ -45,6 +45,7 @@ import com.botts.impl.sensor.proximity.ProximityConfig;
 import com.botts.impl.sensor.rapiscan.EMLConfig;
 import com.botts.impl.sensor.rapiscan.RapiscanConfig;
 import com.botts.impl.sensor.rapiscan.SetupGammaConfig;
+import com.botts.impl.sensor.rapiscan.SetupNeutronConfig;
 import com.botts.impl.sensor.rs350.RS350Config;
 import com.botts.impl.sensor.rs350.RS350Outputs;
 import com.botts.impl.service.bucket.BucketServiceConfig;
@@ -171,6 +172,7 @@ public class OakridgeSensorI18nTest
         ProximityConfig.class,
         RapiscanConfig.class,
         SetupGammaConfig.class,
+        SetupNeutronConfig.class,
         EMLConfig.class,
         RS350Config.class,
         RS350Outputs.class,
