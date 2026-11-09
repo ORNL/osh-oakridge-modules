@@ -81,6 +81,11 @@ public class SetupGammaOutput extends AbstractSensorOutput<RapiscanSensor> {
     }
 
     public void onNewMessage(String[] setup1, String [] setup2, String[] setup3){
+        if (setup1 == null || setup1.length < 6
+                || setup2 == null || setup2.length < 7
+                || setup3 == null || setup3.length < 6) {
+            return;
+        }
         if (latestRecord == null) {
 
             dataBlock = dataStruct.createDataBlock();
@@ -89,36 +94,59 @@ public class SetupGammaOutput extends AbstractSensorOutput<RapiscanSensor> {
 
             dataBlock = latestRecord.renew();
         }
-        int index =0;
-        dataBlock.setLongValue(index++,System.currentTimeMillis()/1000);
+        int highBg = Integer.parseInt(setup1[1].trim());
+        int lowBg = Integer.parseInt(setup1[2].trim());
+        int parsedIntervals = Integer.parseInt(setup1[3].trim());
+        int parsedHoldin = Integer.parseInt(setup1[4].trim());
+        double parsedNsigma = Double.parseDouble(setup1[5].trim());
+
+        String detectors = setup2[1].trim();
+        double controlLowDiscrim = Double.parseDouble(setup2[2].trim());
+        double controlHighDiscrim = Double.parseDouble(setup2[3].trim());
+        int relayOut = Integer.parseInt(setup2[4].trim());
+        String parsedAlgorithm = setup2[5].trim();
+        String softwareVer = setup2[6].trim();
+
+        double slaveLowDiscrim = Double.parseDouble(setup3[1].trim());
+        double slaveHighDiscrim = Double.parseDouble(setup3[2].trim());
+        int bgTime = Integer.parseInt(setup3[3].trim());
+        double bgSigma = Double.parseDouble(setup3[4].trim());
+        String firmwareVer = setup3[5].trim();
+
+        int index = 0;
+        dataBlock.setLongValue(index++, System.currentTimeMillis() / 1000);
         // set up 1
-        dataBlock.setIntValue(index++, Integer.parseInt(setup1[1])); //high bg
-        dataBlock.setIntValue(index++, Integer.parseInt(setup1[2])); // low bg
-        dataBlock.setIntValue(index++, Integer.parseInt(setup1[3])); //intervals
-        dataBlock.setIntValue(index++, Integer.parseInt(setup1[4])); //occupancy holding
-        dataBlock.setDoubleValue(index++, Double.parseDouble(setup1[5])); //nVal
+        dataBlock.setIntValue(index++, highBg); //high bg
+        dataBlock.setIntValue(index++, lowBg); // low bg
+        dataBlock.setIntValue(index++, parsedIntervals); //intervals
+        dataBlock.setIntValue(index++, parsedHoldin); //occupancy holding
+        dataBlock.setDoubleValue(index++, parsedNsigma); //nVal
 //        dataBlock.setStringValue(index++, setup1[6]); //placeholder
 
         //set up 2
-        dataBlock.setStringValue(index++, setup2[1]); //detectors
-        dataBlock.setDoubleValue(index++, Double.parseDouble(setup2[2])); //low discrim
-        dataBlock.setDoubleValue(index++, Double.parseDouble(setup2[3])); //high discrim
-        dataBlock.setIntValue(index++, Integer.parseInt(setup2[4])); //relay out
-        dataBlock.setStringValue(index++, setup2[5]); //algorithm
-        dataBlock.setStringValue(index++, setup2[6]); //version software
+        dataBlock.setStringValue(index++, detectors); //detectors
+        dataBlock.setDoubleValue(index++, controlLowDiscrim); //low discrim
+        dataBlock.setDoubleValue(index++, controlHighDiscrim); //high discrim
+        dataBlock.setIntValue(index++, relayOut); //relay out
+        dataBlock.setStringValue(index++, parsedAlgorithm); //algorithm
+        dataBlock.setStringValue(index++, softwareVer); //version software
 
         //set up 3
-        dataBlock.setDoubleValue(index++, Double.parseDouble(setup3[1])); //low discrim
-        dataBlock.setDoubleValue(index++, Double.parseDouble(setup3[2])); //high discrim
-        dataBlock.setIntValue(index++, Integer.parseInt(setup3[3])); //background time
-        dataBlock.setIntValue(index++, Integer.parseInt(setup3[4])); //background sgima
-        dataBlock.setStringValue(index, setup3[5]); //version of firmware
+        dataBlock.setDoubleValue(index++, slaveLowDiscrim); //low discrim
+        dataBlock.setDoubleValue(index++, slaveHighDiscrim); //high discrim
+        dataBlock.setIntValue(index++, bgTime); //background time
+        dataBlock.setDoubleValue(index++, bgSigma); //background sigma
+        dataBlock.setStringValue(index, firmwareVer); //version of firmware
 
         //gamma config values!
-        intervals=  Integer.parseInt(setup1[3]);
-        occupancyHoldin =  Integer.parseInt(setup1[4]);
-        algorithm=  setup2[5];
-        nsigma =  Double.parseDouble(setup1[5]);
+        intervals = parsedIntervals;
+        occupancyHoldin = parsedHoldin;
+        algorithm = parsedAlgorithm;
+        nsigma = parsedNsigma;
+
+        if (parentSensor != null) {
+            parentSensor.onSetupGammaReceived(setup1, setup2, setup3);
+        }
 
         latestRecord = dataBlock;
         eventHandler.publish(new DataEvent(System.currentTimeMillis(), SetupGammaOutput.this, dataBlock));

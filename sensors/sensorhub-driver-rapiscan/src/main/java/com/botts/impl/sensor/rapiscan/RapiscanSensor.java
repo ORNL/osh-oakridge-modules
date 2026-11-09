@@ -82,6 +82,8 @@ public class RapiscanSensor extends AbstractSensorModule<RapiscanConfig> {
     RobustConnection connection;
     private boolean isRunning;
     private final AtomicBoolean reconnectPending = new AtomicBoolean();
+    private final AtomicBoolean setupGammaSynced = new AtomicBoolean(false);
+    private final AtomicBoolean setupNeutronSynced = new AtomicBoolean(false);
     private long reconnectTimeoutObservedAtNanos = NO_RECONNECT_TIMEOUT;
 //    private Thread tcpConnectionThread;
     //private static final Object heartbeatLock = new Object();
@@ -89,6 +91,17 @@ public class RapiscanSensor extends AbstractSensorModule<RapiscanConfig> {
     @Override
     public void doInit() throws SensorHubException {
         super.doInit();
+
+        setupGammaSynced.set(false);
+        setupNeutronSynced.set(false);
+        if (config != null) {
+            if (config.setupGammaConfig == null) {
+                config.setupGammaConfig = new SetupGammaConfig();
+            }
+            if (config.setupNeutronConfig == null) {
+                config.setupNeutronConfig = new SetupNeutronConfig();
+            }
+        }
 
         RepetitiveWarningFilter.install();
 
@@ -375,6 +388,8 @@ public class RapiscanSensor extends AbstractSensorModule<RapiscanConfig> {
             emlService.clearOccupancyList();
         }
 
+        RapiscanConfigSaver.flushNow(this);
+
         if (stopFailure != null)
             throw stopFailure;
 
@@ -392,10 +407,135 @@ public class RapiscanSensor extends AbstractSensorModule<RapiscanConfig> {
 
 
     @Override
+    public void setConfiguration(RapiscanConfig config) {
+        super.setConfiguration(config);
+        setupGammaSynced.set(false);
+        setupNeutronSynced.set(false);
+        if (config != null) {
+            if (config.setupGammaConfig == null) {
+                config.setupGammaConfig = new SetupGammaConfig();
+            }
+            if (config.setupNeutronConfig == null) {
+                config.setupNeutronConfig = new SetupNeutronConfig();
+            }
+            if (config.serialNumber != null && !config.serialNumber.isBlank()) {
+                generateUniqueID("urn:osh:sensor:rapiscan:", config.serialNumber);
+                generateXmlID("RAPISCAN_", config.serialNumber);
+            }
+        }
+    }
+
+    @Override
     public synchronized void updateConfig(RapiscanConfig config) throws SensorHubException {
         super.updateConfig(config);
 
         locationOutput.setLocationOutput(config.getLocation());
+    }
+
+    public void onSetupGamma1Received(String[] sg1) {
+        if (config == null || sg1 == null || sg1.length < 6) {
+            return;
+        }
+        if (config.setupGammaConfig == null) {
+            config.setupGammaConfig = new SetupGammaConfig();
+        }
+        boolean changed = config.setupGammaConfig.applySetupGamma1(sg1);
+        propagateGammaRuntimeSettings(config.setupGammaConfig);
+        if (changed) {
+            RapiscanConfigSaver.scheduleSave(this);
+        }
+    }
+
+    public void onSetupGamma2Received(String[] sg2) {
+        if (config == null || sg2 == null || sg2.length < 7) {
+            return;
+        }
+        if (config.setupGammaConfig == null) {
+            config.setupGammaConfig = new SetupGammaConfig();
+        }
+        boolean changed = config.setupGammaConfig.applySetupGamma2(sg2);
+        if (changed) {
+            RapiscanConfigSaver.scheduleSave(this);
+        }
+    }
+
+    public void onSetupGamma3Received(String[] sg3) {
+        if (config == null || sg3 == null || sg3.length < 6) {
+            return;
+        }
+        if (config.setupGammaConfig == null) {
+            config.setupGammaConfig = new SetupGammaConfig();
+        }
+        boolean changed = config.setupGammaConfig.applySetupGamma3(sg3);
+        boolean firstSync = setupGammaSynced.compareAndSet(false, true);
+        if (changed || firstSync) {
+            RapiscanConfigSaver.scheduleSave(this);
+        }
+    }
+
+    public void onSetupGammaReceived(String[] sg1, String[] sg2, String[] sg3) {
+        if (config == null) {
+            return;
+        }
+        if (config.setupGammaConfig == null) {
+            config.setupGammaConfig = new SetupGammaConfig();
+        }
+        boolean changed = config.setupGammaConfig.applyFromStream(sg1, sg2, sg3);
+        boolean firstSync = setupGammaSynced.compareAndSet(false, true);
+        propagateGammaRuntimeSettings(config.setupGammaConfig);
+        if (changed || firstSync) {
+            RapiscanConfigSaver.scheduleSave(this);
+        }
+    }
+
+    public void onSetupNeutron1Received(String[] sn1) {
+        if (config == null || sn1 == null || sn1.length < 7) {
+            return;
+        }
+        if (config.setupNeutronConfig == null) {
+            config.setupNeutronConfig = new SetupNeutronConfig();
+        }
+        boolean changed = config.setupNeutronConfig.applySetupNeutron1(sn1);
+        if (changed) {
+            RapiscanConfigSaver.scheduleSave(this);
+        }
+    }
+
+    public void onSetupNeutron2Received(String[] sn2) {
+        if (config == null || sn2 == null || sn2.length < 5) {
+            return;
+        }
+        if (config.setupNeutronConfig == null) {
+            config.setupNeutronConfig = new SetupNeutronConfig();
+        }
+        boolean changed = config.setupNeutronConfig.applySetupNeutron2(sn2);
+        boolean firstSync = setupNeutronSynced.compareAndSet(false, true);
+        if (changed || firstSync) {
+            RapiscanConfigSaver.scheduleSave(this);
+        }
+    }
+
+    public void onSetupNeutronReceived(String[] sn1, String[] sn2) {
+        if (config == null) {
+            return;
+        }
+        if (config.setupNeutronConfig == null) {
+            config.setupNeutronConfig = new SetupNeutronConfig();
+        }
+        boolean changed = config.setupNeutronConfig.applyFromStream(sn1, sn2);
+        boolean firstSync = setupNeutronSynced.compareAndSet(false, true);
+        if (changed || firstSync) {
+            RapiscanConfigSaver.scheduleSave(this);
+        }
+    }
+
+    private void propagateGammaRuntimeSettings(SetupGammaConfig gammaCfg) {
+        if (gammaThresholdOutput != null) {
+            gammaThresholdOutput.setNSigma(gammaCfg.nsigma);
+        }
+        if (emlService != null) {
+            emlService.updateErnieSetup(gammaCfg.intervals, gammaCfg.occupancyHoldin);
+        }
     }
 
     public EMLService getEmlService() {

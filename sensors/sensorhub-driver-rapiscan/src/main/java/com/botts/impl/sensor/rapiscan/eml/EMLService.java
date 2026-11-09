@@ -61,8 +61,12 @@ public class EMLService implements IEventListener, AutoCloseable {
         return new EmlLaneParameters(cfg.name, cfg.laneID, collimated, width, intervals, holdin);
     }
 
-    private void updateErnieSetup(int intervals, int holdin) {
+    public void updateErnieSetup(int intervals, int holdin) {
         this.laneParameters = initializeErnie(() -> buildLaneParameters(intervals, holdin));
+    }
+
+    public EmlLaneParameters getLaneParameters() {
+        return this.laneParameters;
     }
 
     static <T> T initializeErnie(Supplier<T> initializer) {
