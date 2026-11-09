@@ -25,14 +25,20 @@ public class EMLContextualOutput extends AbstractSensorOutput<RapiscanSensor> {
     protected DataEncoding dataEncoding;
 
     int versionIdIndex, modelIdIndex, thresholdsIndex;
+    private String lastVersionId;
+    private String lastModelId;
+    private double lastPrimaryThreshold = Double.NaN;
 
     public EMLContextualOutput(RapiscanSensor parentSensor) {
         super(SENSOR_OUTPUT_NAME, parentSensor);
     }
 
-    public void init() {
+    public synchronized void init() {
         dataStruct = getDataRecord();
         dataEncoding = new TextEncodingImpl(",", "\n");
+        lastVersionId = null;
+        lastModelId = null;
+        lastPrimaryThreshold = Double.NaN;
     }
 
     DataRecord getDataRecord() {
@@ -56,7 +62,15 @@ public class EMLContextualOutput extends AbstractSensorOutput<RapiscanSensor> {
         return dataRecordBuilder.build();
     }
 
-    public void handleContextualMessage(EmlEvaluationResult results) {
+    public synchronized void handleContextualMessage(EmlEvaluationResult results) {
+        if (results == null)
+            return;
+        if (latestRecord != null
+                && java.util.Objects.equals(results.versionId(), lastVersionId)
+                && java.util.Objects.equals(results.modelId(), lastModelId)
+                && Double.compare(results.primaryThreshold(), lastPrimaryThreshold) == 0) {
+            return;
+        }
         DataBlock dataBlock;
         if (latestRecord == null) {
             dataBlock = dataStruct.createDataBlock();
@@ -68,6 +82,9 @@ public class EMLContextualOutput extends AbstractSensorOutput<RapiscanSensor> {
         dataBlock.setStringValue(modelIdIndex, results.modelId());
         dataBlock.setDoubleValue(thresholdsIndex, results.primaryThreshold());
 
+        lastVersionId = results.versionId();
+        lastModelId = results.modelId();
+        lastPrimaryThreshold = results.primaryThreshold();
         latestRecord = dataBlock;
         eventHandler.publish(new DataEvent(System.currentTimeMillis(), EMLContextualOutput.this, dataBlock));
     }

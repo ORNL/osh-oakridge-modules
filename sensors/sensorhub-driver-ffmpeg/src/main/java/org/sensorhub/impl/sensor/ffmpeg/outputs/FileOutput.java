@@ -317,7 +317,8 @@ public class FileOutput<FFMPEGConfigType extends FFMPEGConfig> extends AbstractS
                 // FFmpeg's log level is process-wide. Do not change it for one recording and
                 // inadvertently hide (or amplify) diagnostics from the other camera streams.
                 recordingGeneration = recordingReadiness.start();
-                if (this.fileName.endsWith(".m3u8")) {
+                if (this.fileName.endsWith(".m3u8")
+                        || (this.waitingForInitialKeyFrame && !processor.isFrameBufferEnabled())) {
                     List<DataBufferRecord> seedRecords = processor.snapshotHlsSeedPackets();
                     long packetsBeforeSeed = packetsWritten;
                     for (DataBufferRecord seedRecord : seedRecords) {

@@ -715,14 +715,23 @@ Vérifiez voies/événements distants, ligne Nationale, rapport et événement a
 
 Le profil standard 3.11.0 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet en mode
 `PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Les métadonnées opérationnelles et les flux
-à faible volume restent dans PostgreSQL, tandis que les observations de détecteurs à fort volume sont
-écrites dans des partitions de transit de 30 minutes (`obs_stage_p*`). Cinq minutes après la clôture de
-chaque fenêtre de 30 minutes, des tâches d'arrière-plan exportent la partition vers des fichiers Apache
-Parquet catalogués et compressés en ZSTD (`archive/parquet/`), vérifient la parité exacte des lignes/empreintes
-et suppriment la partition de transit afin de garder PostgreSQL compact. (Les sites configurés explicitement
-en mode `HOT_RETENTION` conservent les lignes chaudes pendant la fenêtre configurée avant de les retirer après
-vérification de parité.) La propriété de l'archive, l'intégrité des objets, la parité et les conservations
-actives sont revérifiées avant toute suppression et échouent de façon sûre.
+probants permanents (`occupancy`, `adjudication` en ajout seul, `report`, `nationalSummary`) restent dans
+PostgreSQL `ONLY oscar.obs`, tandis que les 12 sorties immuables à fort volume des détecteurs, d'état, de
+rapports et d'EML (`gammaCounts`, `gammaThreshold`, `neutronCounts`, `setupGamma`, `setupNeutron`, `speed`,
+`backgroundReport`, `foregroundReport`, `status`, `emlContextual`, `emlScanContextual`, `emlAnalysis`) sont
+écrites dans des partitions de transit de 30 minutes (`osg_*`). Cinq minutes après la clôture de chaque
+fenêtre de 30 minutes, des tâches d'arrière-plan exportent la partition vers des fichiers Apache Parquet
+catalogués et compressés en ZSTD (`archive/datasets/observations/`), vérifient la parité exacte des
+lignes/empreintes et suppriment la partition de transit afin de garder PostgreSQL compact (et au démarrage,
+OSCAR réconcilie les routes existantes et exporte rétroactivement vers Parquet toute ligne historique non
+archivée de la table parente pour ces 12 sorties). Chaque heure, OSCAR purge également les lignes
+`connectionStatus` de plus d'une heure (en conservant la plus récente par flux), les lignes `Clear` de
+routine de `occupancyStatus` de plus d'une heure (en conservant la plus récente par flux ainsi que toutes
+les lignes de défaut/alarme) et les commandes opérationnelles transitoires dans `cmd_commands`/`cmd_status`
+de plus de 24 heures (tout en conservant définitivement les commandes d'audit `%adjudicate%`). (Les sites
+configurés explicitement en mode `HOT_RETENTION` conservent les lignes chaudes pendant la fenêtre configurée
+avant de les retirer après vérification de parité.) La propriété de l'archive, l'intégrité des objets, la
+parité et les conservations actives sont revérifiées avant toute suppression et échouent de façon sûre.
 
 Chaque pilote RPM exige le journal direct des fichiers quotidiens. Il capture si possible
 l'enregistrement source avant analyse, puis publie la journée terminée sous forme de CSV historique

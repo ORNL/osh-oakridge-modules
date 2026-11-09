@@ -749,14 +749,23 @@ Duplicate names and duplicate address/port pairs are rejected. **Edit** changes 
 ## 12. Data retention and storage behavior
 
 The standard 3.11.0 profile uses the tiered PostgreSQL + Apache Parquet architecture in `PARQUET_PRIMARY`
-mode (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Operational metadata and low-volume streams remain in
-PostgreSQL, while high-volume detector observations land in 30-minute PostgreSQL staging partitions
-(`obs_stage_p*`). Five minutes after each 30-minute window closes, bounded background jobs export the
-completed window to cataloged, ZSTD-compressed Apache Parquet (`archive/parquet/`), verify exact row/hash
-parity, and drop the staging partition so the live PostgreSQL working set stays compact. (Sites that
-explicitly configure `HOT_RETENTION` retain hot PostgreSQL rows for the configured multi-day window plus
-rollback grace before retiring them after parity verification.) Archive ownership, object integrity,
-parity, and active generation or observation holds are rechecked before deletion and fail closed.
+mode (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Operational metadata and permanent evidentiary streams
+(`occupancy`, append-only `adjudication`, `report`, `nationalSummary`) remain in PostgreSQL `ONLY oscar.obs`,
+while the 12 allowlisted immutable high-volume detector, status, report, and EML outputs (`gammaCounts`,
+`gammaThreshold`, `neutronCounts`, `setupGamma`, `setupNeutron`, `speed`, `backgroundReport`,
+`foregroundReport`, `status`, `emlContextual`, `emlScanContextual`, `emlAnalysis`) land in 30-minute
+PostgreSQL staging partitions (`osg_*`). Five minutes after each 30-minute window closes, bounded
+background jobs export the completed window to cataloged, ZSTD-compressed Apache Parquet
+(`archive/datasets/observations/`), verify exact row/hash parity, and drop the staging partition so the
+live PostgreSQL working set stays compact (and on startup, OSCAR reconciles existing route entries and
+retroactively exports any legacy unarchived parent-table rows for those 12 outputs to Parquet). Every
+hour, OSCAR also prunes expired `connectionStatus` rows (> 1 hour old, keeping the latest per stream),
+routine `Clear` `occupancyStatus` rows (> 1 hour old, keeping the latest per stream and all fault/alarm
+rows), and transient operational commands in `cmd_commands`/`cmd_status` (> 24 hours old, while
+permanently preserving `%adjudicate%` audit commands). (Sites that explicitly configure `HOT_RETENTION`
+retain hot PostgreSQL rows for the configured multi-day window plus rollback grace before retiring them
+after parity verification.) Archive ownership, object integrity, parity, and active generation or
+observation holds are rechecked before deletion and fail closed.
 
 Each RPM driver requires the direct daily-file journal. It captures the source record before
 parsing where possible and publishes the completed day as an immutable legacy CSV plus SHA-256

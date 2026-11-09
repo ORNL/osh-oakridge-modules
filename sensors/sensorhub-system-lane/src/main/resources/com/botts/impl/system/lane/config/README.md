@@ -40,7 +40,7 @@ Click 'Add New Module' and select 'Lane System' from the list of available modul
         - Username: Enter your camera's username in this field.
         - Password: Enter your camera's password in this field.
       - **Axis (Specific):**
-        - Stream Codec: Select `H264` (default `640x480` at `30 fps` with `15`-frame keyframe interval via `/axis-media/media.amp?adjustablelivestream=1&resolution=640x480&videocodec=h264&videokeyframeinterval=15&fps=30`) or `MJPEG`.
+        - Stream Codec:
       - **Custom (Specific):**
         - Stream Path: Enter everything that comes after your camera's `ip.ip.ip.ip:port` (e.g., `/lane04_cam`).
 

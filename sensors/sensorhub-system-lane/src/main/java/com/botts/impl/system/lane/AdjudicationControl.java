@@ -117,33 +117,42 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
                    return CommandStatus.failed(command.getID(), "Please specify a secondary inspection status");
 
                // ----------------------------------------------------------------------------------------------------------
-               // update the occupancy adjudication command IDs array with latest command id
-               var commandId = getParentProducer().getParentHub().getIdEncoders().getCommandIdEncoder().encodeID(command.getID());
-               var result = obs.getResult();
-               // Schema-aware so RS350 occupancies (which carry the trailing
-               // alarmCategoryCode field) are read/written with the matching
-               // 17-field datablock layout. The base helpers would otherwise
-               // produce a 16-field datablock that doesn't match the registered
-               // datastream schema and crash the JSON serializer in put().
-               var occupancyRecord = ds.getRecordStructure();
-               var occupancy = OccupancyExtended.readOccupancy(occupancyRecord, result);
+               // Append this immutable adjudication command ID to the occupancy's adjudication list.
+               // Synchronize so concurrent adjudications on the same lane never drop a prior commandId
+               // or race on resultStructure.
+               DataBlock resultData;
+               synchronized (this) {
+                   obs = obsStore.get(decodedObsId);
+                   if (obs == null)
+                       return CommandStatus.failed(command.getID(), "The occupancy from the provided ID is null");
 
-               if (!occupancy.getAdjudicatedIds().contains(commandId)) {
-                   occupancy.addAdjudicatedId(commandId);
+                   var commandId = getParentProducer().getParentHub().getIdEncoders().getCommandIdEncoder().encodeID(command.getID());
+                   var result = obs.getResult();
+                   // Schema-aware so RS350 occupancies (which carry the trailing
+                   // alarmCategoryCode field) are read/written with the matching
+                   // 17-field datablock layout. The base helpers would otherwise
+                   // produce a 16-field datablock that doesn't match the registered
+                   // datastream schema and crash the JSON serializer in put().
+                   var occupancyRecord = ds.getRecordStructure();
+                   var occupancy = OccupancyExtended.readOccupancy(occupancyRecord, result);
+
+                   if (!occupancy.getAdjudicatedIds().contains(commandId)) {
+                       occupancy.addAdjudicatedId(commandId);
+                   }
+                   occupancy.recordAdjudicationCode(adj.getAdjudicationCode());
+                   DataBlock newOccupancyResult = OccupancyExtended.writeOccupancy(occupancyRecord, occupancy);
+                   obs.getResult().setUnderlyingObject(newOccupancyResult.getUnderlyingObject());
+                   obs.getResult().updateAtomCount();
+
+                   String systemUID = getParentProducer().getParentSystemUID() != null ?
+                           getParentProducer().getParentSystemUID() :
+                           getParentProducer().getUniqueIdentifier();
+                   var obsDb = getParentProducer().getParentHub().getSystemDriverRegistry().getDatabase(systemUID);
+
+                   obsDb.getObservationStore().put(decodedObsId, obs);
+
+                   resultData = createResultData(adj, command.getSenderID());
                }
-               occupancy.recordAdjudicationCode(adj.getAdjudicationCode());
-               DataBlock newOccupancyResult = OccupancyExtended.writeOccupancy(occupancyRecord, occupancy);
-               obs.getResult().setUnderlyingObject(newOccupancyResult.getUnderlyingObject());
-               obs.getResult().updateAtomCount();
-
-               String systemUID = getParentProducer().getParentSystemUID() != null ?
-                       getParentProducer().getParentSystemUID() :
-                       getParentProducer().getUniqueIdentifier();
-               var obsDb = getParentProducer().getParentHub().getSystemDriverRegistry().getDatabase(systemUID);
-
-               obsDb.getObservationStore().put(decodedObsId, obs);
-
-               DataBlock resultData = createResultData(adj, command.getSenderID());
 
                return new CommandStatus.Builder()
                        .withCommand(command.getID())
