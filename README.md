@@ -1,6 +1,6 @@
 # osh-oakridge-modules
 
-Oak Ridge National Laboratory OpenSensorHub sensor, lane, adjudication, retained-media, and daily-journal modules for [ORNL/oscar](https://github.com/ORNL/oscar).
+OpenSensorHub sensor, lane, adjudication, retained-media, and daily-journal modules for [ORNL/oscar](https://github.com/ORNL/oscar).
 
 ## OSCAR operator documentation
 

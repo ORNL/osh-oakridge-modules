@@ -1,6 +1,6 @@
 # Contributing to ORNL/osh-oakridge-modules
 
-`ORNL/osh-oakridge-modules` is maintained by Oak Ridge National Laboratory as part of the [ORNL/oscar](https://github.com/ORNL/oscar) platform.
+`ORNL/osh-oakridge-modules` provides the OpenSensorHub sensor, lane, adjudication, retained-media, and daily-journal modules for the [ORNL/oscar](https://github.com/ORNL/oscar) platform.
 
 ## Fork & Pull Request Workflow
 
