@@ -489,6 +489,7 @@ public final class SlidingOccupancyQuery {
         Instant cycleEnd = minimum(addClamped(
                 checkpoint.processedThrough(), lateArrivalCatchUp), allowedEnd);
         Instant cursor = checkpoint.processedThrough();
+        Instant lastForwardCheck = now;
         while (!shouldStop() && cursor.isBefore(cycleEnd)) {
             Instant windowEnd = minimum(addClamped(cursor, batchWindowLength), cycleEnd);
             if (!processWindow(cursor, windowEnd, true, occupancyStreamIds))
@@ -499,6 +500,7 @@ public final class SlidingOccupancyQuery {
                     ? checkpoint.complete(checkpointTime)
                     : checkpoint.advance(cursor, checkpointTime);
             cursorStore.writeLateArrival(checkpoint);
+            lastForwardCheck = advanceForwardScanIfDue(lastForwardCheck, occupancyStreamIds);
         }
     }
 
@@ -558,6 +560,7 @@ public final class SlidingOccupancyQuery {
         // Reconciliation deliberately revalidates even a previously processed observation. This
         // slowly repairs media whose ledger/catalog was lost, without an unbounded restart scan.
         Instant cursor = checkpoint.processedThrough();
+        Instant lastForwardCheck = now;
         while (!shouldStop() && cursor.isBefore(cycleEnd)) {
             Instant windowEnd = minimum(addClamped(cursor, batchWindowLength), cycleEnd);
             if (!processWindow(cursor, windowEnd, false, occupancyStreamIds))
@@ -570,7 +573,34 @@ public final class SlidingOccupancyQuery {
             // Persist every successful query window. A crash replays at most one idempotent
             // boundary window rather than losing the remainder of the frozen sweep.
             cursorStore.writeReconciliation(checkpoint);
+            lastForwardCheck = advanceForwardScanIfDue(lastForwardCheck, occupancyStreamIds);
         }
+    }
+
+    private Instant advanceForwardScanIfDue(Instant lastForwardCheck,
+                                            Set<BigId> occupancyStreamIds) throws IOException {
+        if (shouldStop())
+            return lastForwardCheck;
+        Instant now = clock.instant();
+        if (!isDue(lastForwardCheck, now, batchWindowLength))
+            return lastForwardCheck;
+        Optional<RetentionScanCheckpoint> existing = cursorStore.read();
+        if (existing.isEmpty())
+            return now;
+        Instant eligibleThrough = subtractClamped(now, retentionOffset);
+        ScanPlan plan = plan(existing.get().processedThrough(), eligibleThrough, maximumCatchUp);
+        if (!plan.hasWork())
+            return now;
+        Instant windowStart = plan.startInclusive();
+        while (!shouldStop() && windowStart.isBefore(plan.endInclusive())) {
+            Instant windowEnd = minimum(addClamped(windowStart, batchWindowLength),
+                    plan.endInclusive());
+            if (!processWindow(windowStart, windowEnd, true, occupancyStreamIds))
+                return clock.instant();
+            cursorStore.write(RetentionScanCheckpoint.at(windowEnd, clock.instant()));
+            windowStart = windowEnd;
+        }
+        return clock.instant();
     }
 
     private RetentionReconciliationCheckpoint initializeReconciliationCheckpoint(
