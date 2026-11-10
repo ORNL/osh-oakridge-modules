@@ -58,8 +58,9 @@ Use the release [Quick Start](https://github.com/ORNL/oscar/blob/main/dist/relea
 | **NSIGMA (`N-Sigma`)** | How many standard deviations (`σ`) the current gamma count rate rises above the recent background average; used to trigger gamma alarms consistently as background fluctuates. |
 | **NORM (Naturally Occurring Radioactive Material)** | Benign cargo containing natural radioisotopes (such as potassium-40 in fertilizer, kitty litter, ceramics, or bananas, or thorium/uranium series in granite and tile). |
 | **EML (Energy Metric Ratios) & Code `9999`** | Algorithm for Rapiscan portals that compares low-, mid-, and high-energy gamma windows to distinguish benign **NORM** cargo from concentrated threat sources. When EML classifies an alarm as non-threat, OSCAR logs an automated adjudication (`Code 9999: EML Non-Threat`). |
+| **Extended Occupancy (`Fault - Extended Occupancy`) & Code `9998`** | When a vehicle occupies a lane for at least its configured **Extended Occupancy Threshold (min)** (`extendedOccupancyThresholdMinutes`, `1`–`1440` min, default `1` min), OSCAR publishes a `Fault - Extended Occupancy` status observation and counts the fault in reports/statistics until the lane clears. If that extended occupancy completes with a **gamma-only alarm** (`gammaAlarm = true`, `neutronAlarm = false`), OSCAR suppresses it from the live Dashboard queue and logs an automated adjudication (`Code 9998: Extended Occupancy Gamma Alarm`). Any extended occupancy that includes a neutron alarm is never auto-adjudicated. |
 | **WebID & DRF (Detector Response Function)** | **WebID** is the Sandia Full Spectrum isotope identification service used to analyze uploaded spectra (`N42`/SPC). A **DRF** tells WebID the physical detector model and geometry used to capture the spectrum. |
-| **Daily File & Record Codes (`GB`, `GS`, `GA`, `NS`, `GX`)** | The per-lane daily CSV log of raw RPM messages: `GB`/`NB` = gamma/neutron background, `GS` = occupancy start, `GC`/`NC` = gamma/neutron count profile, `GA`/`NA`/`NS` = gamma/neutron alarm, `GX` = occupancy end, `TT`/`TC` = tamper fault/clear. |
+| **Daily File & Record Codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | The per-lane daily CSV log of raw RPM messages: `GB`/`NB` = gamma/neutron background, `GS` = occupancy start, `GC`/`NC` = gamma/neutron count profile, `GA`/`NA`/`NS` = gamma/neutron alarm, `GX` = occupancy end, `TT`/`TC` = tamper fault/clear, and `SG1`–`SG3`/`SN1`–`SN2` = daily gamma/neutron hardware setup parameters (which automatically update the Rapiscan driver's parameters in memory and coalesce changes into `config.json`). |
 | **Event UUID** | Globally unique identifier (`UUID`) assigned to each occupancy event so operators can search, export QR summaries, and trace the exact event across reports and federated nodes. |
 | **Operational View** | A named filter (`?view=<key>` or `/view/<key>`) that scopes a workstation's Dashboard, Events, Status of Health, and Report Generator to a specific group of lanes (for example, `north-gate`). |
 | **Parquet Cold Tier (`PARQUET_PRIMARY`)** | OSCAR 3.11.0's default storage mode where PostgreSQL holds a 30-minute hot staging window and completed 30-minute partitions are exported to ZSTD-compressed Apache Parquet files (`archive/parquet/`) for fast, compact long-term querying. |
@@ -229,7 +230,7 @@ never run an older binary against 3.11.0 storage.
 
 ### Custom disposition codes
 
-In the OSCAR Service Module configuration, add entries to **Custom Disposition Codes** (`customAdjudicationCodes`). Each entry needs a unique integer `code` greater than 11 (excluding `9999`, which is reserved for automated **EML Non-Threat** adjudications) and a nonblank `label`. Codes 0–11 remain built in and cannot be replaced. For example:
+In the OSCAR Service Module configuration, add entries to **Custom Disposition Codes** (`customAdjudicationCodes`). Each entry needs a unique integer `code` greater than 11 (excluding `9998`, which is reserved for automated **Extended Occupancy Gamma Alarm** adjudications, and `9999`, which is reserved for automated **EML Non-Threat** adjudications) and a nonblank `label`. Codes 0–11 remain built in and cannot be replaced. For example:
 
 ```json
 "customAdjudicationCodes": [{"code": 12, "label": "Local review completed"}]
@@ -439,6 +440,7 @@ The available list can change with installed bundles. For ordinary lane setup, s
 | Last Updated | Timestamp of the last SensorML-description update; normally left system-managed/empty unless external SensorML is used. |
 | Auto Start | Starts the lane automatically when configuration loads. Enable for operational lanes after configuration is verified. |
 | Operational View Keys | Optional list of workstation view keys allowed to display this lane. Add each key separately; use 1–63 lowercase ASCII letters (`a`–`z`), numbers, or hyphens, with no leading or trailing hyphen. Leave empty when the lane should have no scoped-view assignment. |
+| Extended Occupancy Threshold (min) | Duration in minutes (`1`–`1440`, default `1`) before an active occupancy publishes a `Fault - Extended Occupancy` status observation and increments the lane's `Ext-Occ` fault count. When an extended occupancy completes with a gamma-only alarm (no neutron alarm), OSCAR suppresses it from the live Dashboard queue and automatically adjudicates it as **Code 9998: Extended Occupancy Gamma Alarm**. |
 | Delete Data on Lane Removal | Defaults enabled. If selected, removing the lane deletes its database records. Clear it when decommissioning must preserve historical data. |
 | Data Source Info | Optional inherited metadata shown by some builds; use only when the site's SensorML/data-source model requires it. |
 
@@ -480,7 +482,7 @@ Additional options:
 | RPM type | Additional fields |
 | --- | --- |
 | Aspect | **Find Device Within Address Range — From/To**. Required inclusive Modbus scan range; defaults are 1 and 32. |
-| Rapiscan | **Enable EML Analysis** only for a VM250/EML lane; **Is Collimated** records collimation status; **Lane Width (m)** defaults to 4.82. |
+| Rapiscan | **Enable EML Analysis** only for a VM250/EML lane; **Is Collimated** records collimation status; **Lane Width (m)** defaults to 4.82. When a Rapiscan RPM publishes its daily setup messages (`SG1`–`SG3` and `SN1`–`SN2`) in the daily-file stream, the driver automatically updates its gamma and neutron setup parameters in memory and coalesces any changes into an asynchronous `config.json` update without impacting stream performance or latency. |
 | RS350 | No additional initial fields. The lane creates the RS-350 driver and an occupancy process when it starts. |
 
 Do not guess a port or Aspect address range. Confirm it with the device administrator. A failed RPM connection should not prevent independent lanes from operating, but this lane will lack normal occupancy data until its device configuration is corrected.
@@ -524,12 +526,15 @@ Open `https://<oscar-host>/`. The dashboard should show lane status, the event t
 
 ### 8.1 Dashboard checks and alarm queue
 
-1. Confirm that every expected lane appears in **Lane Status**.
-2. Confirm that the lane marker is near the expected point on the diagram.
+1. Confirm that every expected lane appears in **Lane Status**. Use **Customize Dashboard** in the Dashboard header when a workstation or Operational View needs to show, hide, or reorder Dashboard cards (**Lane Status**, **Map**, **Event Table**); hidden cards reclaim layout space and preferences persist per workstation/view.
+2. Confirm that the lane marker is near the expected point on the diagram. The map automatically zooms tightly to the bounding extent of the active lane markers.
 3. Use the layer control to compare the site diagram with OSM or Esri when alignment needs verification.
 4. Confirm that new occupancies reach the event table and that start/end time, gamma, neutron, and status values are plausible.
-5. The dashboard alarm table contains alarming occupancies that have not yet been adjudicated. On Rapiscan VM250 lanes with **EML Analysis** enabled and an uploaded EML plugin active, alarms classified by EML as non-threat (`RELEASE`) are suppressed from the dashboard alarm queue and browser notifications, and automatically adjudicated as **EML Non-Threat** (code `9999`) with queryable EML metadata; alarms classified as `INVESTIGATE` (or occurring while no EML plugin is loaded) appear in the dashboard queue as usual. Select a row once to open its preview; select it again to close the preview. The selected status cell is color-coded for Gamma, Neutron, or Gamma & Neutron.
-6. In the preview, review the CPS/NSIGMA chart tabs and each available recorded-camera item. Arrow controls move between media items.
+5. The dashboard alarm table contains alarming occupancies that have not yet been adjudicated. Two categories of automated dispositions are suppressed from the active dashboard alarm queue and browser notifications at publication (`t = 0`):
+   - **Extended Occupancy Gamma Alarm (`Code 9998`)**: When a vehicle occupies a lane for at least its configured `extendedOccupancyThresholdMinutes` (`1`–`1440` min, default `1` min), OSCAR publishes `Fault - Extended Occupancy` on `occupancyStatus`. If that extended occupancy completes with a **gamma-only alarm** (`gammaAlarm = true` and `neutronAlarm = false`), OSCAR suppresses it from the live dashboard queue and automatically adjudicates it as **Extended Occupancy Gamma Alarm** (code `9998`, `username = "AUTO"`). Any extended occupancy that includes a **neutron alarm** (`Gamma-Neutron` or `Neutron`) is **never** auto-adjudicated and remains in the active dashboard queue.
+   - **EML Non-Threat (`Code 9999`)**: On Rapiscan VM250 lanes with **EML Analysis** enabled and an uploaded EML plugin active, alarms classified by EML as non-threat (`RELEASE`) are suppressed from the dashboard alarm queue and browser notifications, and automatically adjudicated as **EML Non-Threat** (code `9999`) with queryable EML metadata; alarms classified as `INVESTIGATE` (or occurring while no EML plugin is loaded) appear in the dashboard queue as usual.
+   Select a row once to open its preview; select it again to close the preview. The selected status cell is color-coded for Gamma, Neutron, or Gamma & Neutron.
+6. In the preview, review the CPS/NSIGMA chart tabs, the interactive 5-frame retained-media JPEG filmstrip (`FIRST`, `QUARTER`, `MIDDLE`, `THREE_QUARTERS`, `LAST`), and each available recorded-camera item. Arrow controls move between media items.
 7. Use the expand action to open the full Event Details page. A double-click on a table row also opens Event Details.
 
 ### 8.2 Quick adjudication on the dashboard
@@ -555,7 +560,7 @@ The **Events** page is the historical list across configured local and federated
 - Use **Find event by UUID** to paste the durable event identifier from Event Details, a PDF, or an alarm transfer. OSCAR performs an exact observation lookup rather than requiring a filter chain, then opens that event directly. The identifier is OSCAR's public encoded observation ID; it is labeled Event UUID for operators but is not required to have RFC-4122 UUID punctuation.
 - **Columns** shows/hides optional columns; **Filters** opens server-side filters; **Density** changes row spacing. Filters, counts, pages, and bulk selection apply to the complete matching server-side result set, not only the currently visible page.
 - Build filter groups with **All conditions (AND)** or **Any condition (OR)**, and nest groups when a workflow needs both. Up to 20 rules and three group levels are supported. Node and lane conditions choose the streams to query; occupancy ID, time, gamma/neutron maxima, alarm status, adjudication state, and adjudication code conditions are sent to the server for each applicable lane. Applying a filter returns to page 1.
-- Use the operators offered for each field. Times support before, after, and between; numeric values support inclusive limits, between, and exact match; status supports None, Gamma, Neutron, or Gamma & Neutron; adjudication supports Yes, No, **EML Non-Threat** (to query alarms auto-adjudicated by EML), and empty/not empty; and **Adjudication Code** supports equals, does not equal, is any of, is empty, and is not empty across built-in codes `1–11`, automated **Code 9999: EML Non-Threat**, and any configured **Custom Disposition Codes**.
+- Use the operators offered for each field. Times support before, after, and between; numeric values support inclusive limits, between, and exact match; status supports None, Gamma, Neutron, or Gamma & Neutron; adjudication supports Yes, No, **EML Non-Threat** (to query alarms auto-adjudicated by EML), and empty/not empty; and **Adjudication Code** supports equals, does not equal, is any of, is empty, and is not empty across built-in codes `1–11`, automated **Code 9998: Extended Occupancy Gamma Alarm**, automated **Code 9999: EML Non-Threat**, and any configured **Custom Disposition Codes**.
 - Check individual unadjudicated alarms, or select **Select all filtered alarms** to freeze the complete eligible result set at the current load time, including other pages. You may then clear individual rows. Bulk adjudication applies one code, secondary-inspection state, optional vehicle ID, and notes to the selection; it processes at most six events concurrently. It does not attach evidence or isotope selections; use Event Details when those are required.
 - Review the count and warning before submitting. Successful events leave the alarm queue or show as adjudicated. Failed events remain visible and selected, and **Retry failed** retries only those failures. If OSCAR cannot enumerate the full filtered result, it selects nothing rather than silently adjudicating a partial set.
 - Results are newest first and paged 15 at a time. The footer advances between pages. Counts cover the occupancy streams currently reachable from every configured node.
@@ -569,9 +574,9 @@ The **Events** page is the historical list across configured local and federated
 The page can include:
 
 - Event UUID plus lane, occupancy, time, alarm status, speed, and other captured fields;
-- gamma, threshold, neutron, and supported RS-350 charts;
-- recorded video for the event window;
-- WebID analysis results and the complete logged-adjudication history;
+- gamma, threshold, neutron, and supported RS-350 charts, including **Show Individual Detectors** (which combines non-summed gamma detectors `G1`–`G4+` onto one multi-line chart and non-summed neutron detectors `N1`–`N4+` onto a second chart, with a persisted **Separate Plots (Accessibility)** toggle that splits each detector into its own chart for color-blind accessibility);
+- the 5-frame retained-media JPEG filmstrip (`FIRST`, `QUARTER`, `MIDDLE`, `THREE_QUARTERS`, `LAST`) and recorded video for the event window;
+- **Daily File Output** messages for the occupancy window, **EML Automated Analysis** metadata (when evaluated by EML), **WebID Analysis Results**, and the complete append-only **Logged Adjudications** history;
 - uploaded evidence and spectroscopic QR evidence;
 - optional WebID analysis and manual isotope selection;
 - vehicle ID, notes, secondary-inspection status, and adjudication code; and
@@ -621,7 +626,7 @@ Deleting an item before submission removes it only from the pending form. After 
 | Test/Maintenance | 9 Authorized Test, Maintenance, or Training Activity |
 | Tamper/Fault | 10 Unauthorized Activity |
 | Other | 11 Other |
-| Automated | 9999 EML Non-Threat (system-generated when EML classifies an alarm as non-threat; includes release/investigate probabilities, model/collimation metadata, and source breakdown in **Event Details**) |
+| Automated | 9998 Extended Occupancy Gamma Alarm (system-generated when an occupancy reaches or exceeds the lane's extended-occupancy threshold and completes with a gamma-only alarm and no neutron alarm); 9999 EML Non-Threat (system-generated when EML classifies an alarm as non-threat; includes release/investigate probabilities, model/collimation metadata, and source breakdown in **Event Details**) |
 
 Use site procedure—not convenience—to choose a code.
 
@@ -655,7 +660,7 @@ Open **Status of Health** with the heart-monitor icon in the Viewer navigation o
 - **Current occupancy** uses the Lane System's canonical `occupancyStatus` stream to show a stable elapsed time across Rapiscan, Aspect, and RS350 RPMs.
 - **Last update** is the browser-local time of the latest connection or fault update for that row.
 
-Extended occupancy defaults to one minute. Enter a value from 1 through 1440 minutes in **Extended occupancy threshold**. The setting is saved in that browser and immediately re-evaluates an occupancy already in progress; it does not alter server observations or reports.
+Each lane configures a server-side **Extended Occupancy Threshold (min)** (`extendedOccupancyThresholdMinutes`, `1` through `1440` minutes, default `1` minute) in SensorHub Admin (**Lane Sensor System > General > Extended Occupancy Threshold (min)**). When a vehicle occupies a lane for at least that threshold, the lane publishes `Fault - Extended Occupancy` on `occupancyStatus`, activates the **Extended occupancy** indicator, and increments the lane's `Ext-Occ` fault count in National Statistics and Lane Reports until the lane clears. If that extended occupancy completes with a **gamma-only alarm** (`gammaAlarm = true` and `neutronAlarm = false`), OSCAR suppresses it from the live Dashboard queue and automatically adjudicates it as **Code 9998: Extended Occupancy Gamma Alarm** (`username = "AUTO"`), whereas any extended occupancy with a neutron alarm remains an active alarm requiring operator adjudication. On `/health`, operators can also enter a browser-local value from 1 through 1440 minutes in **Extended occupancy threshold** to immediately re-evaluate elapsed occupancy display in that browser without altering server observations, adjudications, or reports.
 
 Rapiscan tamper messages report transitions rather than a periodically repeated snapshot. The [DOE/PNNL Rapiscan maintenance guide](https://d5.pnnl.gov/sites/default/files/2023-02/RPM_Maint_Guide_Drawings.pdf) specifies that the RPM sends `TT` once when a monitored door or power condition enters tamper and `TC` once when the condition clears. By OSCAR policy, every newly established Rapiscan connection publishes a **Clear** tamper baseline before processing device messages. A later `TT` immediately changes it to **Fault**, and a later `TC` restores **Clear**. A missing or unreadable tamper datastream remains **Unknown**.
 
@@ -669,7 +674,7 @@ Operational views separate workstation presentation; they are not an authorizati
 
 ### 8.9 View live lane video
 
-Open **Lane Details** for a lane with a configured camera. The panel initially shows **Preparing live video… waiting for a keyframe.** while OSCAR creates a decodable HLS playlist. With a compliant camera, playback normally begins within the camera's keyframe interval—one to two seconds—plus ordinary network and browser latency.
+Open **Lane Details** for a lane with a configured camera. The panel initially shows **Preparing live video… waiting for a keyframe.** while OSCAR creates a decodable HLS playlist (seeded immediately from a bounded keyframe-aligned GOP cache when an upstream stream is already warm). With a compliant camera, playback normally begins within the camera's keyframe interval—one to two seconds—plus ordinary network and browser latency. Beside the live video, you can toggle **Show Individual Detectors** to view all non-summed gamma detectors (`G1`–`G4+`) on one combined chart and all non-summed neutron detectors (`N1`–`N4+`) on a second chart, or enable **Separate Plots (Accessibility)** to split each detector into its own chart for color-blind accessibility.
 
 The camera must provide H.264 with a closed GOP and an IDR/keyframe every one to two seconds. A longer or open GOP can delay startup or prevent the first segment from decoding independently.
 
@@ -702,8 +707,8 @@ The **Report Generator** asks the selected node's OSCAR Service to generate a fr
    - **Operational View**: Scopes the report to all lanes assigned to the chosen Operational View key.
    - **Specific Lanes**: Lets you pick one or more individual lanes (**Select All** toggles the full lane list).
 3. Select **Report Type**:
-   - **RDS Site Report (`RDS_SITE`)**: Site-wide executive KPI summary, occupancy and alarm rates, EML suppression breakdown (`EML Suppressed (9999)` vs. `Operator Review Required`), fault breakdown, storage capacity, and per-lane summary table (with no duplicate data tables).
-   - **Lane Report (`LANE`)**: Per-lane operational KPIs, alarm and EML rates, fault breakdown, and daily time-series activity for the selected scope.
+   - **RDS Site Report (`RDS_SITE`)**: Site-wide executive KPI summary, occupancy and alarm rates, automated disposition breakdown (`EML Suppressed (9999)`, `Extended Occupancy Gamma Alarm (9998)`, and `Operator Review Required`), fault breakdown, storage capacity, and per-lane summary table (with no duplicate data tables).
+   - **Lane Report (`LANE`)**: Per-lane operational KPIs, alarm and automated disposition (`9998`/`9999`) rates, fault breakdown, and daily time-series activity for the selected scope.
    - **Event Report (`EVENT`)**: Choose **Alarms and Occupancies**, **Alarms**, or **State of Health** (`Gamma High`, `Gamma Low`, `Neutron High`, `Tamper`) to generate daily time-series charts and tables.
    - **Adjudication Report (`ADJUDICATION`)**: Starts with the summed **All Selected Lanes (`ALL_LANES`)** **Disposition** and **Isotope Results** summary tables across all lanes in scope, followed by individual **Disposition** and **Isotope Results** sections for each selected lane.
    - **Adjudication Details Extract (`ADJUDICATION_DETAILS`)**: Full line-by-line audit extract of individual adjudication submissions (`Submission Time`, `Lane`, `Username`, `Occupancy Count`, `Adjudication Code`, `Feedback`, `Secondary InspectionStatus`, `Isotopes`, `Vehicle ID`, `File Paths`, and `Occupancy ID`).
@@ -889,7 +894,7 @@ records-destruction requirements.
 | Event Details has no media | Confirm the event belongs to an available lane, required datastreams exist for its time range, retained video has not been deleted/decimated beyond need, and the user has permission. |
 | Status of Health lane/device is missing, or its connection is Waiting or Offline | Confirm the lane is in the current view, the lane and device child are running, and the RPM or FFmpeg camera publishes connection status. Waiting applies to connection telemetry and means no usable connection value has arrived; test reachability and inspect child logs before treating it as healthy. |
 | A fault or tamper status is Unknown | Confirm its datastream exists and has a readable latest observation. A current Rapiscan driver publishes a Clear tamper baseline whenever it establishes the RPM connection; confirm the child driver reconnected and that the baseline observation is readable. A later hardware `TT` must still change the state to Fault. |
-| Extended occupancy does not appear | Confirm the Lane System publishes `occupancyStatus`, verify the RPM's daily-file/status input reports entry and exit, set a 1–1440 minute threshold in this browser, and wait until the stable elapsed time exceeds it. |
+| Extended occupancy does not appear | Confirm the Lane System publishes `occupancyStatus`, verify the RPM's daily-file/status input reports entry and exit, check the lane's **Extended Occupancy Threshold (min)** (`extendedOccupancyThresholdMinutes`, 1–1440 min) in SensorHub Admin and the 1–1440 minute threshold in this browser, and wait until the stable elapsed time exceeds it. |
 | Bulk adjudication partly fails | Keep the failed rows selected, review lane/node connectivity and the adjudication control stream, then use **Retry failed**. Successful rows are not resubmitted. |
 | Adjudication fails | Confirm a code was selected, the lane/node is reachable, the adjudication control stream exists, and any evidence upload completed. Do not repeatedly submit until the original result is known. |
 | WebID controls have no DRF/results | Verify internet access to the configured Sandia Full Spectrum service, select a DRF and foreground/background type, and inspect the returned warning/error columns. Manual adjudication remains the operator's responsibility. |

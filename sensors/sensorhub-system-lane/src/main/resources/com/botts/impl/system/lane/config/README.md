@@ -14,6 +14,7 @@ Click 'Add New Module' and select 'Lane System' from the list of available modul
   - UniqueID: The platform's serial number, or a unique identifier, this will be used for all submodules and must be unique.
   - Auto Start: Check the box to start this module when OSH node is launched
   - Operational View Keys: Add one or more workstation view keys (for example, `north-gate`). A lane can belong to multiple views. Leave empty to show the lane only in the unscoped view.
+  - Extended Occupancy Threshold (min): Duration in minutes (`1`–`1440`, default `1`) before an active occupancy logs `Fault - Extended Occupancy` on `occupancyStatus` and enables automatic `Code 9998: Extended Occupancy Gamma Alarm` adjudication for gamma-only extended occupancy alarms (any extended occupancy with a neutron alarm is never auto-adjudicated).
   - Delete Data on Lane Removal: Check the box to remove systems data from database if lane is deleted from node.
 
 **- Fixed Location:**
