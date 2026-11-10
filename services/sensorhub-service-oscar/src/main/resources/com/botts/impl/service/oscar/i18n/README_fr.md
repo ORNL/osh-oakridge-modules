@@ -58,8 +58,9 @@ Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/mai
 | **NSIGMA (`N-Sigma`)** | Nombre d'écarts-types (`σ`) dont le taux de comptage gamma actuel dépasse la moyenne récente du bruit de fond ; permet un déclenchement cohérent des alarmes lorsque le fond varie. |
 | **NORM (Matière radioactive d'origine naturelle)** | Cargaison bénigne contenant des radio-isotopes naturels (tels que le potassium-40 dans les engrais, la litière, la céramique ou les bananes, ou les séries thorium/uranium dans le granit et le carrelage). |
 | **EML (Rapports de métriques d'énergie) et Code `9999`** | Algorithme pour portiques Rapiscan comparant les fenêtres gamma de basse, moyenne et haute énergie pour distinguer le fret **NORM** bénin des sources menaçantes. Lorsqu'une alarme est classée non menaçante, OSCAR enregistre une décision automatique (`Code 9999: EML Non-Threat`). |
+| **Occupation prolongée (`Fault - Extended Occupancy`) et Code `9998`** | Lorsqu'un véhicule occupe une voie pendant au moins son **Seuil d'occupation prolongée (min)** (`extendedOccupancyThresholdMinutes`, `1`–`1440` min, défaut `1` min), OSCAR publie `Fault - Extended Occupancy` et comptabilise le défaut dans les rapports et statistiques jusqu'à la libération de la voie. Si cette occupation prolongée se termine par une **alarme gamma seule** (`gammaAlarm = true`, `neutronAlarm = false`), OSCAR la masque de la file active du tableau de bord et enregistre une décision automatique (`Code 9998: Extended Occupancy Gamma Alarm`). Toute occupation prolongée comportant une alarme neutron n'est jamais adjugée automatiquement. |
 | **WebID et DRF (Fonction de réponse du détecteur)** | **WebID** est le service Sandia Full Spectrum d'identification isotopique des spectres téléversés (`N42`/SPC). Une **DRF** indique à WebID le modèle physique et la géométrie du détecteur utilisé. |
-| **Fichier quotidien et codes (`GB`, `GS`, `GA`, `NS`, `GX`)** | Journal CSV quotidien par voie contenant les messages RPM bruts : `GB`/`NB` = bruit de fond gamma/neutrons, `GS` = début d'occupation, `GC`/`NC` = profil de comptage, `GA`/`NA`/`NS` = alarme gamma/neutrons, `GX` = fin d'occupation, `TT`/`TC` = défaut/rétablissement de sabotage. |
+| **Fichier quotidien et codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | Journal CSV quotidien par voie contenant les messages RPM bruts : `GB`/`NB` = bruit de fond gamma/neutrons, `GS` = début d'occupation, `GC`/`NC` = profil de comptage, `GA`/`NA`/`NS` = alarme gamma/neutrons, `GX` = fin d'occupation, `TT`/`TC` = défaut/rétablissement de sabotage, et `SG1`–`SG3`/`SN1`–`SN2` = paramètres quotidiens de configuration gamma/neutrons (qui mettent automatiquement à jour les paramètres du pilote Rapiscan en mémoire et regroupent les modifications dans `config.json`). |
 | **UUID d'événement (`Event UUID`)** | Identifiant unique global attribué à chaque événement d'occupation pour la recherche, l'exportation QR et le suivi dans les rapports et nœuds fédérés. |
 | **Vue opérationnelle (`Operational View`)** | Filtre nommé (`?view=<clé>` ou `/view/<clé>`) limitant le Tableau de bord, les Événements, l'État de santé et le Générateur de rapports d'un poste à un groupe de voies précis. |
 | **Niveau froid Parquet (`PARQUET_PRIMARY`)** | Mode de stockage par défaut d'OSCAR 3.11.0 dans lequel PostgreSQL conserve une fenêtre de transit de 30 minutes et les partitions terminées sont exportées en fichiers Apache Parquet compressés ZSTD (`archive/parquet/`). |
@@ -229,7 +230,7 @@ la même sauvegarde coordonnée antérieure à 3.11.0 ; n'exécutez jamais un an
 
 ### Codes de disposition personnalisés
 
-Dans la configuration du module de service OSCAR, ajoutez des entrées à **Custom Disposition Codes** (`customAdjudicationCodes`). Chaque entrée nécessite un entier `code` unique supérieur à 11 (à l'exception de `9999`, réservé aux adjudications automatiques **Sans menace EML**) et un libellé `label` non vide. Les codes 0–11 sont intégrés et ne peuvent pas être remplacés. Exemple :
+Dans la configuration du module de service OSCAR, ajoutez des entrées à **Custom Disposition Codes** (`customAdjudicationCodes`). Chaque entrée nécessite un entier `code` unique supérieur à 11 (à l'exception de `9998`, réservé aux adjudications automatiques **Alarme gamma d'occupation prolongée**, et de `9999`, réservé aux adjudications automatiques **Sans menace EML**) et un libellé `label` non vide. Les codes 0–11 sont intégrés et ne peuvent pas être remplacés. Exemple :
 
 ```json
 "customAdjudicationCodes": [{"code": 12, "label": "Examen local terminé"}]
@@ -439,6 +440,7 @@ La liste varie selon les paquets installés. Pour une voie ordinaire, choisissez
 | Dernière mise à jour | Horodatage SensorML, normalement vide/géré par le système. |
 | Démarrage automatique | Démarre la voie au chargement. Activez après vérification. |
 | Clés de vue opérationnelle | Liste facultative des clés de poste autorisées à afficher cette voie. Ajoutez chaque clé séparément ; utilisez 1 à 63 lettres ASCII minuscules (`a`–`z`), chiffres ou tirets, sans tiret initial ni final. Laissez vide si la voie ne doit appartenir à aucune vue limitée. |
+| Seuil d'occupation prolongée (min) | Durée en minutes (`1`–`1440`, défaut `1`) avant qu'une occupation active ne publie `Fault - Extended Occupancy` et n'incrémente le compteur de défauts `Ext-Occ`. Lorsqu'une occupation prolongée se termine par une alarme gamma seule (sans alarme neutron), OSCAR la masque du tableau de bord actif et l'adjuge automatiquement comme **Code 9998 : Alarme gamma d'occupation prolongée**. |
 | Supprimer les données avec la voie | Activé par défaut. La suppression de la voie efface ses données. Désactivez-le si l'historique doit être conservé. |
 | Informations de source de données | Métadonnées héritées facultatives, seulement si le modèle SensorML du site les exige. |
 
@@ -475,7 +477,7 @@ Tous exigent **Hôte distant** et **Port distant**. Options supplémentaires :
 | Type | Champs supplémentaires |
 | --- | --- |
 | Aspect | **Rechercher l'appareil dans la plage — De/À**. Plage Modbus inclusive obligatoire, 1 à 32 par défaut. |
-| Rapiscan | **Activer l'analyse EML** uniquement pour VM250/EML ; **Est collimaté** ; **Largeur de voie (m)**, 4.82 par défaut. |
+| Rapiscan | **Activer l'analyse EML** uniquement pour VM250/EML ; **Est collimaté** ; **Largeur de voie (m)**, 4.82 par défaut. Lorsque le RPM publie ses messages quotidiens de configuration (`SG1`–`SG3` et `SN1`–`SN2`) dans le flux de fichier quotidien, le pilote met automatiquement à jour ses paramètres gamma et neutron en mémoire et regroupe les modifications dans une mise à jour asynchrone de `config.json` sans affecter la latence ni les performances. |
 | RS350 | Aucun champ initial supplémentaire. La voie crée le pilote et le processus d'occupation au démarrage. |
 
 Ne devinez pas le port ni la plage Aspect. La panne d'un RPM ne doit pas arrêter les voies indépendantes, mais cette voie n'aura pas d'occupations normales avant correction.
@@ -513,12 +515,15 @@ Ouvrez `https://<hote-oscar>/`. Le tableau de bord doit afficher l'état des voi
 
 ### 8.1 Tableau de bord et file d'alarmes
 
-1. Confirmez toutes les voies dans **État des voies**.
-2. Vérifiez la position de chaque marqueur.
+1. Confirmez toutes les voies dans **État des voies**. Utilisez **Personnaliser le tableau de bord** dans l'en-tête lorsqu'un poste ou une Vue opérationnelle doit afficher, masquer ou réorganiser les cartes (**État des voies**, **Carte**, **Table des événements**).
+2. Vérifiez la position de chaque marqueur. La carte ajuste automatiquement son zoom aux limites des marqueurs de voie actifs.
 3. Utilisez les couches pour comparer le plan à OSM ou Esri.
 4. Vérifiez que les nouvelles occupations arrivent et que heures, gamma, neutrons et état sont plausibles.
-5. La table d'alarmes contient les occupations en alarme non encore adjugées. Sur les voies Rapiscan VM250 avec **Analyse EML** activée et un module EML téléversé, les alarmes classées sans menace (`RELEASE`) par EML sont masquées du tableau de bord et des notifications navigateur et adjugées automatiquement comme **Sans menace EML** (code `9999`) avec métadonnées EML interrogeables ; les alarmes `INVESTIGATE` apparaissent normalement. Sélectionnez une ligne pour ouvrir/fermer l'aperçu; l'état colore Gamma, Neutron ou Gamma et Neutron.
-6. Vérifiez les onglets CPS/NSIGMA et chaque vidéo; les flèches changent de média.
+5. La table d'alarmes contient les occupations en alarme non encore adjugées. Deux catégories d'adjudication automatique sont masquées de la file active du tableau de bord et des notifications navigateur :
+   - **Alarme gamma d'occupation prolongée (`Code 9998`)** : Lorsqu'un véhicule occupe une voie pendant au moins son `extendedOccupancyThresholdMinutes` (`1`–`1440` min, défaut `1` min), OSCAR publie `Fault - Extended Occupancy` sur `occupancyStatus`. Si cette occupation prolongée se termine par une **alarme gamma seule** (`gammaAlarm = true`, `neutronAlarm = false`), OSCAR la masque de la file active du tableau de bord et l'adjuge automatiquement comme **Alarme gamma d'occupation prolongée** (code `9998`, `username = "AUTO"`). Toute occupation prolongée comportant une alarme neutron n'est jamais adjugée automatiquement et reste dans la file active.
+   - **Sans menace EML (`Code 9999`)** : Sur les voies Rapiscan VM250 avec **Analyse EML** activée et un module EML téléversé, les alarmes classées sans menace (`RELEASE`) par EML sont masquées du tableau de bord et des notifications navigateur et adjugées automatiquement comme **Sans menace EML** (code `9999`) avec métadonnées EML interrogeables ; les alarmes `INVESTIGATE` apparaissent normalement.
+   Sélectionnez une ligne pour ouvrir/fermer l'aperçu; l'état colore Gamma, Neutron ou Gamma et Neutron.
+6. Vérifiez les onglets CPS/NSIGMA, la bande interactive de 5 images JPEG retenues (`FIRST`, `QUARTER`, `MIDDLE`, `THREE_QUARTERS`, `LAST`) et chaque vidéo; les flèches changent de média.
 7. Agrandissez ou double-cliquez la ligne pour ouvrir **Détails de l'événement**.
 
 ### 8.2 Adjudication rapide depuis le tableau de bord
@@ -544,7 +549,7 @@ L'envoi ajoute un enregistrement sans modifier l'observation d'origine. Pour pre
 - Utilisez **Rechercher un événement par UUID** pour coller l'identifiant durable affiché dans les Détails de l'événement, un PDF ou un transfert d'alarme. OSCAR recherche exactement cette observation et ouvre l'événement sans reconstruire une suite de filtres. Il s'agit de l'ID public codé de l'observation OSCAR ; il est présenté comme UUID de l'événement aux opérateurs mais n'est pas tenu d'utiliser la ponctuation RFC-4122.
 - **Colonnes** masque/affiche les champs, **Filtres** ouvre les filtres serveur et **Densité** règle l'espacement.
 - Créez des groupes avec **Toutes les conditions (ET)** ou **Une condition au choix (OU)** et imbriquez-les si les deux logiques sont nécessaires. Jusqu'à 20 règles et trois niveaux de groupes sont admis. Les conditions de nœud et de voie choisissent les flux ; celles d'ID d'occupation, d'heure, de maxima gamma/neutron, d'état, d'adjudication et de code d'adjudication sont envoyées au serveur pour chaque voie concernée. L'application revient à la première page.
-- Utilisez les opérateurs proposés pour chaque champ. Les heures acceptent avant, après et entre ; les nombres, des limites inclusives, entre et l'égalité ; l'état, Aucun, Gamma, Neutron ou Gamma et Neutron ; l'adjudication, Oui, Non, **Sans menace EML** (pour interroger les alarmes adjugées automatiquement par EML) et vide/non vide ; et **Code d'adjudication** prend en charge est égal à, est différent de, fait partie de, est vide et n'est pas vide pour les codes intégrés `1–11`, **Code 9999 : EML sans menace** et les **Codes de disposition personnalisés** configurés.
+- Utilisez les opérateurs proposés pour chaque champ. Les heures acceptent avant, après et entre ; les nombres, des limites inclusives, entre et l'égalité ; l'état, Aucun, Gamma, Neutron ou Gamma et Neutron ; l'adjudication, Oui, Non, **Sans menace EML** (pour interroger les alarmes adjugées automatiquement par EML) et vide/non vide ; et **Code d'adjudication** prend en charge est égal à, est différent de, fait partie de, est vide et n'est pas vide pour les codes intégrés `1–11`, **Code 9998 : Alarme gamma d'occupation prolongée**, **Code 9999 : EML sans menace** et les **Codes de disposition personnalisés** configurés.
 - Cochez séparément des alarmes non adjugées ou choisissez **Sélectionner toutes les alarmes filtrées** pour figer l'ensemble admissible au moment du chargement, y compris les autres pages. Vous pouvez ensuite décocher des lignes. L'adjudication groupée applique à la sélection un code, un état d'inspection secondaire, un ID véhicule facultatif et des notes, avec au plus six événements traités simultanément. Elle ne joint ni preuves ni choix d'isotopes ; utilisez les Détails de l'événement lorsque ceux-ci sont nécessaires.
 - Vérifiez le nombre et l'avertissement avant l'envoi. Les succès quittent la file d'alarmes ou apparaissent adjugés. Les échecs restent visibles et sélectionnés ; **Réessayer les échecs** ne relance qu'eux. Si OSCAR ne peut pas énumérer tout le résultat filtré, il ne sélectionne rien plutôt que d'adjuger silencieusement un sous-ensemble.
 - Résultats du plus récent, par pages de 15. Sélection = aperçu; double-clic ou **Détails** = page complète.
@@ -557,9 +562,9 @@ L'envoi ajoute un enregistrement sans modifier l'observation d'origine. Pour pre
 La page peut contenir :
 
 - UUID de l'événement, voie, occupation, heures, alarme, vitesse et autres champs ;
-- graphiques gamma, seuil, neutrons et RS-350 pris en charge ;
-- vidéo enregistrée pendant l'événement ;
-- données diverses et adjudications précédentes ;
+- graphiques gamma, seuil, neutrons et RS-350 pris en charge, y compris **Afficher les détecteurs individuels** (combinant les détecteurs gamma `G1`–`G4+` sur un graphique et les détecteurs neutrons `N1`–`N4+` sur un second, avec un commutateur **Graphiques séparés (Accessibilité)** pour le daltonisme) ;
+- la bande de 5 images JPEG retenues (`FIRST`, `QUARTER`, `MIDDLE`, `THREE_QUARTERS`, `LAST`) et la vidéo enregistrée pendant l'événement ;
+- les messages de **Sortie de fichier quotidien**, les métadonnées d'**Analyse automatisée EML**, les résultats WebID et l'historique complet des **Adjudications consignées** (en ajout seul) ;
 - preuves téléversées ou lues par QR ;
 - analyse Web ID et choix d'isotopes facultatifs ;
 - ID véhicule, notes, inspection secondaire et code ; et
@@ -581,7 +586,7 @@ Les données disponibles dépendent du détecteur, de la caméra, de la conserva
 | Test/Maintenance | 9 Activité autorisée de test, maintenance ou formation |
 | Sabotage/Défaut | 10 Activité non autorisée |
 | Autre | 11 Autre |
-| Automatisé | 9999 Sans menace EML (généré par le système lorsqu'EML classe une alarme sans menace ; inclut probabilités, modèle/collimation et détail des sources dans **Détails de l'événement**) |
+| Automatisé | 9998 Alarme gamma d'occupation prolongée (généré par le système lorsqu'une occupation atteint ou dépasse le seuil d'occupation prolongée de la voie et se termine par une alarme gamma seule sans alarme neutron) ; 9999 Sans menace EML (généré par le système lorsqu'EML classe une alarme sans menace ; inclut probabilités, modèle/collimation et détail des sources dans **Détails de l'événement**) |
 
 Choisissez selon la procédure du site, jamais par commodité.
 
@@ -640,7 +645,7 @@ Ouvrez **État de santé** avec l'icône de moniteur cardiaque dans la navigatio
 - **Occupation actuelle** utilise le flux canonique `occupancyStatus` du Système de voie pour afficher une durée stable avec les RPM Rapiscan, Aspect et RS350.
 - **Dernière mise à jour** utilise l'heure locale du navigateur pour la dernière mise à jour de connexion ou de défaut.
 
-Le seuil d'occupation prolongée est d'une minute par défaut. Entrez de 1 à 1440 minutes dans **Seuil d'occupation prolongée**. La valeur est enregistrée dans ce navigateur et réévalue immédiatement une occupation en cours; elle ne modifie ni les observations ni les rapports du serveur.
+Chaque voie configure un **Seuil d'occupation prolongée (min)** côté serveur (`extendedOccupancyThresholdMinutes`, de `1` à `1440` minutes, défaut `1` minute) dans SensorHub Admin (**Lane Sensor System > General > Extended Occupancy Threshold (min)**). Lorsqu'un véhicule occupe une voie pendant au moins ce seuil, la voie publie `Fault - Extended Occupancy` sur `occupancyStatus`, active l'indicateur **Occupation prolongée** et incrémente le compteur de défauts `Ext-Occ` dans les Statistiques nationales et les Rapports de voie jusqu'à la libération de la voie. Si cette occupation prolongée se termine par une **alarme gamma seule** (`gammaAlarm = true`, `neutronAlarm = false`), OSCAR la masque de la file active du tableau de bord et l'adjuge automatiquement comme **Code 9998 : Alarme gamma d'occupation prolongée** (`username = "AUTO"`), tandis que toute occupation prolongée comportant une alarme neutron reste active pour adjudication par l'opérateur. Sur `/health`, vous pouvez également saisir de 1 à 1440 minutes dans **Seuil d'occupation prolongée** pour réévaluer l'affichage dans ce navigateur sans modifier les observations, adjudications ni rapports du serveur.
 
 Les messages de sabotage Rapiscan signalent des transitions, et non un instantané répété périodiquement. Le [guide de maintenance Rapiscan du DOE/PNNL](https://d5.pnnl.gov/sites/default/files/2023-02/RPM_Maint_Guide_Drawings.pdf) précise que le RPM envoie `TT` une fois à l'entrée en sabotage et `TC` une fois au retour à la normale. Selon la politique OSCAR, chaque nouvelle connexion Rapiscan publie une valeur initiale **Normal** avant de traiter les messages de l'appareil. Un `TT` ultérieur la remplace immédiatement par **Défaut** et un `TC` ultérieur rétablit **Normal**. Un flux de sabotage absent ou illisible reste **Inconnu**.
 
@@ -654,7 +659,7 @@ Les vues opérationnelles séparent la présentation des postes; elles ne consti
 
 ### 8.9 Afficher la vidéo en direct d'une voie
 
-Ouvrez les **Détails de la voie** pour une voie dotée d'une caméra configurée. Le panneau affiche d'abord **Préparation de la vidéo en direct… en attente d’une image clé.** pendant qu'OSCAR crée une liste de lecture HLS décodable. Avec une caméra conforme, la lecture commence normalement dans l'intervalle entre images clés de la caméra — une à deux secondes — auquel s'ajoute la latence normale du réseau et du navigateur.
+Ouvrez les **Détails de la voie** pour une voie dotée d'une caméra configurée. Le panneau affiche d'abord **Préparation de la vidéo en direct… en attente d’une image clé.** pendant qu'OSCAR crée une liste de lecture HLS décodable (amorcée immédiatement depuis un cache GOP aligné sur image clé lorsque le flux amont est déjà actif). Avec une caméra conforme, la lecture commence normalement dans l'intervalle entre images clés de la caméra — une à deux secondes — auquel s'ajoute la latence normale du réseau et du navigateur. À côté de la vidéo en direct, vous pouvez activer **Afficher les détecteurs individuels** pour combiner les détecteurs gamma (`G1`–`G4+`) sur un graphique et les détecteurs neutrons (`N1`–`N4+`) sur un second, ou activer **Graphiques séparés (Accessibilité)** pour séparer chaque détecteur.
 
 La caméra doit fournir une vidéo H.264 avec un GOP fermé et une image IDR/clé toutes les une à deux secondes. Un GOP ouvert ou plus long peut retarder le démarrage ou empêcher le décodage indépendant du premier segment.
 
@@ -683,8 +688,8 @@ Le **Générateur de rapports** demande au Service OSCAR du nœud sélectionné 
 
 1. Choisissez **Nœud** et **Portée du rapport** (**Nœud entier**, **Vue opérationnelle** ou **Voies spécifiques**).
 2. Choisissez le **Type de rapport** :
-   - **RDS Site (`RDS_SITE`)** : synthèse exécutive du site, taux d'occupation et d'alarmes, répartition de suppression EML (`EML Suppressed (9999)` vs `Operator Review Required`), répartition des défauts, capacité de stockage et tableau récapitulatif par voie (sans tableaux redondants).
-   - **Lane (`LANE`)** : indicateurs opérationnels par voie, taux d'alarmes et EML, répartition des défauts et série temporelle quotidienne pour la portée choisie.
+   - **RDS Site (`RDS_SITE`)** : synthèse exécutive du site, taux d'occupation et d'alarmes, répartition des dispositions automatiques (`EML Suppressed (9999)`, `Extended Occupancy Gamma Alarm (9998)` et `Operator Review Required`), répartition des défauts, capacité de stockage et tableau récapitulatif par voie (sans tableaux redondants).
+   - **Lane (`LANE`)** : indicateurs opérationnels par voie, taux d'alarmes et de dispositions automatiques (`9998`/`9999`), répartition des défauts et série temporelle quotidienne pour la portée choisie.
    - **Event (`EVENT`)** : choisissez **Alarmes et occupations**, **Alarmes** ou **État de santé** (`Gamma High`, `Gamma Low`, `Neutron High`, `Tamper`) pour produire les graphiques et tableaux quotidiens.
    - **Adjudication (`ADJUDICATION`)** : commence par les tableaux cumulés **Toutes les voies sélectionnées (`ALL_LANES`)** (**Disposition** et **Résultats isotopiques**) pour l'ensemble des voies sélectionnées, suivis des sections **Disposition** et **Résultats isotopiques** propres à chaque voie.
    - **Adjudication Details Extract (`ADJUDICATION_DETAILS`)** : extraction d'audit ligne par ligne des décisions soumises (`Heure de soumission`, `Voie`, `Utilisateur`, `Compteur d'occupation`, `Code d'adjudication`, `Commentaires`, `Inspection secondaire`, `Isotopes`, `ID de véhicule`, `Chemins de fichiers` et `ID d'occupation`).
@@ -862,7 +867,7 @@ reprise et destruction des documents.
 | Événement sans média | Vérifiez voie disponible, flux sur l'intervalle, conservation et droits. |
 | Voie/appareil absent dans État de santé, ou connexion En attente ou Hors ligne | Vérifiez que la voie appartient à la vue actuelle, que la voie et l'appareil enfant sont démarrés, et que le RPM ou la caméra FFmpeg publie son état de connexion. En attente s'applique à la télémétrie de connexion et signifie qu'aucune valeur de connexion exploitable n'est encore arrivée ; testez la connexion et examinez les journaux de l'enfant. |
 | Un défaut ou l'état de sabotage est Inconnu | Vérifiez que son flux de données existe et que sa dernière observation est lisible. Un pilote Rapiscan actuel publie une valeur initiale Normal à chaque connexion ; confirmez que le pilote enfant s'est reconnecté et que l'observation est lisible. Un `TT` ultérieur du matériel doit toujours faire passer l'état à Défaut. |
-| L'occupation prolongée n'apparaît pas | Vérifiez que le Système de voie publie `occupancyStatus`, que l'entrée fichier quotidien/état du RPM signale l'entrée et la sortie, réglez un seuil de 1 à 1440 minutes dans ce navigateur et attendez que la durée stable le dépasse. |
+| L'occupation prolongée n'apparaît pas | Vérifiez que le Système de voie publie `occupancyStatus`, que l'entrée fichier quotidien/état du RPM signale l'entrée et la sortie, vérifiez le **Seuil d'occupation prolongée (min)** (`extendedOccupancyThresholdMinutes`, 1–1440 min) de la voie dans SensorHub Admin ainsi que le seuil de 1 à 1440 minutes dans ce navigateur, et attendez que la durée stable le dépasse. |
 | L'adjudication groupée échoue partiellement | Gardez les lignes en échec sélectionnées, vérifiez la connexion voie/nœud et le flux de commande d'adjudication, puis choisissez **Réessayer les échecs**. Les succès ne sont pas renvoyés. |
 | Échec d'adjudication | Choisissez un code; vérifiez nœud/voie, flux de commande et téléversement. Ne renvoyez pas avant de connaître le premier résultat. |
 | WebID sans DRF/résultat | Vérifiez Full Spectrum, DRF, premier/arrière-plan et colonnes avertissement/erreur. La décision reste humaine. |
