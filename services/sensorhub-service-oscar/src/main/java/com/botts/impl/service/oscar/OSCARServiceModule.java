@@ -314,7 +314,29 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         }
 
         awaitSystemRegistration(registry.register(system));
+        purgePriorAdjudicationCodesObservations();
         adjudicationCodesOutput.publish(config.customAdjudicationCodes);
+    }
+
+    private void purgePriorAdjudicationCodesObservations() {
+        try {
+            IObsSystemDatabase db = resolveSliceDatabase();
+            if (db != null && db.getObservationStore() != null && db.getDataStreamStore() != null) {
+                var streamIds = db.getDataStreamStore()
+                        .selectKeys(new DataStreamFilter.Builder()
+                                .withOutputNames(AdjudicationCodesOutput.NAME)
+                                .build())
+                        .map(org.sensorhub.api.resource.ResourceKey::getInternalID)
+                        .collect(java.util.stream.Collectors.toSet());
+                if (!streamIds.isEmpty()) {
+                    db.getObservationStore().removeEntries(new ObsFilter.Builder()
+                            .withDataStreams(streamIds)
+                            .build());
+                }
+            }
+        } catch (Exception e) {
+            getLogger().debug("Could not prune prior adjudicationCodes observations before publishing current codes", e);
+        }
     }
 
     protected void unregisterSystem() throws SensorHubException {

@@ -45,6 +45,7 @@ public class FFMPEGSensor extends FFMPEGSensorBase<FFMPEGConfig> {
     private ScheduledFuture<?> connectionStatusHeartbeatTask;
     private boolean reconnectEnabled;
     private int currentReconnect;
+    private int heartbeatTickCount;
 
     @Override
     protected void doInit() throws SensorHubException {
@@ -120,6 +121,13 @@ public class FFMPEGSensor extends FFMPEGSensorBase<FFMPEGConfig> {
     private void runConnectionStatusHeartbeat() {
         synchronized (reconnectLock) {
             if (!reconnectEnabled)
+                return;
+            // State transitions (connect/disconnect) publish immediately via
+            // publishConnectionStatus(boolean). Coalesce unchanged background
+            // heartbeats to once every 30 ticks (15 minutes) so every 30-minute
+            // stage partition receives a fresh status sample without writing
+            // 400 redundant rows per minute across 200 cameras.
+            if ((++heartbeatTickCount % 30) != 1)
                 return;
 
             try {
