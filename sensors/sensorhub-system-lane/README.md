@@ -29,7 +29,7 @@ Click 'Add New Module' and select 'Lane System' from the list of available modul
         - Remote Host:
         - Remote Port:
       - **Rapiscan RPM (Specific)**
-        - EML Configuration: Enable and configure Energy Metric Ratios (`EML Enabled`, `One Panel Mode`, `Custom Parameters`, `Use Auto Accumulate Time`) when an EML `.jar` plugin is loaded in OSCAR Service.
+        - EML Configuration: Enable and configure Enhanced Machine Learning (`EML Enabled`, `One Panel Mode`, `Custom Parameters`, `Use Auto Accumulate Time`) when an EML `.jar` plugin is loaded in OSCAR Service.
       - **Aspect RPM (Specific)**
         - Address Range: Modbus register range (`From` and `To`).
 

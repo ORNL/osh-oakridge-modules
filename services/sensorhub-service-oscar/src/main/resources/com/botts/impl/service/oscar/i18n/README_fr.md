@@ -57,7 +57,7 @@ Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/mai
 | **CPS (Coups par seconde)** | Taux de comptage brut du détecteur de rayonnement mesuré à chaque intervalle d'échantillonnage pendant le bruit de fond ou l'occupation. |
 | **NSIGMA (`N-Sigma`)** | Nombre d'écarts-types (`σ`) dont le taux de comptage gamma actuel dépasse la moyenne récente du bruit de fond ; permet un déclenchement cohérent des alarmes lorsque le fond varie. |
 | **NORM (Matière radioactive d'origine naturelle)** | Cargaison bénigne contenant des radio-isotopes naturels (tels que le potassium-40 dans les engrais, la litière, la céramique ou les bananes, ou les séries thorium/uranium dans le granit et le carrelage). |
-| **EML (Rapports de métriques d'énergie) et Code `9999`** | Algorithme pour portiques Rapiscan comparant les fenêtres gamma de basse, moyenne et haute énergie pour distinguer le fret **NORM** bénin des sources menaçantes. Lorsqu'une alarme est classée non menaçante, OSCAR enregistre une décision automatique (`Code 9999: EML Non-Threat`). |
+| **EML (Apprentissage automatique amélioré / Enhanced Machine Learning) et Code `9999`** | Algorithme pour portiques Rapiscan comparant les fenêtres gamma de basse, moyenne et haute énergie pour distinguer le fret **NORM** bénin des sources menaçantes. Lorsqu'une alarme est classée non menaçante, OSCAR enregistre une décision automatique (`Code 9999: EML Non-Threat`). |
 | **Occupation prolongée (`Fault - Extended Occupancy`) et Code `9998`** | Lorsqu'un véhicule occupe une voie pendant au moins son **Seuil d'occupation prolongée (min)** (`extendedOccupancyThresholdMinutes`, `1`–`1440` min, défaut `1` min), OSCAR publie `Fault - Extended Occupancy` et comptabilise le défaut dans les rapports et statistiques jusqu'à la libération de la voie. Si cette occupation prolongée se termine par une **alarme gamma seule** (`gammaAlarm = true`, `neutronAlarm = false`), OSCAR la masque de la file active du tableau de bord et enregistre une décision automatique (`Code 9998: Extended Occupancy Gamma Alarm`). Toute occupation prolongée comportant une alarme neutron n'est jamais adjugée automatiquement. |
 | **WebID et DRF (Fonction de réponse du détecteur)** | **WebID** est le service Sandia Full Spectrum d'identification isotopique des spectres téléversés (`N42`/SPC). Une **DRF** indique à WebID le modèle physique et la géométrie du détecteur utilisé. |
 | **Fichier quotidien et codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | Journal CSV quotidien par voie contenant les messages RPM bruts : `GB`/`NB` = bruit de fond gamma/neutrons, `GS` = début d'occupation, `GC`/`NC` = profil de comptage, `GA`/`NA`/`NS` = alarme gamma/neutrons, `GX` = fin d'occupation, `TT`/`TC` = défaut/rétablissement de sabotage, et `SG1`–`SG3`/`SN1`–`SN2` = paramètres quotidiens de configuration gamma/neutrons (qui mettent automatiquement à jour les paramètres du pilote Rapiscan en mémoire et regroupent les modifications dans `config.json`). |
@@ -719,24 +719,25 @@ Vérifiez voies/événements distants, ligne Nationale, rapport et événement a
 ## 12. Conservation des données et stockage
 
 Le profil standard 3.11.0 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet en mode
-`PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Les métadonnées opérationnelles et les flux
-probants permanents (`occupancy`, `adjudication` en ajout seul, `report`, `nationalSummary`) restent dans
-PostgreSQL `ONLY oscar.obs`, tandis que les 12 sorties immuables à fort volume des détecteurs, d'état, de
-rapports et d'EML (`gammaCounts`, `gammaThreshold`, `neutronCounts`, `setupGamma`, `setupNeutron`, `speed`,
-`backgroundReport`, `foregroundReport`, `status`, `emlContextual`, `emlScanContextual`, `emlAnalysis`) sont
-écrites dans des partitions de transit de 30 minutes (`osg_*`). Cinq minutes après la clôture de chaque
-fenêtre de 30 minutes, des tâches d'arrière-plan exportent la partition vers des fichiers Apache Parquet
-catalogués et compressés en ZSTD (`archive/datasets/observations/`), vérifient la parité exacte des
-lignes/empreintes et suppriment la partition de transit afin de garder PostgreSQL compact (et au démarrage,
-OSCAR réconcilie les routes existantes et exporte rétroactivement vers Parquet toute ligne historique non
-archivée de la table parente pour ces 12 sorties). Chaque heure, OSCAR purge également les lignes
-`connectionStatus` de plus d'une heure (en conservant la plus récente par flux), les lignes `Clear` de
-routine de `occupancyStatus` de plus d'une heure (en conservant la plus récente par flux ainsi que toutes
-les lignes de défaut/alarme) et les commandes opérationnelles transitoires dans `cmd_commands`/`cmd_status`
-de plus de 24 heures (tout en conservant définitivement les commandes d'audit `%adjudicate%`). (Les sites
-configurés explicitement en mode `HOT_RETENTION` conservent les lignes chaudes pendant la fenêtre configurée
-avant de les retirer après vérification de parité.) La propriété de l'archive, l'intégrité des objets, la
-parité et les conservations actives sont revérifiées avant toute suppression et échouent de façon sûre.
+`PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Les flux de configuration statiques
+(`sensorLocation`, `adjudicationCodes`, `siteInfo`) restent dans PostgreSQL `ONLY oscar.obs`, tandis que
+les 21 sorties opérationnelles et probantes autorisées (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
+`setupGamma`, `setupNeutron`, `speed`, `backgroundReport`, `foregroundReport`, `status`, `emlContextual`,
+`emlScanContextual`, `emlAnalysis`, `dailyFile`, `connectionStatus`, `occupancyStatus`, `tamper`,
+`occupancy`, `adjudication`, `report`, `siteStatistics`, `nationalSummary`) sont écrites dans des
+partitions de transit de 30 minutes (`osg_*`). Cinq minutes après la clôture de chaque fenêtre de
+30 minutes, des tâches d'arrière-plan exportent la partition vers des fichiers Apache Parquet catalogués
+et compressés en ZSTD (`archive/datasets/observations/`), alimentent `oscar_obs_latest`, les compteurs de
+résumé de `oscar_archive_schema` et `oscar_event_locator`, vérifient la parité exacte des lignes/empreintes
+et suppriment la partition de transit afin de garder PostgreSQL compact (et au démarrage, OSCAR réconcilie
+les routes existantes et exporte rétroactivement vers Parquet toute ligne historique non archivée de la
+table parente pour ces 21 sorties). Les décisions et ré-adjudications portant sur des occupations archivées
+sont enregistrées dans `oscar_obs_overlay` + `oscar_obs_latest` sans réécrire Parquet, et chaque heure
+OSCAR purge les commandes opérationnelles transitoires dans `cmd_commands`/`cmd_status` de plus de
+24 heures (tout en conservant définitivement les commandes d'audit `%adjudicate%`). (Les sites configurés
+explicitement en mode `HOT_RETENTION` conservent les lignes chaudes pendant la fenêtre configurée avant de
+les retirer après vérification de parité.) La propriété de l'archive, l'intégrité des objets, la parité et
+les conservations actives sont revérifiées avant toute suppression et échouent de façon sûre.
 
 Chaque pilote RPM exige le journal direct des fichiers quotidiens. Il capture si possible
 l'enregistrement source avant analyse, puis publie la journée terminée sous forme de CSV historique

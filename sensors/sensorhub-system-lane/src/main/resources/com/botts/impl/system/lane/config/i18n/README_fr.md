@@ -7,7 +7,7 @@ Le **Système de capteurs de voie** crée un système parent regroupant un porti
 | Terme | Signification |
 | --- | --- |
 | **Clé de vue opérationnelle (`Operational View Key`)** | Étiquette facultative (par exemple `north-gate` ou `cargo-inbound`) qui regroupe cette voie dans un espace de travail opérateur nommé dans le Visualiseur OSCAR. |
-| **Rapports de métriques d'énergie (`EML`)** | Algorithme Rapiscan facultatif comparant les comptages gamma de basse, moyenne et haute énergie pour distinguer la radioactivité naturelle du fret (**NORM**, auto-adjugée en `Code 9999: EML Non-Threat`) des sources menaçantes. |
+| **Apprentissage automatique amélioré (`EML`, Enhanced Machine Learning)** | Algorithme Rapiscan facultatif comparant les comptages gamma de basse, moyenne et haute énergie pour distinguer la radioactivité naturelle du fret (**NORM**, auto-adjugée en `Code 9999: EML Non-Threat`) des sources menaçantes. |
 | **Plage d'adresses Modbus** | Plage de registres (`De` et `À`) utilisée par les contrôleurs Aspect sur TCP/IP. |
 
 ## Configuration générale

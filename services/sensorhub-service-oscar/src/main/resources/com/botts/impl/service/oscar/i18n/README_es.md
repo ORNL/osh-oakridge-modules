@@ -57,7 +57,7 @@ Consulte la [Guía de inicio rápido](https://github.com/ORNL/oscar/blob/main/di
 | **CPS (Conteos por segundo)** | Tasa bruta de conteo del detector de radiación medida en cada intervalo de muestreo durante el fondo o la ocupación. |
 | **NSIGMA (`N-Sigma`)** | Cuántas desviaciones estándar (`σ`) se eleva el conteo gamma actual sobre el promedio reciente de fondo; permite activar alarmas de forma consistente aunque fluctúe el fondo. |
 | **NORM (Material radiactivo de origen natural)** | Carga benigna que contiene radioisótopos naturales (como potasio-40 en fertilizantes, arena para gatos, cerámica o plátanos, o series de torio/uranio en granito y baldosas). |
-| **EML (Relaciones de métricas de energía) y Código `9999`** | Algoritmo para pórticos Rapiscan que compara ventanas gamma de baja, media y alta energía para distinguir carga **NORM** benigna de fuentes de amenaza. Cuando EML clasifica una alarma como no amenazante, OSCAR registra una adjudicación automática (`Code 9999: EML Non-Threat`). |
+| **EML (Aprendizaje automático mejorado / Enhanced Machine Learning) y Código `9999`** | Algoritmo para pórticos Rapiscan que compara ventanas gamma de baja, media y alta energía para distinguir carga **NORM** benigna de fuentes de amenaza. Cuando EML clasifica una alarma como no amenazante, OSCAR registra una adjudicación automática (`Code 9999: EML Non-Threat`). |
 | **Ocupación prolongada (`Fault - Extended Occupancy`) y Código `9998`** | Cuando un vehículo ocupa un carril durante al menos su **Umbral de ocupación prolongada (min)** (`extendedOccupancyThresholdMinutes`, `1`–`1440` min, predeterminado `1` min), OSCAR publica `Fault - Extended Occupancy` y contabiliza la falla en informes y estadísticas hasta que el carril quede libre. Si esa ocupación prolongada finaliza con una **alarma solo gamma** (`gammaAlarm = true`, `neutronAlarm = false`), OSCAR la suprime de la cola activa del panel y registra una adjudicación automática (`Code 9998: Extended Occupancy Gamma Alarm`). Cualquier ocupación prolongada con alarma de neutrones nunca se adjudica automáticamente. |
 | **WebID y DRF (Función de respuesta del detector)** | **WebID** es el servicio Full Spectrum de Sandia para identificar isótopos en espectros cargados (`N42`/SPC). Una **DRF** indica a WebID el modelo físico y la geometría del detector usado. |
 | **Archivo diario y códigos (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | Registro CSV diario por carril con mensajes RPM sin procesar: `GB`/`NB` = fondo gamma/neutrones, `GS` = inicio de ocupación, `GC`/`NC` = perfil de conteo, `GA`/`NA`/`NS` = alarma gamma/neutrones, `GX` = fin de ocupación, `TT`/`TC` = fallo/restablecimiento de manipulación, y `SG1`–`SG3`/`SN1`–`SN2` = parámetros diarios de configuración gamma/neutrones (que actualizan automáticamente los parámetros del controlador Rapiscan en memoria y agrupan cambios en `config.json`). |
@@ -720,24 +720,25 @@ Verifique carriles/eventos del remoto, su fila Nacional, un informe y un evento 
 ## 12. Retención de datos y almacenamiento
 
 El perfil estándar 3.11.0 utiliza la arquitectura por niveles PostgreSQL + Apache Parquet en modo
-`PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Los metadatos operativos y los flujos
-probatorios permanentes (`occupancy`, `adjudication` de solo adición, `report`, `nationalSummary`)
-permanecen en PostgreSQL `ONLY oscar.obs`, mientras que las 12 salidas inmutables de gran volumen de
-detectores, estado, informes y EML (`gammaCounts`, `gammaThreshold`, `neutronCounts`, `setupGamma`,
-`setupNeutron`, `speed`, `backgroundReport`, `foregroundReport`, `status`, `emlContextual`,
-`emlScanContextual`, `emlAnalysis`) se escriben en particiones temporales de 30 minutos (`osg_*`). Cinco
-minutos después del cierre de cada ventana de 30 minutos, trabajos de fondo exportan la partición a
-archivos Apache Parquet catalogados y comprimidos con ZSTD (`archive/datasets/observations/`), verifican
-la paridad exacta de filas/hashes y retiran la partición temporal para mantener compacto PostgreSQL (y al
-iniciar, OSCAR reconcilia las rutas existentes y exporta retroactivamente a Parquet cualquier fila heredada
-sin archivar en la tabla principal para esas 12 salidas). Cada hora, OSCAR también depura las filas
-`connectionStatus` con más de 1 hora (conservando siempre la última por flujo), las filas rutinarias `Clear`
-de `occupancyStatus` con más de 1 hora (conservando la última por flujo y todas las filas de fallo/alarma)
-y los comandos operativos transitorios en `cmd_commands`/`cmd_status` con más de 24 horas (conservando
-permanentemente los comandos de auditoría `%adjudicate%`). (Los sitios que configuran explícitamente
-`HOT_RETENTION` conservan filas calientes durante los días configurados más el margen de reversión antes
-de retirarlas). Antes de eliminar se vuelven a comprobar, con fallo seguro, la propiedad del archivo, la
-integridad de los objetos, la paridad y las retenciones activas.
+`PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Los flujos de configuración estáticos
+(`sensorLocation`, `adjudicationCodes`, `siteInfo`) permanecen en PostgreSQL `ONLY oscar.obs`, mientras
+que las 21 salidas operativas y probatorias permitidas (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
+`setupGamma`, `setupNeutron`, `speed`, `backgroundReport`, `foregroundReport`, `status`, `emlContextual`,
+`emlScanContextual`, `emlAnalysis`, `dailyFile`, `connectionStatus`, `occupancyStatus`, `tamper`,
+`occupancy`, `adjudication`, `report`, `siteStatistics`, `nationalSummary`) se escriben en particiones
+temporales de 30 minutos (`osg_*`). Cinco minutos después del cierre de cada ventana de 30 minutos,
+trabajos de fondo exportan la partición a archivos Apache Parquet catalogados y comprimidos con ZSTD
+(`archive/datasets/observations/`), actualizan `oscar_obs_latest`, los contadores de resumen de
+`oscar_archive_schema` y `oscar_event_locator`, verifican la paridad exacta de filas/hashes y retiran la
+partición temporal para mantener compacto PostgreSQL (y al iniciar, OSCAR reconcilia las rutas existentes
+y exporta retroactivamente a Parquet cualquier fila heredada sin archivar en la tabla principal para esas
+21 salidas). Las adjudicaciones y readjudicaciones de ocupaciones archivadas se registran en
+`oscar_obs_overlay` + `oscar_obs_latest` sin reescribir Parquet, y cada hora se depuran los comandos
+operativos transitorios en `cmd_commands`/`cmd_status` con más de 24 horas (conservando permanentemente
+los comandos de auditoría `%adjudicate%`). (Los sitios que configuran explícitamente `HOT_RETENTION`
+conservan filas calientes durante los días configurados más el margen de reversión antes de retirarlas).
+Antes de eliminar se vuelven a comprobar, con fallo seguro, la propiedad del archivo, la integridad de los
+objetos, la paridad y las retenciones activas.
 
 Cada controlador RPM requiere el diario directo de archivos diarios. Captura el registro fuente
 antes del análisis cuando es posible y publica el día terminado como CSV heredado inmutable más un

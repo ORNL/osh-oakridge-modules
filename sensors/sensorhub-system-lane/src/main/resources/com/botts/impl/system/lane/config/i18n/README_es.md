@@ -7,7 +7,7 @@ El **Sistema de sensores de carril** crea un contenedor principal para un monito
 | Término | Significado |
 | --- | --- |
 | **Clave de vista operativa (`Operational View Key`)** | Etiqueta opcional (por ejemplo, `north-gate` o `cargo-inbound`) que agrupa este carril en una vista de trabajo para operadores en el Visor OSCAR. |
-| **Relaciones de métricas de energía (`EML`)** | Algoritmo opcional para Rapiscan que compara conteos gamma de baja, media y alta energía para distinguir radiación natural de carga (**NORM**, auto-adjudicada como `Code 9999: EML Non-Threat`) frente a fuentes de amenaza. |
+| **Aprendizaje automático mejorado (`EML`, Enhanced Machine Learning)** | Algoritmo opcional para Rapiscan que compara conteos gamma de baja, media y alta energía para distinguir radiación natural de carga (**NORM**, auto-adjudicada como `Code 9999: EML Non-Threat`) frente a fuentes de amenaza. |
 | **Rango de direcciones Modbus** | Rango de registros (`Desde` y `Hasta`) utilizado por los controladores Aspect sobre TCP/IP. |
 
 ## Configuración general

@@ -57,7 +57,7 @@ Use the release [Quick Start](https://github.com/ORNL/oscar/blob/main/dist/relea
 | **CPS (Counts Per Second)** | Raw radiation detector count rate measured each sampling interval during background or occupancy. |
 | **NSIGMA (`N-Sigma`)** | How many standard deviations (`σ`) the current gamma count rate rises above the recent background average; used to trigger gamma alarms consistently as background fluctuates. |
 | **NORM (Naturally Occurring Radioactive Material)** | Benign cargo containing natural radioisotopes (such as potassium-40 in fertilizer, kitty litter, ceramics, or bananas, or thorium/uranium series in granite and tile). |
-| **EML (Energy Metric Ratios) & Code `9999`** | Algorithm for Rapiscan portals that compares low-, mid-, and high-energy gamma windows to distinguish benign **NORM** cargo from concentrated threat sources. When EML classifies an alarm as non-threat, OSCAR logs an automated adjudication (`Code 9999: EML Non-Threat`). |
+| **EML (Enhanced Machine Learning) & Code `9999`** | Algorithm for Rapiscan portals that compares low-, mid-, and high-energy gamma windows to distinguish benign **NORM** cargo from concentrated threat sources. When EML classifies an alarm as non-threat, OSCAR logs an automated adjudication (`Code 9999: EML Non-Threat`). |
 | **Extended Occupancy (`Fault - Extended Occupancy`) & Code `9998`** | When a vehicle occupies a lane for at least its configured **Extended Occupancy Threshold (min)** (`extendedOccupancyThresholdMinutes`, `1`–`1440` min, default `1` min), OSCAR publishes a `Fault - Extended Occupancy` status observation and counts the fault in reports/statistics until the lane clears. If that extended occupancy completes with a **gamma-only alarm** (`gammaAlarm = true`, `neutronAlarm = false`), OSCAR suppresses it from the live Dashboard queue and logs an automated adjudication (`Code 9998: Extended Occupancy Gamma Alarm`). Any extended occupancy that includes a neutron alarm is never auto-adjudicated. |
 | **WebID & DRF (Detector Response Function)** | **WebID** is the Sandia Full Spectrum isotope identification service used to analyze uploaded spectra (`N42`/SPC). A **DRF** tells WebID the physical detector model and geometry used to capture the spectrum. |
 | **Daily File & Record Codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | The per-lane daily CSV log of raw RPM messages: `GB`/`NB` = gamma/neutron background, `GS` = occupancy start, `GC`/`NC` = gamma/neutron count profile, `GA`/`NA`/`NS` = gamma/neutron alarm, `GX` = occupancy end, `TT`/`TC` = tamper fault/clear, and `SG1`–`SG3`/`SN1`–`SN2` = daily gamma/neutron hardware setup parameters (which automatically update the Rapiscan driver's parameters in memory and coalesce changes into `config.json`). |
@@ -754,23 +754,23 @@ Duplicate names and duplicate address/port pairs are rejected. **Edit** changes 
 ## 12. Data retention and storage behavior
 
 The standard 3.11.0 profile uses the tiered PostgreSQL + Apache Parquet architecture in `PARQUET_PRIMARY`
-mode (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Operational metadata and permanent evidentiary streams
-(`occupancy`, append-only `adjudication`, `report`, `nationalSummary`) remain in PostgreSQL `ONLY oscar.obs`,
-while the 12 allowlisted immutable high-volume detector, status, report, and EML outputs (`gammaCounts`,
-`gammaThreshold`, `neutronCounts`, `setupGamma`, `setupNeutron`, `speed`, `backgroundReport`,
-`foregroundReport`, `status`, `emlContextual`, `emlScanContextual`, `emlAnalysis`) land in 30-minute
-PostgreSQL staging partitions (`osg_*`). Five minutes after each 30-minute window closes, bounded
-background jobs export the completed window to cataloged, ZSTD-compressed Apache Parquet
-(`archive/datasets/observations/`), verify exact row/hash parity, and drop the staging partition so the
-live PostgreSQL working set stays compact (and on startup, OSCAR reconciles existing route entries and
-retroactively exports any legacy unarchived parent-table rows for those 12 outputs to Parquet). Every
-hour, OSCAR also prunes expired `connectionStatus` rows (> 1 hour old, keeping the latest per stream),
-routine `Clear` `occupancyStatus` rows (> 1 hour old, keeping the latest per stream and all fault/alarm
-rows), and transient operational commands in `cmd_commands`/`cmd_status` (> 24 hours old, while
-permanently preserving `%adjudicate%` audit commands). (Sites that explicitly configure `HOT_RETENTION`
-retain hot PostgreSQL rows for the configured multi-day window plus rollback grace before retiring them
-after parity verification.) Archive ownership, object integrity, parity, and active generation or
-observation holds are rechecked before deletion and fail closed.
+mode (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Static singleton configuration streams (`sensorLocation`,
+`adjudicationCodes`, `siteInfo`) remain in PostgreSQL `ONLY oscar.obs`, while all 21 allowlisted operational
+and evidentiary outputs (`gammaCounts`, `gammaThreshold`, `neutronCounts`, `setupGamma`, `setupNeutron`,
+`speed`, `backgroundReport`, `foregroundReport`, `status`, `emlContextual`, `emlScanContextual`,
+`emlAnalysis`, `dailyFile`, `connectionStatus`, `occupancyStatus`, `tamper`, `occupancy`, `adjudication`,
+`report`, `siteStatistics`, `nationalSummary`) land in 30-minute PostgreSQL staging partitions (`osg_*`).
+Five minutes after each 30-minute window closes, bounded background jobs export the completed window to
+cataloged, ZSTD-compressed Apache Parquet (`archive/datasets/observations/`), populate `oscar_obs_latest`,
+`oscar_archive_schema` summary counters, and `oscar_event_locator`, verify exact row/hash parity, and drop
+the staging partition so the live PostgreSQL working set stays compact (and on startup, OSCAR reconciles
+existing route entries and retroactively exports and compacts any legacy unarchived parent-table rows for
+those 21 outputs to Parquet). Adjudications and re-adjudications of archived `occupancy` rows are recorded
+in `oscar_obs_overlay` + `oscar_obs_latest` without rewriting Parquet, while transient operational commands
+in `cmd_commands`/`cmd_status` (> 24 hours old, preserving `%adjudicate%` audit commands) are pruned hourly.
+(Sites that explicitly configure `HOT_RETENTION` retain hot PostgreSQL rows for the configured multi-day
+window plus rollback grace before retiring them after parity verification.) Archive ownership, object
+integrity, parity, and active generation or observation holds are rechecked before deletion and fail closed.
 
 Each RPM driver requires the direct daily-file journal. It captures the source record before
 parsing where possible and publishes the completed day as an immutable legacy CSV plus SHA-256

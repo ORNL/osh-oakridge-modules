@@ -8,7 +8,7 @@ The **Lane Sensor System** creates a parent lane container for one Radiation Por
 | --- | --- |
 | **Operational View Key** | An optional tag (for example, `north-gate` or `cargo-inbound`) that groups this lane into a named operator workspace in the OSCAR Viewer. |
 | **Extended Occupancy Threshold (min)** | Duration in minutes (`1`–`1440`, default `1`) before an active occupancy is logged as a `Fault - Extended Occupancy` event. Any gamma-only alarm (no neutron alarm) during an extended occupancy is automatically adjudicated as `Code 9998: Extended Occupancy Gamma Alarm`. |
-| **Energy Metric Ratios (EML)** | Optional Rapiscan algorithm that compares low-, mid-, and high-energy gamma counts to distinguish natural cargo radiation (**NORM**, auto-adjudicated as `Code 9999: EML Non-Threat`) from concentrated threat sources. |
+| **Enhanced Machine Learning (EML)** | Optional Rapiscan algorithm that compares low-, mid-, and high-energy gamma counts to distinguish natural cargo radiation (**NORM**, auto-adjudicated as `Code 9999: EML Non-Threat`) from concentrated threat sources. |
 | **Modbus Address Range** | Register range (`From` and `To`) used by Aspect RPM controllers over TCP/IP. |
 
 ## General Configuration
