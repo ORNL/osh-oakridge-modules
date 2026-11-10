@@ -68,18 +68,26 @@ public final class EmlArchiveExtractor {
         }
 
         Path analysisXml = findAnalysisXml(targetDir);
-        if (analysisXml == null) {
-            throw new IOException("EML archive is missing required config/vm250Analysis.xml");
+        Path configDir;
+        Path bundleRoot;
+        if (analysisXml != null) {
+            configDir = analysisXml.getParent();
+            bundleRoot = configDir.getParent() != null ? configDir.getParent() : targetDir;
+        } else {
+            Path candidateConfig = targetDir.resolve("config");
+            configDir = Files.isDirectory(candidateConfig) ? candidateConfig : targetDir;
+            bundleRoot = targetDir;
         }
-        Path configDir = analysisXml.getParent();
-        Path bundleRoot = configDir.getParent() != null ? configDir.getParent() : targetDir;
 
         List<Path> jars = collectRuntimeJars(bundleRoot, targetDir);
         if (jars.isEmpty() && lower.endsWith(".jar")) {
-            // Support single shaded/uber JAR containing classes directly alongside config/
+            // Support single shaded/uber JAR containing classes directly
             Path selfCopy = targetDir.resolve("eml-self-bundle.jar");
             Files.copy(archivePath, selfCopy, StandardCopyOption.REPLACE_EXISTING);
             jars = List.of(selfCopy);
+        }
+        if (analysisXml == null && !hasCustomAlgorithmDescriptor(targetDir, jars)) {
+            throw new IOException("EML archive is missing required config/vm250Analysis.xml");
         }
         if (jars.isEmpty()) {
             throw new IOException("EML archive contains no runtime JAR files");
@@ -94,6 +102,47 @@ public final class EmlArchiveExtractor {
                     .findFirst()
                     .orElse(null);
         }
+    }
+
+    private static boolean hasCustomAlgorithmDescriptor(Path root, List<Path> jars) throws IOException {
+        String spiName = EmlAlarmAssessmentAlgorithm.class.getName();
+        try (Stream<Path> walk = Files.walk(root, 5)) {
+            for (Path p : walk.filter(Files::isRegularFile).toList()) {
+                String name = p.getFileName().toString();
+                if (spiName.equals(name) || EmlAlarmAssessmentAlgorithm.DESCRIPTOR_FILENAME.equals(name)) {
+                    return true;
+                }
+                if ("MANIFEST.MF".equalsIgnoreCase(name)) {
+                    String content = Files.readString(p, StandardCharsets.UTF_8);
+                    if (content.contains(EmlAlarmAssessmentAlgorithm.MANIFEST_CLASS_ATTRIBUTE)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        for (Path jar : jars) {
+            try (InputStream fis = Files.newInputStream(jar);
+                 ZipInputStream zis = new ZipInputStream(new BufferedInputStream(fis), StandardCharsets.UTF_8)) {
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    String entryName = entry.getName().replace('\\', '/');
+                    if (("META-INF/services/" + spiName).equals(entryName)
+                            || ("META-INF/" + EmlAlarmAssessmentAlgorithm.DESCRIPTOR_FILENAME).equals(entryName)
+                            || ("config/" + EmlAlarmAssessmentAlgorithm.DESCRIPTOR_FILENAME).equals(entryName)
+                            || EmlAlarmAssessmentAlgorithm.DESCRIPTOR_FILENAME.equals(entryName)) {
+                        return true;
+                    }
+                    if ("META-INF/MANIFEST.MF".equalsIgnoreCase(entryName)) {
+                        String mf = new String(zis.readAllBytes(), StandardCharsets.UTF_8);
+                        if (mf.contains(EmlAlarmAssessmentAlgorithm.MANIFEST_CLASS_ATTRIBUTE)) {
+                            return true;
+                        }
+                    }
+                }
+            } catch (IOException ignored) {
+            }
+        }
+        return false;
     }
 
     private static List<Path> collectRuntimeJars(Path bundleRoot, Path extractRoot) throws IOException {

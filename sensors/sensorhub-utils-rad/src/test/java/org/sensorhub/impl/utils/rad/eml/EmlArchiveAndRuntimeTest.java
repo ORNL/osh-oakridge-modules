@@ -131,6 +131,165 @@ public class EmlArchiveAndRuntimeTest {
     }
 
     @Test
+    public void loadsCustomSpiAndZeroDependencyManifestAlgorithms() throws Exception {
+        Path spiJar = buildCustomSpiPluginJar(tempDir.resolve("custom-spi-assessor-2.0.0.jar"));
+        Path manifestJar = buildZeroDependencyManifestPluginJar(tempDir.resolve("zero-dep-assessor-3.1.0.jar"));
+
+        EmlRuntimeRegistry registry = new EmlRuntimeRegistry();
+        try {
+            EmlRuntimeStatus spiStatus = registry.installFromArchive("custom-spi-assessor-2.0.0.jar", spiJar);
+            assertTrue(spiStatus.loaded());
+            assertEquals("2.0.0-spi", spiStatus.versionId());
+            assertEquals("spectral-ratio-collimated", spiStatus.collimatedModelId());
+            assertEquals("spectral-ratio-uncollimated", spiStatus.uncollimatedModelId());
+
+            EmlLaneParameters params = new EmlLaneParameters("lane3", 3, true, 4.82, 20, 5);
+            EmlEvaluationResult norm = registry.evaluate(params, Stream.of(
+                    "GS, 10:00:01",
+                    "GA, 10:00:01,350,350,350,350",
+                    "GX, 10:00:02,7"));
+            assertNotNull(norm);
+            assertTrue(norm.isAutoReleaseNonThreat());
+            assertEquals("RELEASE", norm.result());
+            assertEquals(0.985, norm.releaseProbability(), 1e-6);
+
+            EmlEvaluationResult threat = registry.evaluate(params, Stream.of(
+                    "GS, 10:00:01",
+                    "GA, 10:00:01,9900,350,350,350",
+                    "GX, 10:00:02,8"));
+            assertNotNull(threat);
+            assertFalse(threat.isAutoReleaseNonThreat());
+            assertEquals("INVESTIGATE", threat.result());
+
+            // Hot-swap with a zero-dependency standalone JAR registered via META-INF/MANIFEST.MF
+            EmlRuntimeStatus mfStatus = registry.installFromArchive("zero-dep-assessor-3.1.0.jar", manifestJar);
+            assertTrue(mfStatus.loaded());
+            assertEquals("3.1.0-standalone", mfStatus.versionId());
+            assertEquals("zero-dep-model", mfStatus.collimatedModelId());
+
+            EmlEvaluationResult mfNorm = registry.evaluate(params, Stream.of(
+                    "GS, 10:05:01",
+                    "GA, 10:05:01,320,320,320,320",
+                    "GX, 10:05:02,9"));
+            assertNotNull(mfNorm);
+            assertTrue(mfNorm.isAutoReleaseNonThreat());
+            assertEquals("RELEASE", mfNorm.result());
+            assertEquals(0.96, mfNorm.releaseProbability(), 1e-6);
+            assertTrue(mfNorm.toAdjudicationFeedback().contains("\"modelId\":\"zero-dep-model\""));
+        } finally {
+            registry.unload();
+        }
+    }
+
+    private static Path buildCustomSpiPluginJar(Path targetJar) throws Exception {
+        Path srcDir = Files.createTempDirectory(targetJar.getParent(), "spi-src-");
+        Path classesDir = Files.createTempDirectory(targetJar.getParent(), "spi-cls-");
+        Path srcFile = srcDir.resolve("example/custom/CustomSpiAssessor.java");
+        Files.createDirectories(srcFile.getParent());
+        Files.writeString(srcFile, """
+                package example.custom;
+                import org.sensorhub.impl.utils.rad.eml.EmlAlarmAssessmentAlgorithm;
+                import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
+                import org.sensorhub.impl.utils.rad.eml.EmlLaneParameters;
+                import org.sensorhub.impl.utils.rad.eml.EmlSourceBreakdown;
+                import java.nio.file.Files;
+                import java.nio.file.Path;
+                import java.util.List;
+                public class CustomSpiAssessor implements EmlAlarmAssessmentAlgorithm {
+                    @Override
+                    public void initialize(Path extractedPluginRoot) throws Exception {
+                        if (!Files.isDirectory(extractedPluginRoot)) {
+                            throw new IllegalStateException("Missing extracted root");
+                        }
+                    }
+                    @Override public String getVersionId() { return "2.0.0-spi"; }
+                    @Override public String getCollimatedModelId() { return "spectral-ratio-collimated"; }
+                    @Override public String getUncollimatedModelId() { return "spectral-ratio-uncollimated"; }
+                    @Override
+                    public EmlEvaluationResult evaluate(EmlLaneParameters params, List<String> lines) {
+                        boolean spike = lines.stream().anyMatch(l -> l.contains(",9900,"));
+                        String model = params.collimated() ? getCollimatedModelId() : getUncollimatedModelId();
+                        double rel = spike ? 0.015 : 0.985;
+                        double inv = 1.0 - rel;
+                        EmlSourceBreakdown overall = new EmlSourceBreakdown(
+                                spike ? "Threat" : "NORM", model, 0, 0, 0, 0, 0.0, spike ? 0.0 : rel, spike ? inv : 0.0);
+                        return new EmlEvaluationResult(
+                                getVersionId(), model, 0.05, params.portId(), params.laneId(),
+                                System.currentTimeMillis(), 1L, "ALARM", true, false, false,
+                                spike ? "INVESTIGATE" : "RELEASE", false, "", inv, rel,
+                                true, false, 1, 5.0, "", List.of(overall), overall);
+                    }
+                }
+                """, StandardCharsets.UTF_8);
+
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        int rc = compiler.run(null, null, null,
+                "-cp", System.getProperty("java.class.path"),
+                "-d", classesDir.toString(),
+                srcFile.toString());
+        assertEquals(0, rc);
+
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(targetJar));
+             Stream<Path> walk = Files.walk(classesDir)) {
+            addZipText(zos, "META-INF/services/" + EmlAlarmAssessmentAlgorithm.class.getName(),
+                    "example.custom.CustomSpiAssessor\n");
+            for (Path p : walk.filter(Files::isRegularFile).toList()) {
+                String rel = classesDir.relativize(p).toString().replace('\\', '/');
+                zos.putNextEntry(new ZipEntry(rel));
+                zos.write(Files.readAllBytes(p));
+                zos.closeEntry();
+            }
+        }
+        return targetJar;
+    }
+
+    private static Path buildZeroDependencyManifestPluginJar(Path targetJar) throws Exception {
+        Path srcDir = Files.createTempDirectory(targetJar.getParent(), "mf-src-");
+        Path classesDir = Files.createTempDirectory(targetJar.getParent(), "mf-cls-");
+        Path srcFile = srcDir.resolve("example/standalone/ZeroDepAssessor.java");
+        Files.createDirectories(srcFile.getParent());
+        Files.writeString(srcFile, """
+                package example.standalone;
+                import java.util.LinkedHashMap;
+                import java.util.List;
+                import java.util.Map;
+                public class ZeroDepAssessor {
+                    public String getVersionId() { return "3.1.0-standalone"; }
+                    public String getCollimatedModelId() { return "zero-dep-model"; }
+                    public Map<String, Object> evaluate(Map<String, Object> laneParams, List<String> lines) {
+                        boolean spike = lines.stream().anyMatch(l -> l.contains(",9900,"));
+                        Map<String, Object> out = new LinkedHashMap<>();
+                        out.put("result", spike ? "INVESTIGATE" : "RELEASE");
+                        out.put("releaseProbability", spike ? 0.04 : 0.96);
+                        out.put("investigateProbability", spike ? 0.96 : 0.04);
+                        out.put("overallSourceType", spike ? "Threat" : "NORM");
+                        return out;
+                    }
+                }
+                """, StandardCharsets.UTF_8);
+
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        int rc = compiler.run(null, null, null,
+                "-d", classesDir.toString(),
+                srcFile.toString());
+        assertEquals(0, rc);
+
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(targetJar));
+             Stream<Path> walk = Files.walk(classesDir)) {
+            addZipText(zos, "META-INF/MANIFEST.MF",
+                    "Manifest-Version: 1.0\r\n"
+                    + EmlAlarmAssessmentAlgorithm.MANIFEST_CLASS_ATTRIBUTE + ": example.standalone.ZeroDepAssessor\r\n\r\n");
+            for (Path p : walk.filter(Files::isRegularFile).toList()) {
+                String rel = classesDir.relativize(p).toString().replace('\\', '/');
+                zos.putNextEntry(new ZipEntry(rel));
+                zos.write(Files.readAllBytes(p));
+                zos.closeEntry();
+            }
+        }
+        return targetJar;
+    }
+
+    @Test
     public void registersAndClaimsPendingAutoAdjudicationsWithRoundingTolerance() {
         EmlSourceBreakdown overall = new EmlSourceBreakdown(
                 "NORM", "multi_site_collimated", 0.5, 2.5, 1.0, 1.2, 0.02, 0.96, 0.02);
