@@ -48,6 +48,7 @@ public final class SlidingOccupancyQuery {
     private static final Logger logger = LoggerFactory.getLogger(SlidingOccupancyQuery.class);
     private static final Instant RETENTION_EPOCH = Instant.EPOCH;
     private static final long DEFAULT_STOP_TIMEOUT_MILLIS = 5_000L;
+    private static final Duration MINIMUM_COLD_SWEEP_WINDOW = Duration.ofMinutes(30);
 
     private final Duration batchWindowLength;
     private final Duration retentionOffset;
@@ -488,10 +489,12 @@ public final class SlidingOccupancyQuery {
         Instant allowedEnd = minimum(checkpoint.windowEnd(), safeThrough);
         Instant cycleEnd = minimum(addClamped(
                 checkpoint.processedThrough(), lateArrivalCatchUp), allowedEnd);
+        Duration lateStepWindow = minimum(lateArrivalCatchUp,
+                maximum(batchWindowLength, MINIMUM_COLD_SWEEP_WINDOW));
         Instant cursor = checkpoint.processedThrough();
         Instant lastForwardCheck = now;
         while (!shouldStop() && cursor.isBefore(cycleEnd)) {
-            Instant windowEnd = minimum(addClamped(cursor, batchWindowLength), cycleEnd);
+            Instant windowEnd = minimum(addClamped(cursor, lateStepWindow), cycleEnd);
             if (!processWindow(cursor, windowEnd, true, occupancyStreamIds))
                 return;
             cursor = windowEnd;
@@ -557,12 +560,14 @@ public final class SlidingOccupancyQuery {
         Instant allowedEnd = minimum(checkpoint.windowEnd(), reconcileBefore);
         Instant cycleEnd = minimum(addClamped(checkpoint.processedThrough(),
                 reconciliationCatchUp), allowedEnd);
+        Duration reconciliationStepWindow = minimum(reconciliationCatchUp,
+                maximum(batchWindowLength, MINIMUM_COLD_SWEEP_WINDOW));
         // Reconciliation deliberately revalidates even a previously processed observation. This
         // slowly repairs media whose ledger/catalog was lost, without an unbounded restart scan.
         Instant cursor = checkpoint.processedThrough();
         Instant lastForwardCheck = now;
         while (!shouldStop() && cursor.isBefore(cycleEnd)) {
-            Instant windowEnd = minimum(addClamped(cursor, batchWindowLength), cycleEnd);
+            Instant windowEnd = minimum(addClamped(cursor, reconciliationStepWindow), cycleEnd);
             if (!processWindow(cursor, windowEnd, false, occupancyStreamIds))
                 return;
             cursor = windowEnd;
@@ -584,6 +589,13 @@ public final class SlidingOccupancyQuery {
         Instant now = clock.instant();
         if (!isDue(lastForwardCheck, now, batchWindowLength))
             return lastForwardCheck;
+        try {
+            beforeQueryAction.run();
+        } catch (Exception e) {
+            if (shouldStop())
+                return lastForwardCheck;
+            logger.warn("Retained-media maintenance cycle failed during historical reconciliation", e);
+        }
         Optional<RetentionScanCheckpoint> existing = cursorStore.read();
         if (existing.isEmpty())
             return now;
@@ -841,6 +853,10 @@ public final class SlidingOccupancyQuery {
     }
 
     private static Instant maximum(Instant left, Instant right) {
+        return left.compareTo(right) >= 0 ? left : right;
+    }
+
+    private static Duration maximum(Duration left, Duration right) {
         return left.compareTo(right) >= 0 ? left : right;
     }
 
