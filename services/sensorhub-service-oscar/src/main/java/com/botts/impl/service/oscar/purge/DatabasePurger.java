@@ -725,6 +725,19 @@ public class DatabasePurger {
         return merged;
     }
 
+    private boolean isParquetPrimaryManagedStore() {
+        var obsStore = database != null ? database.getObservationStore() : null;
+        if (obsStore == null)
+            return false;
+        try {
+            var method = obsStore.getClass().getMethod("isParquetPrimary");
+            Object result = method.invoke(obsStore);
+            return Boolean.TRUE.equals(result);
+        } catch (ReflectiveOperationException ignored) {
+            return false;
+        }
+    }
+
     public void purgeOldConnectionStatus() {
         runCancellableMaintenance(this::purgeOldConnectionStatusWithinScope);
     }
@@ -732,6 +745,10 @@ public class DatabasePurger {
     void purgeOldConnectionStatusWithinScope() {
         if (shouldStopPurge())
             return;
+        if (observationLifecycleDelegated && isParquetPrimaryManagedStore()) {
+            log.debug("Skipping Connection Status row deletion because PARQUET_PRIMARY stage lifecycle manages retention");
+            return;
+        }
         Set<BigId> ids = getDataStreamIdsByOutputNames(OUTPUT_CONNECTION_STATUS);
 
         if (ids.isEmpty()) {
@@ -754,6 +771,10 @@ public class DatabasePurger {
     void purgeOldOccupancyStatusWithinScope() {
         if (shouldStopPurge())
             return;
+        if (observationLifecycleDelegated && isParquetPrimaryManagedStore()) {
+            log.debug("Skipping Occupancy Status row deletion because PARQUET_PRIMARY stage lifecycle manages retention");
+            return;
+        }
         Set<BigId> ids = getDataStreamIdsByOutputNames(OUTPUT_OCCUPANCY_STATUS);
         if (ids.isEmpty()) {
             log.debug("No Occupancy Status dataStreams found");
@@ -1104,6 +1125,10 @@ public class DatabasePurger {
         }
         if (!safelyPublished)
             return new PurgeDayResult(false, 0);
+
+        if (observationLifecycleDelegated && isParquetPrimaryManagedStore()) {
+            return new PurgeDayResult(true, 0);
+        }
 
         long deleted = deleteObservationsInTimeRange(Set.of(dataStreamId),
                 window.startInclusive, window.endExclusive);
