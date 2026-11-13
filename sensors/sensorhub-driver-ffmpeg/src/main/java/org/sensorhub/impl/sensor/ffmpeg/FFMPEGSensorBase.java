@@ -455,6 +455,7 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
 	        // Initialize the MPEG transport stream processor from the source named in the configuration.
 	        // If neither the file source nor a connection string is specified, throw an exception so the user knows that
 	        // they have to provide at least one of them.
+	        boolean liveNetworkSource = false;
 	        if ((null != config.connection.transportStreamPath) && (!config.connection.transportStreamPath.isBlank())) {
 	            Asserts.checkArgument(config.connection.fps >= 0, "FPS must be >= 0");
 	            mpegTsProcessor = new MpegTsProcessor(config.connection.transportStreamPath, config.connection.fps, config.connection.loop, config.connection.useTCP);
@@ -463,10 +464,14 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
 	            // Live network streams are paced by the upstream camera/proxy; passing a positive
 	            // FPS here sleeps the demux thread and throttles >24 fps cameras.
 	            mpegTsProcessor = new MpegTsProcessor(resolvedConnection, 0, false, config.connection.useTCP);
+	            liveNetworkSource = true;
 	        } else {
 	        	throw new SensorHubException("Either the input file path or the connection string must be set");
 	        }
-            mpegTsProcessor.setTimeout(config.connectionConfig.connectTimeout * 1000L);
+            long configuredTimeoutMicros = config.connectionConfig.connectTimeout * 1000L;
+            mpegTsProcessor.setTimeout(liveNetworkSource
+                    ? Math.max(configuredTimeoutMicros, 10_000_000L)
+                    : configuredTimeoutMicros);
             mpegTsProcessor.setFrameBuffer(config.connection.bufferSize);
             mpegTsProcessor.clearVideoDataBufferListeners();
 

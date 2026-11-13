@@ -36,15 +36,22 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
     public static final String RES_NAME = "adjudicationResult";
     public static final String RES_LABEL = "Adjudication Result";
     public static final String RES_DESCRIPTION = "Adjudications of occupancy events";
+    private static final int MAX_CONCURRENT_ADJUDICATION_COMMANDS = 8;
+    private static final int OBSERVATION_LOCK_STRIPES = 64;
 
     DataComponent commandStructure;
     DataComponent resultStructure;
     RADHelper fac;
     IdEncoder obsIdEncoder;
     IObsStore obsStore;
+    private final Object[] observationLocks = new Object[OBSERVATION_LOCK_STRIPES];
+    private final Object resultStructureLock = new Object();
 
     protected AdjudicationControl(LaneSystem parentSensor) {
         super(NAME, parentSensor);
+        for (int i = 0; i < observationLocks.length; i++) {
+            observationLocks[i] = new Object();
+        }
 
         var hub = getParentProducer().getParentHub();
         obsIdEncoder = hub.getIdEncoders().getObsIdEncoder();
@@ -71,6 +78,17 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
     }
 
     @Override
+    public int getMaxConcurrentCommands() {
+        return MAX_CONCURRENT_ADJUDICATION_COMMANDS;
+    }
+
+    private Object observationLockFor(BigId obsId) {
+        int hash = Objects.hashCode(obsId);
+        hash ^= (hash >>> 16);
+        return observationLocks[hash & (OBSERVATION_LOCK_STRIPES - 1)];
+    }
+
+    @Override
     public CompletableFuture<ICommandStatus> submitCommand(ICommandData command) {
         DataBlock cmdData = command.getParams();
         Instant start = Instant.now();
@@ -92,39 +110,30 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
                if (decodedObsId == null)
                    return CommandStatus.failed(command.getID(), "The provided occupancy observation ID is invalid.");
 
-               if (obsStore == null)
-                   return CommandStatus.failed(command.getID(), "Please attach this lane to a database, or restart the lane");
-
-               // Validate obs ID is in database
-               if (!obsStore.containsKey(decodedObsId))
-                   return CommandStatus.failed(command.getID(), "The provided occupancy observation ID was not found in the database.");
-
-               // Validate obs' data stream matches occupancy datastream
-               var obs = obsStore.get(decodedObsId);
-               if (obs == null)
-                   return CommandStatus.failed(command.getID(), "The occupancy from the provided ID is null");
-
-               var ds = obsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
-               if (ds == null)
-                   return CommandStatus.failed(command.getID(), "The provided occupancy observation ID is not part of an RPM");
-
-               var dsDef = ds.getRecordStructure().getDefinition();
-               var expectedDef = RADHelper.getRadUri("Occupancy");
-               if (!Objects.equals(expectedDef, dsDef))
-                   return CommandStatus.failed(command.getID(), "The provided occupancy observation ID is not part of an RPM");
-
                if (adj.getSecondaryInspectionStatus() == null)
                    return CommandStatus.failed(command.getID(), "Please specify a secondary inspection status");
 
+               if (obsStore == null)
+                   return CommandStatus.failed(command.getID(), "Please attach this lane to a database, or restart the lane");
+
                // ----------------------------------------------------------------------------------------------------------
                // Append this immutable adjudication command ID to the occupancy's adjudication list.
-               // Synchronize so concurrent adjudications on the same lane never drop a prior commandId
-               // or race on resultStructure.
-               DataBlock resultData;
-               synchronized (this) {
-                   obs = obsStore.get(decodedObsId);
+               // Lock per observation stripe so distinct alarms on the same lane adjudicate concurrently
+               // (enabling tiered-store cold-read and overlay-write batching) while concurrent updates to
+               // the same observation remain strictly serialized.
+               synchronized (observationLockFor(decodedObsId)) {
+                   var obs = obsStore.get(decodedObsId);
                    if (obs == null)
-                       return CommandStatus.failed(command.getID(), "The occupancy from the provided ID is null");
+                       return CommandStatus.failed(command.getID(), "The provided occupancy observation ID was not found in the database.");
+
+                   var ds = obsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
+                   if (ds == null)
+                       return CommandStatus.failed(command.getID(), "The provided occupancy observation ID is not part of an RPM");
+
+                   var dsDef = ds.getRecordStructure().getDefinition();
+                   var expectedDef = RADHelper.getRadUri("Occupancy");
+                   if (!Objects.equals(expectedDef, dsDef))
+                       return CommandStatus.failed(command.getID(), "The provided occupancy observation ID is not part of an RPM");
 
                    var commandId = getParentProducer().getParentHub().getIdEncoders().getCommandIdEncoder().encodeID(command.getID());
                    var result = obs.getResult();
@@ -150,7 +159,10 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
                    var obsDb = getParentProducer().getParentHub().getSystemDriverRegistry().getDatabase(systemUID);
 
                    obsDb.getObservationStore().put(decodedObsId, obs);
+               }
 
+               DataBlock resultData;
+               synchronized (resultStructureLock) {
                    resultData = createResultData(adj, command.getSenderID());
                }
 

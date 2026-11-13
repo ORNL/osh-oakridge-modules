@@ -795,9 +795,9 @@ public final class MediaMtxSidecarManager implements AutoCloseable {
     private static String renderConfigYaml(int rtspPort, int apiPort, String apiSecret, String rtspSecret) {
         return "logLevel: warn\n"
                 + "logDestinations: [stdout]\n"
-                + "readTimeout: 5s\n"
-                + "writeTimeout: 5s\n"
-                + "writeQueueSize: 1024\n"
+                + "readTimeout: 15s\n"
+                + "writeTimeout: 15s\n"
+                + "writeQueueSize: 4096\n"
                 + "authMethod: internal\n"
                 + "authInternalUsers:\n"
                 + "- user: " + API_USER + "\n"
