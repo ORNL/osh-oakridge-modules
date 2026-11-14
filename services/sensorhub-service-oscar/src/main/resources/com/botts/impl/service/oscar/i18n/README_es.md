@@ -65,6 +65,7 @@ Consulte la [Guía de inicio rápido](https://github.com/ORNL/oscar/blob/main/di
 | **Vista operativa (`Operational View`)** | Filtro con nombre (`?view=<clave>` o `/view/<clave>`) que limita el Panel, Eventos, Estado de salud y Generador de informes de una estación a un grupo específico de carriles. |
 | **Nivel frío Parquet (`PARQUET_PRIMARY`)** | Modo de almacenamiento predeterminado de OSCAR 3.11.0 donde PostgreSQL mantiene una ventana temporal de 30 minutos y las particiones cerradas se exportan a archivos Apache Parquet comprimidos con ZSTD (`archive/parquet/`). |
 | **Medios retenidos de 5 fotogramas** | En cada ocupación con alarma, OSCAR extrae 5 instantáneas JPEG (`frame-01.jpg` a `frame-05.jpg`). Tras 30 días, se depuran los fotogramas secundarios (`01`, `02`, `04`, `05`) y se conserva el fotograma central (`frame-03.jpg`). |
+| **OCR de contenedores y matrículas (`ocrConfig`)** | Reconocimiento óptico opcional por carril (`enabled = false` de forma predeterminada) que lee de forma asíncrona códigos de contenedor ISO 6346 (con dígito de control) y matrículas según lo permitan los recursos de CPU y memoria, autocompletando **ID del vehículo** para contenedores ISO válidos o matrículas con confianza `>= 85%` y mostrando chips de sugerencia con recortes JPEG (`/sensorhub/buckets/ocr/crops/`). |
 | **SAN (Nombre alternativo del sujeto)** | Lista de nombres de host y direcciones IP (como `oscar.local` y `192.168.0.57`) incluidos dentro de un certificado HTTPS que el navegador comprueba antes de confiar en la conexión. |
 
 ## 2. Confiar en el certificado de OSCAR
@@ -441,6 +442,7 @@ La lista varía con los paquetes instalados. Para un carril normal, seleccione *
 | Inicio automático | Inicia el carril al cargar la configuración. Actívelo tras verificar. |
 | Claves de vista operativa | Lista opcional de claves de estación autorizadas para mostrar este carril. Añada cada clave por separado; use entre 1 y 63 letras ASCII minúsculas (`a`–`z`), números o guiones, sin guion inicial ni final. Déjela vacía si el carril no debe pertenecer a una vista delimitada. |
 | Umbral de ocupación prolongada (min) | Duración en minutos (`1`–`1440`, predeterminado `1`) antes de que una ocupación activa publique `Fault - Extended Occupancy` e incremente el contador de fallas `Ext-Occ`. Cuando una ocupación prolongada termina con una alarma solo gamma (sin alarma de neutrones), OSCAR la suprime del panel activo y la adjudica automáticamente como **Código 9998: Alarma gamma de ocupación prolongada**. |
+| OCR de contenedores y matrículas | Ajuste opcional por carril (`enabled = false` de forma predeterminada). Cuando se activa en un carril, OSCAR ejecuta reconocimiento PP-OCRv3 ONNX en segundo plano según los recursos disponibles, publica candidatos `vehicleOcr` y autocompleta **ID del vehículo** al adjudicar; los carriles desactivados no registran `vehicleOcr` ni consumen recursos adicionales. |
 | Eliminar datos al eliminar el carril | Activo de forma predeterminada. Al eliminar el carril borra sus registros de base de datos. Desactívelo si debe conservar el historial. |
 | Información de fuente de datos | Metadatos heredados opcionales; úselos solo si el modelo SensorML del sitio los exige. |
 
@@ -532,7 +534,7 @@ Abra `https://<host-oscar>/`. El panel debe mostrar estados, tabla de eventos y 
 
 Úsela cuando los gráficos y el vídeo basten y no se necesiten evidencias ni WebID:
 
-1. Introduzca **ID del vehículo** si se conoce.
+1. Introduzca **ID del vehículo** si se conoce (en carriles con **OCR de contenedores / matrículas** habilitado, OSCAR autocompleta códigos ISO 6346 válidos o matrículas con confianza `>= 85%` salvo edición previa del operador, y ofrece chips de sugerencia con recortes).
 2. Elija un código de **Adjudicar** de la lista agrupada de 8.5.
 3. Defina **Inspección secundaria** como **Ninguna**, **Solicitada** o **Completada**.
 4. Añada **Notas** que justifiquen la decisión.

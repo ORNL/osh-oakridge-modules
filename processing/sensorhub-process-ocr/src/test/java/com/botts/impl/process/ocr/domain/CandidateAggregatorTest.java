@@ -1,0 +1,61 @@
+/*******************************************************************************
+ * Copyright (c) 2026 Botts Innovative Research, Inc.
+ * All rights reserved.
+ *******************************************************************************/
+package com.botts.impl.process.ocr.domain;
+
+import com.botts.impl.process.ocr.engine.OcrRead;
+import org.junit.jupiter.api.Test;
+import org.sensorhub.impl.utils.rad.model.VehicleOcrResult;
+
+import java.awt.Rectangle;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class CandidateAggregatorTest {
+
+    @Test
+    void concatenatesSameLineSplitStencilBoxesAndSuppressesPlateFragments() {
+        CandidateAggregator aggregator = new CandidateAggregator(0.55);
+
+        List<OcrRead> frameReads = List.of(
+                new OcrRead("CSQU", 0.94, new Rectangle(100, 200, 90, 36)),
+                new OcrRead("305438", 0.93, new Rectangle(210, 202, 130, 35)),
+                new OcrRead("3", 0.91, new Rectangle(355, 201, 28, 36)),
+                new OcrRead("CSQU305", 0.72, new Rectangle(100, 200, 180, 36)),
+                new OcrRead("TN849B2", 0.89, new Rectangle(420, 520, 120, 34))
+        );
+
+        var results = aggregator.aggregate(List.of(
+                new CandidateAggregator.FrameInput(0, 1280, 720, frameReads)
+        ));
+
+        assertEquals(2, results.size());
+        assertEquals(VehicleOcrResult.ID_TYPE_CONTAINER, results.get(0).idType());
+        assertEquals("CSQU3054383", results.get(0).normalizedValue());
+        assertTrue(results.get(0).checksumValid());
+
+        assertEquals(VehicleOcrResult.ID_TYPE_PLATE, results.get(1).idType());
+        assertEquals("TN849B2", results.get(1).normalizedValue());
+    }
+
+    @Test
+    void suppressesRepeatedStaticEdgeOsdAcrossFrames() {
+        CandidateAggregator aggregator = new CandidateAggregator(0.55, 0.05, 0.05);
+
+        OcrRead staticOsd = new OcrRead("CAM2A19", 0.96, new Rectangle(40, 80, 140, 28));
+        OcrRead realPlateF0 = new OcrRead("ABC1234", 0.88, new Rectangle(520, 410, 120, 34));
+        OcrRead realPlateF1 = new OcrRead("ABC1234", 0.91, new Rectangle(610, 420, 122, 35));
+
+        var results = aggregator.aggregate(List.of(
+                new CandidateAggregator.FrameInput(0, 1280, 720, List.of(staticOsd, realPlateF0)),
+                new CandidateAggregator.FrameInput(1, 1280, 720, List.of(staticOsd, realPlateF1)),
+                new CandidateAggregator.FrameInput(2, 1280, 720, List.of(staticOsd))
+        ));
+
+        assertEquals(1, results.size());
+        assertEquals("ABC1234", results.get(0).normalizedValue());
+        assertEquals(2, results.get(0).readCount());
+    }
+}

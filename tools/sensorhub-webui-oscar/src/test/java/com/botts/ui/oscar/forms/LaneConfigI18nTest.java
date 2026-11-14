@@ -25,6 +25,7 @@ import com.botts.impl.system.lane.config.CustomCameraConfig;
 import com.botts.impl.system.lane.config.FFMpegConfig;
 import com.botts.impl.system.lane.config.LaneConfig;
 import com.botts.impl.system.lane.config.LaneOptionsConfig;
+import com.botts.impl.system.lane.config.OcrConfig;
 import com.botts.impl.system.lane.config.RPMConfig;
 import com.botts.impl.system.lane.config.RapiscanRPMConfig;
 
@@ -88,6 +89,7 @@ public class LaneConfigI18nTest
             PositionConfig.EulerOrientation.class,
             LaneConfig.class,
             LaneOptionsConfig.class,
+            OcrConfig.class,
             ConnectionConfig.class,
             RPMConfig.class,
             FFMpegConfig.class,

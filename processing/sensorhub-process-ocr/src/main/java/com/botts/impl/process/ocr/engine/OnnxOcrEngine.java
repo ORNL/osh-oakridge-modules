@@ -1,0 +1,414 @@
+/*******************************************************************************
+ * Copyright (c) 2026 Botts Innovative Research, Inc.
+ * All rights reserved.
+ *******************************************************************************/
+package com.botts.impl.process.ocr.engine;
+
+import ai.onnxruntime.OnnxTensor;
+import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
+import ai.onnxruntime.OrtSession;
+import ai.onnxruntime.TensorInfo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.awt.Graphics2D;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.FloatBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * PP-OCRv3 CPU ONNX Runtime scene-text engine (DBNet detector + SVTR-LCNet CTC recognizer).
+ *
+ * <p>Hardened for 50-lane continuous operation:</p>
+ * <ul>
+ *   <li>Bounded native threads ({@code intraOp=2}, {@code interOp=1}).</li>
+ *   <li>{@code setMemoryPatternOptimization(false)} and {@code setCPUArenaAllocator(false)} so
+ *       variable-width text crops release off-heap native tensor memory immediately after each
+ *       {@code session.run()} instead of growing an unbounded native arena.</li>
+ *   <li>Process-wide reference-counted session sharing via {@link #acquireShared(Path)} so
+ *       multiple OCR-enabled lanes share one native model allocation rather than duplicating
+ *       {@code det.onnx}/{@code rec.onnx} in native RAM.</li>
+ * </ul>
+ */
+public class OnnxOcrEngine implements OcrEngine {
+
+    public static final String DET_MODEL = "det.onnx";
+    public static final String REC_MODEL = "rec.onnx";
+    public static final String DICT_FILE = "dict.txt";
+
+    private static final Path CONTAINER_MODEL_FALLBACK = Paths.get("/opt/oscar/models/ocr");
+    private static final Path DEV_MODEL_FALLBACK = Paths.get("dist/models/ocr");
+
+    static final int DET_MAX_SIDE = 960;
+    static final long MAX_FRAME_PIXELS = 4096L * 4096L;
+    static final int MAX_BOXES_PER_FRAME = 64;
+    static final float[] DET_MEAN = {0.485f, 0.456f, 0.406f};
+    static final float[] DET_STD = {0.229f, 0.224f, 0.225f};
+    static final int REC_DEFAULT_HEIGHT = 48;
+    static final int REC_MIN_WIDTH = 16;
+    static final int REC_MAX_WIDTH = 1920;
+
+    private static final Logger logger = LoggerFactory.getLogger(OnnxOcrEngine.class);
+
+    private static final Object SHARED_LOCK = new Object();
+    private static final Map<Path, SharedEntry> SHARED_ENGINES = new HashMap<>();
+
+    private static final class SharedEntry {
+        final OnnxOcrEngine engine;
+        int refCount;
+
+        SharedEntry(OnnxOcrEngine engine) {
+            this.engine = engine;
+            this.refCount = 1;
+        }
+    }
+
+    private final int intraOpThreads;
+    private final Object inferenceLock = new Object();
+
+    private OrtEnvironment env;
+    private OrtSession detSession;
+    private OrtSession recSession;
+    private String detInputName;
+    private String recInputName;
+    private CtcGreedyDecoder decoder;
+    private final DbNetPostProcessor postProcessor = new DbNetPostProcessor();
+    private int recHeight = REC_DEFAULT_HEIGHT;
+    private boolean closed = false;
+
+    public OnnxOcrEngine() {
+        this(2);
+    }
+
+    public OnnxOcrEngine(Path modelDir) {
+        this(2);
+        init(modelDir);
+    }
+
+    public OnnxOcrEngine(int intraOpThreads) {
+        this.intraOpThreads = Math.max(1, Math.min(4, intraOpThreads));
+    }
+
+    /**
+     * Resolves {@code requestedDir} against packaged fallbacks ({@code /opt/oscar/models/ocr},
+     * {@code dist/models/ocr}) so existing deployments with persistent state volumes locate
+     * bundled models automatically.
+     */
+    public static Path resolveModelDirectory(Path requestedDir) {
+        List<Path> candidates = new ArrayList<>(3);
+        if (requestedDir != null)
+            candidates.add(requestedDir);
+        candidates.add(CONTAINER_MODEL_FALLBACK);
+        candidates.add(DEV_MODEL_FALLBACK);
+
+        for (Path candidate : candidates) {
+            if (hasCompleteModelFiles(candidate))
+                return candidate.toAbsolutePath().normalize();
+        }
+        return requestedDir != null
+                ? requestedDir.toAbsolutePath().normalize()
+                : CONTAINER_MODEL_FALLBACK;
+    }
+
+    public static boolean hasCompleteModelFiles(Path dir) {
+        if (dir == null)
+            return false;
+        return Files.isReadable(dir.resolve(DET_MODEL))
+                && Files.isReadable(dir.resolve(REC_MODEL))
+                && Files.isReadable(dir.resolve(DICT_FILE));
+    }
+
+    /**
+     * Acquires a reference-counted shared {@link OcrEngine} for {@code modelDir}. Closing the
+     * returned handle decrements the reference count and closes native ONNX sessions only when
+     * the last lane releases it.
+     */
+    public static OcrEngine acquireShared(Path modelDir) {
+        Path resolved = resolveModelDirectory(modelDir);
+        synchronized (SHARED_LOCK) {
+            SharedEntry existing = SHARED_ENGINES.get(resolved);
+            if (existing != null) {
+                existing.refCount++;
+                return new LeaseHandle(resolved, existing.engine);
+            }
+            OnnxOcrEngine created = new OnnxOcrEngine(2);
+            created.init(resolved);
+            SHARED_ENGINES.put(resolved, new SharedEntry(created));
+            return new LeaseHandle(resolved, created);
+        }
+    }
+
+    private static void releaseShared(Path resolvedKey) {
+        OnnxOcrEngine toClose = null;
+        synchronized (SHARED_LOCK) {
+            SharedEntry entry = SHARED_ENGINES.get(resolvedKey);
+            if (entry == null)
+                return;
+            entry.refCount--;
+            if (entry.refCount <= 0) {
+                SHARED_ENGINES.remove(resolvedKey);
+                toClose = entry.engine;
+            }
+        }
+        if (toClose != null) {
+            toClose.close();
+        }
+    }
+
+    private static final class LeaseHandle implements OcrEngine {
+        private final Path key;
+        private final OnnxOcrEngine delegate;
+        private boolean released = false;
+
+        LeaseHandle(Path key, OnnxOcrEngine delegate) {
+            this.key = key;
+            this.delegate = delegate;
+        }
+
+        @Override
+        public List<OcrRead> recognize(BufferedImage frame) {
+            return delegate.recognize(frame);
+        }
+
+        @Override
+        public synchronized void close() {
+            if (released)
+                return;
+            released = true;
+            releaseShared(key);
+        }
+    }
+
+    public void init(Path requestedDir) {
+        Path modelDir = resolveModelDirectory(requestedDir);
+        Path detPath = modelDir.resolve(DET_MODEL);
+        Path recPath = modelDir.resolve(REC_MODEL);
+        Path dictPath = modelDir.resolve(DICT_FILE);
+        for (Path p : List.of(detPath, recPath, dictPath)) {
+            if (!Files.isReadable(p))
+                throw new OcrEngineException("OCR model file not found or unreadable: " + p);
+        }
+
+        synchronized (inferenceLock) {
+            try {
+                env = OrtEnvironment.getEnvironment();
+                try (OrtSession.SessionOptions options = createBoundedSessionOptions()) {
+                    detSession = env.createSession(detPath.toString(), options);
+                }
+                try (OrtSession.SessionOptions options = createBoundedSessionOptions()) {
+                    recSession = env.createSession(recPath.toString(), options);
+                }
+
+                detInputName = detSession.getInputNames().iterator().next();
+                recInputName = recSession.getInputNames().iterator().next();
+                recHeight = queryRecInputHeight(recSession, recInputName);
+
+                List<String> charset = Files.readAllLines(dictPath, StandardCharsets.UTF_8);
+                decoder = new CtcGreedyDecoder(charset);
+                closed = false;
+
+                logger.info("OCR ONNX engine initialized from {} (recHeight={}, intraOpThreads={})",
+                        modelDir, recHeight, intraOpThreads);
+            } catch (OrtException | IOException e) {
+                close();
+                throw new OcrEngineException("Failed to initialize ONNX OCR engine from " + modelDir, e);
+            }
+        }
+    }
+
+    private OrtSession.SessionOptions createBoundedSessionOptions() throws OrtException {
+        OrtSession.SessionOptions options = new OrtSession.SessionOptions();
+        options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
+        options.setIntraOpNumThreads(intraOpThreads);
+        options.setInterOpNumThreads(1);
+        options.setMemoryPatternOptimization(false);
+        options.setCPUArenaAllocator(false);
+        return options;
+    }
+
+    private int queryRecInputHeight(OrtSession session, String inputName) {
+        try {
+            var info = session.getInputInfo().get(inputName);
+            if (info != null && info.getInfo() instanceof TensorInfo tensorInfo) {
+                long[] shape = tensorInfo.getShape();
+                if (shape.length == 4 && shape[2] > 0)
+                    return (int) shape[2];
+            }
+        } catch (OrtException e) {
+            logger.debug("Could not query rec model input shape, using default height", e);
+        }
+        return REC_DEFAULT_HEIGHT;
+    }
+
+    @Override
+    public List<OcrRead> recognize(BufferedImage image) {
+        if (image == null)
+            return List.of();
+        int w = image.getWidth();
+        int h = image.getHeight();
+        if (w <= 1 || h <= 1 || (long) w * h > MAX_FRAME_PIXELS)
+            throw new OcrEngineException("Invalid frame dimensions for OCR: " + w + "x" + h);
+
+        synchronized (inferenceLock) {
+            if (closed || detSession == null || recSession == null)
+                throw new OcrEngineException("OCR engine is not initialized or already closed");
+
+            List<Rectangle> boxes = detect(image);
+            if (boxes.isEmpty())
+                return List.of();
+
+            int limit = Math.min(boxes.size(), MAX_BOXES_PER_FRAME);
+            List<OcrRead> reads = new ArrayList<>(limit);
+            for (int i = 0; i < limit; i++) {
+                Rectangle box = boxes.get(i);
+                if (box.width <= 1 || box.height <= 1)
+                    continue;
+                BufferedImage crop = image.getSubimage(box.x, box.y, box.width, box.height);
+                CtcGreedyDecoder.Decoded decoded = recognizeCrop(crop);
+                if (decoded.text() != null && !decoded.text().isBlank()) {
+                    reads.add(new OcrRead(decoded.text(), decoded.confidence(), box));
+                }
+            }
+            return reads;
+        }
+    }
+
+    private List<Rectangle> detect(BufferedImage image) {
+        int ow = image.getWidth();
+        int oh = image.getHeight();
+        double ratio = Math.min(1.0, DET_MAX_SIDE / (double) Math.max(ow, oh));
+        int rw = roundToMultipleOf32(ow * ratio);
+        int rh = roundToMultipleOf32(oh * ratio);
+
+        BufferedImage resized = resize(image, rw, rh);
+        try {
+            float[] tensor = toNchw(resized, DET_MEAN, DET_STD);
+            try (OnnxTensor input = OnnxTensor.createTensor(env, FloatBuffer.wrap(tensor), new long[]{1, 3, rh, rw});
+                 OrtSession.Result result = detSession.run(Collections.singletonMap(detInputName, input))) {
+                float[][][][] output = (float[][][][]) result.get(0).getValue();
+                float[][] probMap = output[0][0];
+                double scaleX = ow / (double) probMap[0].length;
+                double scaleY = oh / (double) probMap.length;
+                return postProcessor.extractBoxes(probMap, scaleX, scaleY, ow, oh);
+            } catch (OrtException e) {
+                throw new OcrEngineException("Text detection failed", e);
+            }
+        } finally {
+            if (resized != image)
+                resized.flush();
+        }
+    }
+
+    private CtcGreedyDecoder.Decoded recognizeCrop(BufferedImage crop) {
+        int width = (int) Math.round(crop.getWidth() * (recHeight / (double) Math.max(1, crop.getHeight())));
+        width = Math.max(REC_MIN_WIDTH, Math.min(REC_MAX_WIDTH, width));
+
+        BufferedImage resized = resize(crop, width, recHeight);
+        try {
+            float[] tensor = toNchwCentered(resized);
+            try (OnnxTensor input = OnnxTensor.createTensor(env, FloatBuffer.wrap(tensor), new long[]{1, 3, recHeight, width});
+                 OrtSession.Result result = recSession.run(Collections.singletonMap(recInputName, input))) {
+                float[][][] output = (float[][][]) result.get(0).getValue();
+                return decoder.decode(output[0]);
+            } catch (OrtException e) {
+                throw new OcrEngineException("Text recognition failed", e);
+            }
+        } finally {
+            if (resized != crop)
+                resized.flush();
+        }
+    }
+
+    private static int roundToMultipleOf32(double v) {
+        return Math.max(32, (int) Math.round(v / 32.0) * 32);
+    }
+
+    static BufferedImage resize(BufferedImage src, int width, int height) {
+        if (src.getWidth() == width && src.getHeight() == height && src.getType() == BufferedImage.TYPE_INT_RGB)
+            return src;
+        BufferedImage dst = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = dst.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.drawImage(src, 0, 0, width, height, null);
+        } finally {
+            g.dispose();
+        }
+        return dst;
+    }
+
+    static float[] toNchw(BufferedImage image, float[] mean, float[] std) {
+        int w = image.getWidth();
+        int h = image.getHeight();
+        float[] tensor = new float[3 * h * w];
+        int planeSize = h * w;
+        int[] row = new int[w];
+
+        for (int y = 0; y < h; y++) {
+            image.getRGB(0, y, w, 1, row, 0, w);
+            for (int x = 0; x < w; x++) {
+                int rgb = row[x];
+                int i = y * w + x;
+                tensor[i] = (((rgb >> 16) & 0xFF) / 255f - mean[0]) / std[0];
+                tensor[planeSize + i] = (((rgb >> 8) & 0xFF) / 255f - mean[1]) / std[1];
+                tensor[2 * planeSize + i] = ((rgb & 0xFF) / 255f - mean[2]) / std[2];
+            }
+        }
+        return tensor;
+    }
+
+    static float[] toNchwCentered(BufferedImage image) {
+        int w = image.getWidth();
+        int h = image.getHeight();
+        float[] tensor = new float[3 * h * w];
+        int planeSize = h * w;
+        int[] row = new int[w];
+
+        for (int y = 0; y < h; y++) {
+            image.getRGB(0, y, w, 1, row, 0, w);
+            for (int x = 0; x < w; x++) {
+                int rgb = row[x];
+                int i = y * w + x;
+                tensor[i] = ((rgb >> 16) & 0xFF) / 127.5f - 1f;
+                tensor[planeSize + i] = ((rgb >> 8) & 0xFF) / 127.5f - 1f;
+                tensor[2 * planeSize + i] = (rgb & 0xFF) / 127.5f - 1f;
+            }
+        }
+        return tensor;
+    }
+
+    @Override
+    public void close() {
+        synchronized (inferenceLock) {
+            closed = true;
+            try {
+                if (detSession != null)
+                    detSession.close();
+            } catch (Exception e) {
+                logger.warn("Error closing ONNX detection session", e);
+            } finally {
+                detSession = null;
+            }
+            try {
+                if (recSession != null)
+                    recSession.close();
+            } catch (Exception e) {
+                logger.warn("Error closing ONNX recognition session", e);
+            } finally {
+                recSession = null;
+            }
+        }
+    }
+}

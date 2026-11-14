@@ -1,0 +1,30 @@
+description = 'Camera-based container and license plate OCR for lane occupancies'
+ext.details = 'PaddleOCR (ONNX Runtime) detection and recognition with ISO 6346 container ID and license plate normalization, bounded evidence crop archiving, and asynchronous resource-governed scheduling'
+version = '0.1.0'
+
+dependencies {
+    implementation 'org.sensorhub:sensorhub-core:' + oshCoreVersion
+    api project(':sensorhub-utils-rad')
+    implementation project(':sensorhub-service-bucket')
+    embeddedImpl 'com.microsoft.onnxruntime:onnxruntime:1.20.0'
+    compileOnly 'org.bytedeco:ffmpeg-platform:7.1-1.5.11'
+    testImplementation 'org.bytedeco:ffmpeg-platform:7.1-1.5.11'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+ext.pom >>= {
+    developers {
+        developer {
+            id 'botts'
+            name 'Botts Innovative Research'
+            organization 'Botts Innovative Research, Inc.'
+            organizationUrl 'http://www.botts-inc.com'
+        }
+    }
+}

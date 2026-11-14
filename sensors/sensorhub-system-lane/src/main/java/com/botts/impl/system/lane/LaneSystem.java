@@ -28,6 +28,7 @@ import com.botts.impl.sensor.rapiscan.RapiscanSensor;
 import com.botts.impl.sensor.rs350.RS350Config;
 import com.botts.impl.sensor.rs350.RS350Sensor;
 import com.botts.impl.system.lane.helpers.eml.EmlAutoAdjudicationHelper;
+import com.botts.impl.system.lane.helpers.ocr.OcrHelper;
 import com.botts.impl.system.lane.helpers.webid.WebIdHelper;
 import org.sensorhub.impl.utils.rad.output.N42Output;
 import com.botts.impl.system.lane.config.*;
@@ -102,6 +103,8 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     AdjudicationControl adjudicationControl;
     WebIdOutput webIdOutput;
     N42Output<?> n42Output;
+    VehicleOcrOutput vehicleOcrOutput;
+    OcrHelper ocrHelper;
 
     @Override
     protected void setState(ModuleEvent.ModuleState newState) {
@@ -201,6 +204,14 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         occupancyStatusOutput = new OccupancyStatusOutput(this);
         occupancyStatusOutput.setExtendedOccupancyThresholdMinutes(getExtendedOccupancyThresholdMinutes());
         addOutput(occupancyStatusOutput, false);
+
+        // OCR is strictly opt-in: disabled lanes register no vehicleOcr datastream
+        if (getConfiguration().ocrConfig != null && getConfiguration().ocrConfig.enabled) {
+            vehicleOcrOutput = new VehicleOcrOutput(this);
+            addOutput(vehicleOcrOutput, false);
+        } else {
+            vehicleOcrOutput = null;
+        }
 
         adjudicationControl = new AdjudicationControl(this);
         addControlInput(adjudicationControl);
@@ -423,6 +434,15 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         } else {
             webIdHelper = null;
         }
+
+        if (ocrHelper != null) {
+            ocrHelper.stop();
+            ocrHelper = null;
+        }
+        var ocrConfig = getConfiguration().ocrConfig;
+        if (ocrConfig != null && ocrConfig.enabled && vehicleOcrOutput != null && occupancyProducer != null) {
+            ocrHelper = new OcrHelper(this, occupancyProducer, vehicleOcrOutput, ocrConfig);
+        }
     }
 
     protected void doStop() throws SensorHubException {
@@ -431,6 +451,10 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         if (emlAutoAdjudicationHelper != null) {
             emlAutoAdjudicationHelper.stop();
             emlAutoAdjudicationHelper = null;
+        }
+        if (ocrHelper != null) {
+            ocrHelper.stop();
+            ocrHelper = null;
         }
         super.doStop();
         if (webIdHelper != null) {
@@ -451,6 +475,10 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         if (emlAutoAdjudicationHelper != null) {
             emlAutoAdjudicationHelper.stop();
             emlAutoAdjudicationHelper = null;
+        }
+        if (ocrHelper != null) {
+            ocrHelper.stop();
+            ocrHelper = null;
         }
         super.cleanup();
 

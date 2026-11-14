@@ -1,0 +1,396 @@
+/*******************************************************************************
+ * Copyright (c) 2026 Botts Innovative Research, Inc.
+ * All rights reserved.
+ *******************************************************************************/
+package com.botts.impl.process.ocr.domain;
+
+import com.botts.impl.process.ocr.engine.OcrRead;
+import com.botts.impl.process.ocr.pipeline.OcrSettings;
+import org.sensorhub.impl.utils.rad.model.VehicleOcrResult;
+
+import java.awt.Rectangle;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * Aggregates raw per-frame OCR detections across cameras and frames into ranked
+ * {@link VehicleOcrResult#ID_TYPE_CONTAINER} and {@link VehicleOcrResult#ID_TYPE_PLATE} candidates.
+ */
+public final class CandidateAggregator {
+
+    public static final int MAX_CANDIDATES_PER_TYPE = 3;
+    private static final double STATIC_EDGE_BAND_FRACTION = 0.18;
+
+    public record FrameInput(int frameIndex, int frameWidth, int frameHeight, List<OcrRead> reads) {
+        public FrameInput(int frameIndex, List<OcrRead> reads) {
+            this(frameIndex, 0, 0, reads);
+        }
+    }
+
+    public record AggregatedCandidate(
+            String idType,
+            String normalizedValue,
+            String rawText,
+            double confidence,
+            boolean checksumValid,
+            boolean checkDigitRepaired,
+            int bestFrameIndex,
+            Rectangle bestBoundingBox,
+            int readCount,
+            double effectiveScore
+    ) {}
+
+    private final boolean readContainerIds;
+    private final boolean readPlates;
+    private final double containerMinConfidence;
+    private final double plateMinConfidence;
+    private final double ignoreTopFraction;
+    private final double ignoreBottomFraction;
+
+    public CandidateAggregator(double minConfidence) {
+        this(new OcrSettings(Paths.get("models/ocr"), true, true, 6, minConfidence, minConfidence, 0.0, 0.0));
+    }
+
+    public CandidateAggregator(double minConfidence, double ignoreTopFraction, double ignoreBottomFraction) {
+        this(new OcrSettings(Paths.get("models/ocr"), true, true, 6, minConfidence, minConfidence,
+                ignoreTopFraction, ignoreBottomFraction));
+    }
+
+    public CandidateAggregator(OcrSettings settings) {
+        this.readContainerIds = settings.readContainerIds();
+        this.readPlates = settings.readPlates();
+        this.containerMinConfidence = settings.containerMinConfidence();
+        this.plateMinConfidence = settings.plateMinConfidence();
+        this.ignoreTopFraction = settings.ignoreTopFraction();
+        this.ignoreBottomFraction = settings.ignoreBottomFraction();
+    }
+
+    public List<AggregatedCandidate> aggregate(List<FrameInput> frames) {
+        if (frames == null || frames.isEmpty())
+            return List.of();
+
+        Set<String> staticEdgeKeys = findStaticEdgePositions(frames);
+        Map<String, Accumulator> byKey = new LinkedHashMap<>();
+
+        for (FrameInput frame : frames) {
+            if (frame == null || frame.reads() == null || frame.reads().isEmpty())
+                continue;
+
+            List<OcrRead> usable = new ArrayList<>();
+            for (OcrRead read : frame.reads()) {
+                if (read == null || read.text() == null || read.text().isBlank())
+                    continue;
+                if (isInIgnoredBand(read, frame.frameHeight()))
+                    continue;
+                if (isStaticEdgeOsd(read, frame, staticEdgeKeys))
+                    continue;
+                usable.add(read);
+            }
+            if (usable.isEmpty())
+                continue;
+
+            // 1. Per-box evaluation
+            for (OcrRead read : usable) {
+                evaluateAndRecord(byKey, frame.frameIndex(), read.text(), read.confidence(), read.boundingBox());
+            }
+
+            // 2. Same-line horizontal box concatenation for split container stencils / boxed check digit
+            if (readContainerIds) {
+                for (LineRead merged : buildSameLineConcatenations(usable)) {
+                    Optional<Iso6346.Match> iso = Iso6346.extractBest(merged.text);
+                    if (iso.isPresent()) {
+                        Iso6346.Match m = iso.get();
+                        recordCandidate(
+                                byKey,
+                                VehicleOcrResult.ID_TYPE_CONTAINER,
+                                m.compact(),
+                                merged.text,
+                                merged.confidence,
+                                m.checksumValid(),
+                                m.checkDigitRepaired(),
+                                frame.frameIndex(),
+                                merged.unionBox);
+                    }
+                }
+            }
+        }
+
+        if (byKey.isEmpty())
+            return List.of();
+
+        List<AggregatedCandidate> all = new ArrayList<>(byKey.size());
+        for (Accumulator acc : byKey.values()) {
+            AggregatedCandidate c = acc.toCandidate();
+            double floor = VehicleOcrResult.ID_TYPE_CONTAINER.equals(c.idType())
+                    ? containerMinConfidence
+                    : plateMinConfidence;
+            if (!c.checksumValid() && c.confidence() < floor)
+                continue;
+            all.add(c);
+        }
+
+        // Remove any "plate" that is merely a substring fragment of a detected container number
+        all.removeIf(c -> VehicleOcrResult.ID_TYPE_PLATE.equals(c.idType())
+                && all.stream().anyMatch(other ->
+                VehicleOcrResult.ID_TYPE_CONTAINER.equals(other.idType())
+                        && other.normalizedValue().contains(c.normalizedValue())));
+
+        all.sort(Comparator.comparingDouble(AggregatedCandidate::effectiveScore).reversed());
+
+        List<AggregatedCandidate> capped = new ArrayList<>();
+        int containers = 0;
+        int plates = 0;
+        for (AggregatedCandidate c : all) {
+            if (VehicleOcrResult.ID_TYPE_CONTAINER.equals(c.idType())) {
+                if (containers++ < MAX_CANDIDATES_PER_TYPE)
+                    capped.add(c);
+            } else if (plates++ < MAX_CANDIDATES_PER_TYPE) {
+                capped.add(c);
+            }
+        }
+        return capped;
+    }
+
+    private void evaluateAndRecord(Map<String, Accumulator> byKey,
+                                   int frameIndex,
+                                   String rawText,
+                                   double confidence,
+                                   Rectangle box) {
+        if (readContainerIds) {
+            Optional<Iso6346.Match> iso = Iso6346.extractBest(rawText);
+            if (iso.isPresent()) {
+                Iso6346.Match m = iso.get();
+                recordCandidate(
+                        byKey,
+                        VehicleOcrResult.ID_TYPE_CONTAINER,
+                        m.compact(),
+                        rawText,
+                        confidence,
+                        m.checksumValid(),
+                        m.checkDigitRepaired(),
+                        frameIndex,
+                        box);
+                return;
+            }
+        }
+
+        if (readPlates) {
+            Optional<String> plate = PlateHeuristics.normalizePlate(rawText);
+            if (plate.isPresent()) {
+                recordCandidate(
+                        byKey,
+                        VehicleOcrResult.ID_TYPE_PLATE,
+                        plate.get(),
+                        rawText,
+                        confidence,
+                        false,
+                        false,
+                        frameIndex,
+                        box);
+            }
+        }
+    }
+
+    private void recordCandidate(Map<String, Accumulator> byKey,
+                                 String idType,
+                                 String normalized,
+                                 String raw,
+                                 double confidence,
+                                 boolean checksumValid,
+                                 boolean checkDigitRepaired,
+                                 int frameIndex,
+                                 Rectangle box) {
+        String key = idType + ":" + normalized;
+        Accumulator acc = byKey.computeIfAbsent(key, k -> new Accumulator(idType, normalized));
+        acc.observe(raw, confidence, checksumValid, checkDigitRepaired, frameIndex, box);
+    }
+
+    private record LineRead(String text, double confidence, Rectangle unionBox) {}
+
+    private List<LineRead> buildSameLineConcatenations(List<OcrRead> reads) {
+        if (reads.size() < 2)
+            return List.of();
+        List<OcrRead> sorted = new ArrayList<>(reads);
+        sorted.sort(Comparator.comparingInt(r -> r.boundingBox() != null ? r.boundingBox().x : 0));
+
+        List<LineRead> merged = new ArrayList<>();
+        boolean[] usedAsSeed = new boolean[sorted.size()];
+        for (int i = 0; i < sorted.size(); i++) {
+            if (usedAsSeed[i])
+                continue;
+            OcrRead first = sorted.get(i);
+            if (first.boundingBox() == null)
+                continue;
+
+            List<OcrRead> line = new ArrayList<>();
+            line.add(first);
+            Rectangle union = new Rectangle(first.boundingBox());
+            double centerY = first.boundingBox().getCenterY();
+            double height = Math.max(1.0, first.boundingBox().getHeight());
+
+            for (int j = i + 1; j < sorted.size(); j++) {
+                OcrRead next = sorted.get(j);
+                if (next.boundingBox() == null)
+                    continue;
+                double dy = Math.abs(next.boundingBox().getCenterY() - centerY);
+                double nextH = Math.max(1.0, next.boundingBox().getHeight());
+                double maxH = Math.max(height, nextH);
+                int gapX = next.boundingBox().x - (union.x + union.width);
+                if (dy <= maxH * 0.65 && gapX >= -((int) maxH) && gapX <= maxH * 5.0) {
+                    line.add(next);
+                    union = union.union(next.boundingBox());
+                    usedAsSeed[j] = true;
+                }
+            }
+
+            if (line.size() >= 2) {
+                boolean anyStandaloneValid = line.stream().anyMatch(r -> {
+                    Optional<Iso6346.Match> m = Iso6346.extractBest(r.text());
+                    return m.isPresent() && m.get().checksumValid() && !m.get().checkDigitRepaired();
+                });
+                if (anyStandaloneValid)
+                    continue;
+
+                StringBuilder sb = new StringBuilder();
+                double confSum = 0.0;
+                for (int k = 0; k < line.size(); k++) {
+                    if (k > 0)
+                        sb.append(' ');
+                    sb.append(line.get(k).text().trim());
+                    confSum += line.get(k).confidence();
+                }
+                merged.add(new LineRead(sb.toString(), confSum / line.size(), union));
+            }
+        }
+        return merged;
+    }
+
+    private boolean isInIgnoredBand(OcrRead read, int frameHeight) {
+        if (frameHeight <= 0 || read.boundingBox() == null)
+            return false;
+        double cy = read.boundingBox().getCenterY() / frameHeight;
+        if (ignoreTopFraction > 0 && cy <= ignoreTopFraction)
+            return true;
+        return ignoreBottomFraction > 0 && cy >= (1.0 - ignoreBottomFraction);
+    }
+
+    private Set<String> findStaticEdgePositions(List<FrameInput> frames) {
+        if (frames.size() < 2)
+            return Set.of();
+        Map<String, Set<Integer>> seenFrames = new HashMap<>();
+        for (FrameInput f : frames) {
+            if (f == null || f.frameHeight() <= 0 || f.frameWidth() <= 0 || f.reads() == null)
+                continue;
+            for (OcrRead r : f.reads()) {
+                if (r == null || r.boundingBox() == null || r.text() == null)
+                    continue;
+                String edgeKey = edgeKeyFor(r, f);
+                if (edgeKey != null) {
+                    seenFrames.computeIfAbsent(edgeKey, k -> new HashSet<>()).add(f.frameIndex());
+                }
+            }
+        }
+        Set<String> repeated = new HashSet<>();
+        for (Map.Entry<String, Set<Integer>> e : seenFrames.entrySet()) {
+            // Static edge text appearing in identical quantized slot on >= 3 frames (or all frames when >=2)
+            int threshold = Math.max(2, (int) Math.ceil(frames.size() * 0.5));
+            if (e.getValue().size() >= threshold) {
+                repeated.add(e.getKey());
+            }
+        }
+        return repeated;
+    }
+
+    private boolean isStaticEdgeOsd(OcrRead read, FrameInput frame, Set<String> staticEdgeKeys) {
+        if (staticEdgeKeys.isEmpty())
+            return false;
+        String key = edgeKeyFor(read, frame);
+        return key != null && staticEdgeKeys.contains(key);
+    }
+
+    private static String edgeKeyFor(OcrRead read, FrameInput frame) {
+        if (frame.frameWidth() <= 0 || frame.frameHeight() <= 0 || read.boundingBox() == null)
+            return null;
+        double cy = read.boundingBox().getCenterY();
+        boolean inEdge = cy <= frame.frameHeight() * STATIC_EDGE_BAND_FRACTION
+                || cy >= frame.frameHeight() * (1.0 - STATIC_EDGE_BAND_FRACTION);
+        if (!inEdge)
+            return null;
+
+        int qx = (int) Math.round((read.boundingBox().getCenterX() / frame.frameWidth()) * 25.0);
+        int qy = (int) Math.round((cy / frame.frameHeight()) * 25.0);
+        String normText = read.text().trim().toUpperCase(Locale.ROOT);
+        return qx + ":" + qy + ":" + normText;
+    }
+
+    private static final class Accumulator {
+        private final String idType;
+        private final String normalizedValue;
+        private String bestRawText = "";
+        private double bestConfidence = -1.0;
+        private boolean checksumValid = false;
+        private boolean checkDigitRepaired = true;
+        private int bestFrameIndex = 0;
+        private Rectangle bestBox = null;
+        private final Set<Integer> framesSeen = new HashSet<>();
+
+        Accumulator(String idType, String normalizedValue) {
+            this.idType = idType;
+            this.normalizedValue = normalizedValue;
+        }
+
+        void observe(String raw,
+                     double conf,
+                     boolean validChecksum,
+                     boolean repaired,
+                     int frameIndex,
+                     Rectangle box) {
+            boolean first = framesSeen.isEmpty();
+            framesSeen.add(frameIndex);
+            this.checksumValid |= validChecksum;
+            this.checkDigitRepaired = first ? repaired : (this.checkDigitRepaired && repaired);
+            if (conf > bestConfidence) {
+                this.bestConfidence = conf;
+                this.bestRawText = raw;
+                this.bestFrameIndex = frameIndex;
+                this.bestBox = box == null ? null : new Rectangle(box);
+            }
+        }
+
+        AggregatedCandidate toCandidate() {
+            int hits = framesSeen.size();
+            double bonus = 0.0;
+            if (VehicleOcrResult.ID_TYPE_CONTAINER.equals(idType)) {
+                // Weighted checksum bonus (+0.22 for direct valid, +0.18 for repaired check digit)
+                // so a high-confidence real stencil outranks a low-confidence 1-in-11 chance hit.
+                if (checksumValid) {
+                    bonus += checkDigitRepaired ? 0.18 : 0.22;
+                } else {
+                    bonus -= 0.10;
+                }
+            }
+            bonus += Math.min(0.15, 0.05 * Math.max(0, hits - 1));
+            double effective = bestConfidence + bonus;
+            return new AggregatedCandidate(
+                    idType,
+                    normalizedValue,
+                    bestRawText,
+                    bestConfidence,
+                    checksumValid,
+                    checksumValid && checkDigitRepaired,
+                    bestFrameIndex,
+                    bestBox,
+                    hits,
+                    effective);
+        }
+    }
+}

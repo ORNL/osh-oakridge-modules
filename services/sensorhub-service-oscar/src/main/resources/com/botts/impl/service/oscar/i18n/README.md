@@ -65,6 +65,7 @@ Use the release [Quick Start](https://github.com/ORNL/oscar/blob/main/dist/relea
 | **Operational View** | A named filter (`?view=<key>` or `/view/<key>`) that scopes a workstation's Dashboard, Events, Status of Health, and Report Generator to a specific group of lanes (for example, `north-gate`). |
 | **Parquet Cold Tier (`PARQUET_PRIMARY`)** | OSCAR 3.11.0's default storage mode where PostgreSQL holds a 30-minute hot staging window and completed 30-minute partitions are exported to ZSTD-compressed Apache Parquet files (`archive/parquet/`) for fast, compact long-term querying. |
 | **Retained 5-Frame Media** | For every alarm occupancy, OSCAR extracts 5 evenly spaced JPEG snapshots (`frame-01.jpg` to `frame-05.jpg`). After 30 days, secondary frames (`01`, `02`, `04`, `05`) are pruned while the midpoint keyframe (`frame-03.jpg`) is preserved. |
+| **Container & License Plate OCR (`ocrConfig`)** | Optional per-lane background OCR (`enabled = false` by default) that asynchronously reads ISO 6346 shipping container codes (with check-digit verification) and license plates from occupancy camera frames as CPU and heap resources allow, auto-filling **Vehicle ID** for checksum-valid containers or high-confidence (`>= 85%`) plates while providing clickable suggestion chips and JPEG evidence crops (`/sensorhub/buckets/ocr/crops/`). |
 | **SAN (Subject Alternative Name)** | The list of hostnames and IP addresses (such as `oscar.local` and `192.168.0.57`) embedded inside an HTTPS certificate that a browser checks before trusting the connection. |
 
 ## 2. Trust the OSCAR certificate
@@ -441,6 +442,7 @@ The available list can change with installed bundles. For ordinary lane setup, s
 | Auto Start | Starts the lane automatically when configuration loads. Enable for operational lanes after configuration is verified. |
 | Operational View Keys | Optional list of workstation view keys allowed to display this lane. Add each key separately; use 1–63 lowercase ASCII letters (`a`–`z`), numbers, or hyphens, with no leading or trailing hyphen. Leave empty when the lane should have no scoped-view assignment. |
 | Extended Occupancy Threshold (min) | Duration in minutes (`1`–`1440`, default `1`) before an active occupancy publishes a `Fault - Extended Occupancy` status observation and increments the lane's `Ext-Occ` fault count. When an extended occupancy completes with a gamma-only alarm (no neutron alarm), OSCAR suppresses it from the live Dashboard queue and automatically adjudicates it as **Code 9998: Extended Occupancy Gamma Alarm**. |
+| Container & License Plate OCR | Optional per-lane OCR settings (`Enable Container / Plate OCR`, `Frames Sampled per Video`, `Min Confidence`, `Require ISO 6346 Check Digit`, `Recognize License Plates`, `Save Crop Evidence`, `Model Directory`, default `enabled = false`). When enabled on a lane, OSCAR runs PP-OCRv3 ONNX recognition asynchronously on a low-priority resource-governed worker, publishes `vehicleOcr` candidates, and auto-fills **Vehicle ID** during adjudication; disabled lanes register no `vehicleOcr` output and incur zero runtime overhead. |
 | Delete Data on Lane Removal | Defaults enabled. If selected, removing the lane deletes its database records. Clear it when decommissioning must preserve historical data. |
 | Data Source Info | Optional inherited metadata shown by some builds; use only when the site's SensorML/data-source model requires it. |
 
@@ -543,7 +545,7 @@ Open `https://<oscar-host>/`. The dashboard should show lane status, the event t
 
 Use the dashboard form when the chart/video is sufficient and no evidence upload or WebID analysis is needed:
 
-1. Enter **Vehicle ID** when it is known.
+1. Enter **Vehicle ID** when it is known (on lanes with **Container / Plate OCR** enabled, OSCAR automatically fills ISO 6346 checksum-valid container codes or `>= 85%`-confidence license plates unless you have edited the field, and displays clickable suggestion chips with crop previews).
 2. Choose one **Adjudicate** code from the grouped list in section 8.5.
 3. Set **Secondary Inspection** to **None**, **Requested**, or **Completed**.
 4. Add **Notes** that support the decision.

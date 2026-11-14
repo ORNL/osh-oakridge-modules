@@ -42,6 +42,9 @@ public class LaneConfig extends SensorSystemConfig {
     @DisplayInfo(desc = "Additional options when creating an RPM lane.")
     public LaneOptionsConfig laneOptionsConfig;
 
+    @DisplayInfo(label = "Vehicle OCR", desc = "Optional asynchronous OCR of container numbers and license plates from lane camera recordings. Disabled by default.")
+    public OcrConfig ocrConfig;
+
     @DisplayInfo(label = "Delete Data on Lane Removal", desc = "Select this to automatically delete all records of this lane when the lane is deleted.")
     public boolean autoDelete = true;
 }

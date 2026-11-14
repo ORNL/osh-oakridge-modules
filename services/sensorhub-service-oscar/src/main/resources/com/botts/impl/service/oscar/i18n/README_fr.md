@@ -65,6 +65,7 @@ Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/mai
 | **Vue opérationnelle (`Operational View`)** | Filtre nommé (`?view=<clé>` ou `/view/<clé>`) limitant le Tableau de bord, les Événements, l'État de santé et le Générateur de rapports d'un poste à un groupe de voies précis. |
 | **Niveau froid Parquet (`PARQUET_PRIMARY`)** | Mode de stockage par défaut d'OSCAR 3.11.0 dans lequel PostgreSQL conserve une fenêtre de transit de 30 minutes et les partitions terminées sont exportées en fichiers Apache Parquet compressés ZSTD (`archive/parquet/`). |
 | **Médias conservés à 5 images** | Pour chaque occupation avec alarme, OSCAR extrait 5 instantanés JPEG (`frame-01.jpg` à `frame-05.jpg`). Après 30 jours, les images secondaires (`01`, `02`, `04`, `05`) sont purgées et l'image centrale (`frame-03.jpg`) est conservée. |
+| **OCR de conteneurs et plaques (`ocrConfig`)** | Lecture optique facultative par voie (`enabled = false` par défaut) analysant de façon asynchrone les codes conteneur ISO 6346 (avec chiffre de contrôle) et les plaques d'immatriculation selon les ressources CPU et mémoire disponibles, préremplissant l'**ID véhicule** pour les conteneurs ISO valides ou les plaques `>= 85%` et affichant des puces de suggestion avec vignettes JPEG (`/sensorhub/buckets/ocr/crops/`). |
 | **SAN (Nom alternatif du sujet)** | Liste des noms d'hôtes et adresses IP (tels que `oscar.local` et `192.168.0.57`) inscrits dans un certificat HTTPS que le navigateur vérifie avant d'établir la connexion. |
 
 ## 2. Approuver le certificat OSCAR
@@ -441,6 +442,7 @@ La liste varie selon les paquets installés. Pour une voie ordinaire, choisissez
 | Démarrage automatique | Démarre la voie au chargement. Activez après vérification. |
 | Clés de vue opérationnelle | Liste facultative des clés de poste autorisées à afficher cette voie. Ajoutez chaque clé séparément ; utilisez 1 à 63 lettres ASCII minuscules (`a`–`z`), chiffres ou tirets, sans tiret initial ni final. Laissez vide si la voie ne doit appartenir à aucune vue limitée. |
 | Seuil d'occupation prolongée (min) | Durée en minutes (`1`–`1440`, défaut `1`) avant qu'une occupation active ne publie `Fault - Extended Occupancy` et n'incrémente le compteur de défauts `Ext-Occ`. Lorsqu'une occupation prolongée se termine par une alarme gamma seule (sans alarme neutron), OSCAR la masque du tableau de bord actif et l'adjuge automatiquement comme **Code 9998 : Alarme gamma d'occupation prolongée**. |
+| OCR de conteneurs et plaques | Réglage facultatif par voie (`enabled = false` par défaut). Lorsqu'il est activé sur une voie, OSCAR exécute la reconnaissance PP-OCRv3 ONNX en arrière-plan selon les ressources disponibles, publie les candidats `vehicleOcr` et préremplit l'**ID véhicule** lors de l'adjudication ; les voies désactivées n'enregistrent pas `vehicleOcr` et n'ajoutent aucune surcharge. |
 | Supprimer les données avec la voie | Activé par défaut. La suppression de la voie efface ses données. Désactivez-le si l'historique doit être conservé. |
 | Informations de source de données | Métadonnées héritées facultatives, seulement si le modèle SensorML du site les exige. |
 
@@ -532,7 +534,7 @@ Ouvrez `https://<hote-oscar>/`. Le tableau de bord doit afficher l'état des voi
 
 Utilisez-la lorsque graphiques et vidéo suffisent, sans preuve ni WebID:
 
-1. Saisissez l'**ID véhicule** s'il est connu.
+1. Saisissez l'**ID véhicule** s'il est connu (sur les voies où l'**OCR conteneur / plaque** est activé, OSCAR préremplit automatiquement les codes ISO 6346 valides ou les plaques de confiance `>= 85%` sauf modification par l'opérateur, et propose des puces de suggestion cliquables).
 2. Choisissez un code **Adjuger** dans la liste groupée de 8.5.
 3. Réglez **Inspection secondaire** sur **Aucune**, **Demandée** ou **Terminée**.
 4. Ajoutez des **Notes** justifiant la décision.
