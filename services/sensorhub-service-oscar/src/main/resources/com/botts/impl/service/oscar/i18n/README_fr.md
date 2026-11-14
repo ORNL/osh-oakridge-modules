@@ -879,7 +879,9 @@ reprise et destruction des documents.
 | QR impossible à scanner/importer | Augmentez la luminosité ou utilisez le PNG à sa taille d'origine; sinon importez `.oscar-alarm.json`. Un échec d'intégrité impose un nouvel export, jamais le contournement du contrôle. |
 | Modifications perdues au redémarrage | Appliquez le formulaire, utilisez Enregistrer globalement, confirmez Oui et attendez le message d'enregistrement avant de redémarrer. |
 
-Pour l'assistance, relevez version OSCAR, navigateur, voie/occupation, heure et fuseau, états et journaux nettoyés. Retirez mots de passe, jetons, clés privées et preuves sensibles.
+Pour l'assistance technique, exportez une archive de diagnostic expurgée (`.zip`) :
+- **Depuis la Visionneuse OSCAR (lorsque l'interface est accessible) :** Ouvrez **Aide (`?`)** dans la barre supérieure et sélectionnez **Exporter le pack d'assistance** (également disponible sous **Dépannage et FAQ**). OSCAR regroupe les avertissements/erreurs récents du navigateur, les requêtes API lentes ou en échec, l'état des modules et des voies, le résumé JVM et stockage, la configuration expurgée et les journaux serveur rotatifs (`oscar-support-<UTC>.zip`), ou télécharge une archive client seul (`oscar-client-support-<UTC>.zip`) si le serveur est injoignable.
+- **Depuis la CLI de l'hôte (si OSCAR est dégradé ou ne démarre pas) :** Exécutez `sudo bash oscar.sh support-bundle` sous Ubuntu ou `.\oscar.bat support-bundle` sous Windows (options `--tail`/`-Tail` et `--output`/`-Destination`) pour collecter l'état hôte/Docker, les journaux de conteneurs, les métadonnées du certificat TLS et les journaux/configurations en lecture seule de `oscar_oscar_state` dans `oscar-host-support-<UTC>.zip`. Les mots de passe, jetons, témoins de session, courriels, `secrets/*` et clés privées TLS (`tls/server.key`) sont automatiquement masqués ou exclus ; vérifiez la politique du site avant tout partage externe.
 
 ## 15. Documentation associée
 

@@ -878,7 +878,9 @@ destrucción de registros.
 | El QR no se escanea/importa | Aumente brillo o use el PNG a tamaño original; como alternativa importe `.oscar-alarm.json`. Un fallo de integridad exige una nueva exportación, no omitir la validación. |
 | Cambios desaparecen al reiniciar | Aplique el formulario, pulse Guardar global, confirme Sí y espere el mensaje de configuración guardada antes de reiniciar. |
 
-Para soporte, registre versión OSCAR, navegador, carril/ocupación, hora y zona, estados y logs saneados. Elimine contraseñas, tokens, claves privadas y evidencias sensibles.
+Para soporte técnico, exporte un paquete de diagnóstico saneado (`.zip`):
+- **Desde el Visor OSCAR (cuando la interfaz responde):** Abra **Ayuda (`?`)** en la barra superior y pulse **Exportar paquete de soporte** (también disponible en **Solución de problemas y preguntas frecuentes**). OSCAR reúne advertencias/errores recientes del navegador, solicitudes API fallidas o lentas, estado de módulos y carriles, resumen de JVM y almacenamiento, configuración saneada y registros rotativos del servidor (`oscar-support-<UTC>.zip`), o descarga un paquete solo del cliente (`oscar-client-support-<UTC>.zip`) si el servidor no responde.
+- **Desde la CLI del servidor anfitrión (si OSCAR está degradado o no arranca):** Ejecute `sudo bash oscar.sh support-bundle` en Ubuntu o `.\oscar.bat support-bundle` en Windows (opciones `--tail`/`-Tail` y `--output`/`-Destination`) para recopilar estado del host y Docker, registros de contenedores, metadatos del certificado TLS y registros/configuración en solo lectura de `oscar_oscar_state` en `oscar-host-support-<UTC>.zip`. Las contraseñas, tokens, cookies de sesión, correos electrónicos, `secrets/*` y claves privadas TLS (`tls/server.key`) se redactan o excluyen automáticamente; verifique la política del sitio antes de compartir el archivo.
 
 ## 15. Documentación relacionada
 

@@ -905,7 +905,9 @@ records-destruction requirements.
 | Alarm QR will not scan/import | Increase display brightness or use the downloaded PNG at original size. Otherwise import the `.oscar-alarm.json` file. An integrity failure means the package is incomplete or changed; obtain a new export rather than bypassing validation. |
 | Changes disappear after restart | Apply the module form, use the administration header's global Save, confirm Yes, and wait for the saved notification before restarting. |
 
-When collecting support data, record the OSCAR version, browser, affected lane/occupancy ID, timestamp and timezone, module status/errors, and sanitized browser/server logs. Remove passwords, tokens, private keys, and sensitive evidence before sharing.
+When collecting support data, export a redacted troubleshooting support bundle (`.zip`):
+- **From the OSCAR Viewer (when the UI is reachable):** Select **Help (`?`)** in the top navigation bar and select **Export Support Bundle** (also available under **Troubleshooting & FAQ**). OSCAR packages recent browser warnings/errors, failed or slow API requests, module/lane states, JVM and storage summaries, redacted configuration, and rolling server logs (`oscar-support-<UTC>.zip`), or downloads a client-only bundle (`oscar-client-support-<UTC>.zip`) if the server cannot be reached.
+- **From the host server CLI (when OSCAR is degraded or not booting):** Run `sudo bash oscar.sh support-bundle` on Ubuntu or `.\oscar.bat support-bundle` on Windows (optional `--tail`/`-Tail` and `--output`/`-Destination`) to collect host/Docker state, container logs, TLS certificate metadata, and read-only `oscar_oscar_state` logs/configuration into `oscar-host-support-<UTC>.zip`. Passwords, tokens, session cookies, email addresses, `secrets/*`, and TLS private keys (`tls/server.key`) are automatically redacted or excluded; review site policy before sharing any bundle externally.
 
 ## 15. Related documentation
 

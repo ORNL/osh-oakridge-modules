@@ -18,6 +18,7 @@ import org.bytedeco.ffmpeg.avcodec.AVCodecContext;
 import org.bytedeco.ffmpeg.avcodec.AVCodecParameters;
 import org.bytedeco.ffmpeg.avcodec.AVPacket;
 import org.bytedeco.ffmpeg.avformat.AVFormatContext;
+import org.bytedeco.ffmpeg.avformat.AVIOInterruptCB;
 import org.bytedeco.ffmpeg.avformat.AVStream;
 import org.bytedeco.ffmpeg.avutil.AVDictionary;
 import org.bytedeco.ffmpeg.avutil.AVFrame;
@@ -25,6 +26,7 @@ import org.bytedeco.ffmpeg.avutil.AVRational;
 import org.bytedeco.ffmpeg.global.avcodec;
 import org.bytedeco.ffmpeg.global.avformat;
 import org.bytedeco.ffmpeg.global.avutil;
+import org.bytedeco.javacpp.Pointer;
 import org.bytedeco.javacpp.PointerPointer;
 import org.sensorhub.impl.process.video.transcoder.coders.Coder;
 import org.sensorhub.impl.process.video.transcoder.coders.Decoder;
@@ -297,6 +299,15 @@ public class MpegTsProcessor extends Thread {
     private AVFormatContext avFormatContext;
 
     /**
+     * Strongly referenced native I/O interrupt callback enforcing wall-clock deadlines on
+     * {@code avformat_open_input}, {@code avformat_find_stream_info}, and {@code av_read_frame},
+     * even when trickling RTCP/keepalive packets continuously reset per-socket {@code rw_timeout}.
+     */
+    private AVIOInterruptCB.Callback_Pointer ioInterruptFn;
+    private AVIOInterruptCB ioInterruptCallback;
+    private volatile long ioDeadlineNanos = 0L;
+
+    /**
      * Container for possible video sub stream id
      */
     private int videoStreamId = INVALID_STREAM_ID;
@@ -545,20 +556,35 @@ public class MpegTsProcessor extends Thread {
                 avutil.av_dict_set(options, "analyzeduration", Long.toString(analyzeDuration), 0);
                 avutil.av_dict_set(options, "probesize", Long.toString(getProbeSizeBytes(analyzeDuration)), 0);
 
-                // Create a new AV Format Context for I/O
-                avFormatContext = new AVFormatContext(null);
+                // Allocate an AVFormatContext with a wall-clock interrupt callback before opening
+                // so trickling RTCP/keepalive traffic cannot stall avformat_find_stream_info forever.
+                avFormatContext = avformat.avformat_alloc_context();
+                if (avFormatContext == null || avFormatContext.isNull()) {
+                    logger.error("Could not allocate FFmpeg AVFormatContext");
+                    return false;
+                }
+                avFormatContext.interrupt_callback(ensureIoInterruptCallbackLocked());
 
-                int returnCode = avformat.avformat_open_input(avFormatContext, streamSource, null, options);
+                long openBudgetMicros = timeout > 0
+                        ? Math.max(timeout, analyzeDuration) + Math.min(timeout, 3_000_000L)
+                        : 20_000_000L;
+                ioDeadlineNanos = System.nanoTime() + TimeUnit.MICROSECONDS.toNanos(openBudgetMicros);
+                int openCode;
+                int streamInfoCode = -1;
+                try {
+                    openCode = avformat.avformat_open_input(avFormatContext, streamSource, null, options);
 
-                // Attempt to open the stream, streamPath can be a file or URL
-                if (returnCode == 0) {
+                    // Attempt to open the stream, streamPath can be a file or URL
+                    if (openCode == 0) {
+                        streamInfoCode = avformat.avformat_find_stream_info(avFormatContext, (PointerPointer<?>) null);
+                    }
+                } finally {
+                    ioDeadlineNanos = 0L;
+                }
 
-                    returnCode = avformat.avformat_find_stream_info(avFormatContext, (PointerPointer<?>) null);
-
-                    if (returnCode < 0) {
-
-                        logger.error("Failed to find stream info");
-
+                if (openCode == 0) {
+                    if (streamInfoCode < 0) {
+                        logger.error("Failed to find stream info (FFmpeg code {})", streamInfoCode);
                     } else if ((videoStreamId = findUsableVideoStreamId()) != INVALID_STREAM_ID) {
 
                         if (cacheVideoStreamSnapshotFromInput()) {
@@ -575,7 +601,7 @@ public class MpegTsProcessor extends Thread {
                     }
                 } else {
 
-                    logger.error("Failed to open configured video stream");
+                    logger.error("Failed to open configured video stream (FFmpeg code {})", openCode);
                 }
             } catch (Exception e) {
                 logger.error("Exception when opening stream", e);
@@ -1721,12 +1747,37 @@ public class MpegTsProcessor extends Thread {
         }
     }
 
+    private AVIOInterruptCB ensureIoInterruptCallbackLocked() {
+        if (ioInterruptCallback == null || ioInterruptCallback.isNull()) {
+            ioInterruptFn = new AVIOInterruptCB.Callback_Pointer() {
+                @Override
+                public int call(Pointer opaque) {
+                    if (terminateProcessing) {
+                        return 1;
+                    }
+                    long deadline = ioDeadlineNanos;
+                    return (deadline != 0L && System.nanoTime() - deadline > 0L) ? 1 : 0;
+                }
+            };
+            ioInterruptCallback = new AVIOInterruptCB();
+            ioInterruptCallback.callback(ioInterruptFn);
+            ioInterruptCallback.opaque(null);
+        }
+        return ioInterruptCallback;
+    }
+
     private int readPacket(AVPacket avPacket) {
         synchronized (contextLock) {
             if (terminateProcessing || !streamOpened) {
                 return AVERROR_EOF;
             }
-            return av_read_frame(avFormatContext, avPacket);
+            long readBudgetMicros = timeout > 0 ? Math.max(timeout, 5_000_000L) : 15_000_000L;
+            ioDeadlineNanos = System.nanoTime() + TimeUnit.MICROSECONDS.toNanos(readBudgetMicros);
+            try {
+                return av_read_frame(avFormatContext, avPacket);
+            } finally {
+                ioDeadlineNanos = 0L;
+            }
         }
     }
 

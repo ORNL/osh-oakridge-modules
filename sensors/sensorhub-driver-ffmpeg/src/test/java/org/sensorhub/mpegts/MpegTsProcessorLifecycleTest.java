@@ -7,6 +7,10 @@ import org.junit.rules.TemporaryFolder;
 import org.sensorhub.impl.sensor.ffmpeg.FFMPEGSensor;
 
 import java.io.File;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.file.Paths;
 import java.util.EnumSet;
 import java.util.List;
@@ -388,6 +392,47 @@ public class MpegTsProcessorLifecycleTest {
             processor.stopProcessingStream();
             processor.join(5_000L);
             processor.closeStream();
+        }
+    }
+
+    @Test(timeout = 10_000L)
+    public void tricklingNetworkStreamAbortsOpenWithinWallClockBudget() throws Exception {
+        AtomicBoolean keepTrickling = new AtomicBoolean(true);
+        try (ServerSocket server = new ServerSocket(0, 4, InetAddress.getLoopbackAddress())) {
+            Thread serverThread = new Thread(() -> {
+                try (Socket client = server.accept();
+                     OutputStream out = client.getOutputStream()) {
+                    byte[] tsNullPacket = new byte[188];
+                    tsNullPacket[0] = 0x47;
+                    tsNullPacket[1] = 0x1F;
+                    tsNullPacket[2] = (byte) 0xFF;
+                    tsNullPacket[3] = 0x10;
+                    while (keepTrickling.get()) {
+                        out.write(tsNullPacket);
+                        out.flush();
+                        Thread.sleep(100L);
+                    }
+                } catch (Exception ignored) {
+                    // Expected when FFmpeg aborts via AVIOInterruptCB.
+                }
+            }, "trickling-ts-test-server");
+            serverThread.setDaemon(true);
+            serverThread.start();
+
+            var processor = new MpegTsProcessor(
+                    "tcp://127.0.0.1:" + server.getLocalPort(), 0, false, true);
+            processor.setTimeout(500_000L);
+            long startedNanos = System.nanoTime();
+            try {
+                assertFalse("Trickling stream without video metadata must abort cleanly",
+                        processor.openStream());
+                long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+                assertTrue("Wall-clock interrupt budget must bound openStream (" + elapsedMillis + "ms)",
+                        elapsedMillis < 6_000L);
+            } finally {
+                keepTrickling.set(false);
+                processor.closeStream();
+            }
         }
     }
 }
