@@ -277,7 +277,8 @@ public class BucketServlet extends HttpServlet {
             resp.setHeader("Access-Control-Allow-Origin", origin);
             resp.setHeader("Access-Control-Allow-Credentials", "true");
             resp.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS, DELETE, PUT");
-            resp.setHeader("Access-Control-Allow-Headers", "X-Requested-With, Content-Type, Accept, Authorization, Cache-Control");
+            resp.setHeader("Access-Control-Allow-Headers", "X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, If-None-Match");
+            resp.setHeader("Access-Control-Expose-Headers", "ETag");
         }
         super.service(req, resp);
     }

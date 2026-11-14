@@ -17,6 +17,7 @@ package com.botts.impl.service.oscar;
 
 import com.botts.api.service.bucket.IBucketService;
 import com.botts.api.service.bucket.IBucketStore;
+import com.botts.impl.service.oscar.alarms.DashboardAlarmReadStateHandler;
 import com.botts.impl.service.oscar.dailyfile.DailyFileSliceHandler;
 import com.botts.impl.service.oscar.eml.EmlPluginHandler;
 import com.botts.impl.service.oscar.purge.DatabasePurger;
@@ -71,6 +72,7 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     WebIdResourceHandler webIdResourceHandler;
     MediaResourceHandler mediaResourceHandler;
     DailyFileSliceHandler dailyFileSliceHandler;
+    DashboardAlarmReadStateHandler dashboardAlarmReadStateHandler;
     MediaSetStore retainedMediaStore;
     ApplicationReadiness applicationReadiness;
 
@@ -231,6 +233,13 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         } catch (org.sensorhub.api.datastore.DataStoreException e) {
             throw new SensorHubException("Unable to initialize daily-file slice handler", e);
         }
+        try {
+            bucketService.ensureBucketRegistered(Constants.ADJUDICATION_BUCKET);
+            dashboardAlarmReadStateHandler = new DashboardAlarmReadStateHandler(bucketStore, getLogger());
+            bucketService.registerObjectHandler(dashboardAlarmReadStateHandler);
+        } catch (org.sensorhub.api.datastore.DataStoreException e) {
+            throw new SensorHubException("Unable to initialize dashboard alarm read-state handler", e);
+        }
 
         statsOutput.start();
 
@@ -296,6 +305,8 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         failure = runStopStep(failure, "Web ID object handler", this::unregisterWebIdHandler);
         failure = runStopStep(failure, "retained-media object handler", this::unregisterMediaHandler);
         failure = runStopStep(failure, "daily-file slice object handler", this::unregisterDailyFileSliceHandler);
+        failure = runStopStep(failure, "dashboard alarm read-state object handler",
+                this::unregisterDashboardAlarmReadStateHandler);
         failure = runStopStep(failure, "OSCAR system registration", this::unregisterSystem);
         if (failure != null)
             throw failure;
@@ -487,6 +498,13 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
             return;
         bucketService.unregisterObjectHandler(dailyFileSliceHandler);
         dailyFileSliceHandler = null;
+    }
+
+    void unregisterDashboardAlarmReadStateHandler() {
+        if (dashboardAlarmReadStateHandler == null)
+            return;
+        bucketService.unregisterObjectHandler(dashboardAlarmReadStateHandler);
+        dashboardAlarmReadStateHandler = null;
     }
 
     private IObsSystemDatabase resolveSliceDatabase() {
