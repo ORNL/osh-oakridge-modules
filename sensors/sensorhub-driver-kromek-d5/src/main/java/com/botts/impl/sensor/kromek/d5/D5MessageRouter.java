@@ -45,6 +45,11 @@ public class D5MessageRouter implements Runnable {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private int count = 0;
 
+    /** Polling cycles in a row in which every request failed; see {@link #run()}. */
+    static final int FAILED_CYCLES_BEFORE_RECONNECT = 3;
+    private int consecutiveFailedCycles = 0;
+    private volatile boolean connectionLost = false;
+
     public D5MessageRouter(D5Sensor sensor, InputStream inputStream, OutputStream outputStream) {
         this.sensor = sensor;
         this.inputStream = inputStream;
@@ -63,7 +68,11 @@ public class D5MessageRouter implements Runnable {
     }
 
     public synchronized void run() {
-        if (sensor.processLock) return;
+        if (sensor.processLock || connectionLost) return;
+
+        int attempted = 0;
+        int failed = 0;
+        Exception lastError = null;
 
         // For each active output, send a request and receive a response
         for (Map.Entry<Class<?>, D5Output> entry : sensor.outputs.entrySet()) {
@@ -84,6 +93,7 @@ public class D5MessageRouter implements Runnable {
                     continue;
                 }
 
+                attempted++;
                 report = sendRequest(report, inputStream, outputStream);
 
                 output.setData(report);
@@ -93,9 +103,26 @@ public class D5MessageRouter implements Runnable {
                 if (report instanceof KromekSerialRadiometricStatusReport statusReport)
                     sensor.publishLocation(statusReport);
             } catch (Exception e) {
-                logger.error("Error", e);
+                failed++;
+                lastError = e;
+                // Log the first failure of an outage; the rest of it is one story, not 2 lines/s.
+                if (consecutiveFailedCycles == 0 && failed == 1)
+                    logger.error("D5 {} request failed", config.serialNumber, e);
+                else
+                    logger.debug("D5 {} request failed", config.serialNumber, e);
             }
         }
         count++;
+
+        if (attempted > 0 && failed == attempted) {
+            if (++consecutiveFailedCycles >= FAILED_CYCLES_BEFORE_RECONNECT) {
+                connectionLost = true;
+                sensor.onCommunicationLost(lastError);
+            }
+        } else if (attempted > 0) {
+            if (consecutiveFailedCycles > 0)
+                logger.info("D5 {} responding again", config.serialNumber);
+            consecutiveFailedCycles = 0;
+        }
     }
 }

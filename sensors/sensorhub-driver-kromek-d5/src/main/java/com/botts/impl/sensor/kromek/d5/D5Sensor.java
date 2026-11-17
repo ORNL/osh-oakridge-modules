@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Sensor driver for the Kromek D5 providing sensor description, output registration,
@@ -34,9 +35,16 @@ public class D5Sensor extends AbstractSensorModule<D5Config> {
     // Map of report classes to their associated output instances
     HashMap<Class<?>, D5Output> outputs;
     D5LocationOutput locationOutput;
-    ICommProvider<?> commProvider;
-    Boolean processLock;
+    volatile ICommProvider<?> commProvider;
+    volatile Boolean processLock;
     D5MessageRouter messageRouter;
+
+    static final long RECONNECT_INITIAL_DELAY_MS = 1_000;
+    static final long RECONNECT_MAX_DELAY_MS = 30_000;
+    private final Object connectionLock = new Object();
+    private final AtomicBoolean reconnecting = new AtomicBoolean(false);
+    private volatile boolean stopping;
+    private volatile Thread reconnectThread;
 
     @Override
     public void doInit() throws SensorHubException {
@@ -53,55 +61,151 @@ public class D5Sensor extends AbstractSensorModule<D5Config> {
 
     @Override
     public void doStart() throws SensorHubException {
-        if (commProvider == null) {
-            // we need to recreate comm provider here because it can be changed by UI
-            try {
-                if (config.commSettings == null)
-                    throw new SensorHubException("No communication settings specified");
-
-                var moduleReg = getParentHub().getModuleRegistry();
-                commProvider = (ICommProvider<?>) moduleReg.loadSubModule(config.commSettings, true);
-                commProvider.start();
-            } catch (Exception e) {
-                commProvider = null;
-                throw new SensorException("Error while initializing communications ", e);
-            }
-        }
-
-        // connect to data stream
-        try {
-            messageRouter = new D5MessageRouter(this, commProvider.getInputStream(), commProvider.getOutputStream());
-            messageRouter.start();
-        } catch (Exception e) {
-            throw new SensorException("Error while initializing communications ", e);
-        }
-
+        stopping = false;
         processLock = false;
+        ICommProvider<?> provider = openCommProvider();
+        synchronized (connectionLock) {
+            installConnection(provider);
+        }
     }
 
     @Override
     public void doStop() throws SensorHubException {
         logger.info("Stopping sensor");
+        stopping = true;
         processLock = true;
 
         for (D5Output output : outputs.values()) {
             output.doStop();
         }
 
-        if (commProvider != null) {
-            commProvider.stop();
-            commProvider = null;
+        synchronized (connectionLock) {
+            closeConnection();
         }
-        if (messageRouter != null) {
-            messageRouter.stop();
-            messageRouter = null;
-        }
+        Thread reconnect = reconnectThread;
+        if (reconnect != null)
+            reconnect.interrupt();
     }
 
     @Override
     public boolean isConnected() {
         // Determine if the sensor is connected
-        return commProvider.isInitialized();
+        ICommProvider<?> provider = commProvider;
+        return provider != null && provider.isInitialized();
+    }
+
+    /**
+     * Called by the message router once the device has stopped answering for several consecutive
+     * polling cycles (a dropped TCP link, a power-cycled unit). Without this the router kept writing
+     * to the dead socket, logging two errors a second, and the walker never recovered short of a
+     * manual module restart. Recovery runs on its own thread because the router's scheduler is torn
+     * down as part of it.
+     */
+    void onCommunicationLost(Exception cause) {
+        if (stopping || !reconnecting.compareAndSet(false, true))
+            return;
+        logger.warn("D5 {} stopped responding ({}); re-establishing the connection",
+                config.serialNumber, cause == null ? "no response" : cause.getMessage());
+        Thread thread = new Thread(this::reestablishConnection, "D5 reconnect " + config.serialNumber);
+        thread.setDaemon(true);
+        reconnectThread = thread;
+        thread.start();
+    }
+
+    private void reestablishConnection() {
+        long delayMillis = RECONNECT_INITIAL_DELAY_MS;
+        try {
+            synchronized (connectionLock) {
+                closeConnection();
+            }
+            while (!stopping) {
+                Thread.sleep(delayMillis);
+                if (stopping)
+                    return;
+                ICommProvider<?> provider;
+                try {
+                    // Opened outside the lock: a robust TCP provider can block for its whole retry
+                    // window, and doStop must never wait on that.
+                    provider = openCommProvider();
+                } catch (SensorHubException e) {
+                    logger.warn("D5 {} reconnect failed ({}); retrying in {} ms",
+                            config.serialNumber, e.getMessage(), Math.min(delayMillis * 2, RECONNECT_MAX_DELAY_MS));
+                    delayMillis = Math.min(delayMillis * 2, RECONNECT_MAX_DELAY_MS);
+                    continue;
+                }
+                synchronized (connectionLock) {
+                    if (stopping) {
+                        stopQuietly(provider);
+                        return;
+                    }
+                    installConnection(provider);
+                }
+                logger.info("D5 {} connection re-established", config.serialNumber);
+                return;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (SensorHubException e) {
+            logger.error("D5 {} could not restart its message router", config.serialNumber, e);
+        } finally {
+            reconnectThread = null;
+            reconnecting.set(false);
+        }
+    }
+
+    private ICommProvider<?> openCommProvider() throws SensorHubException {
+        // the comm provider is recreated on every (re)connect because it can be changed by the UI
+        if (config.commSettings == null)
+            throw new SensorHubException("No communication settings specified");
+        ICommProvider<?> provider = null;
+        try {
+            var moduleReg = getParentHub().getModuleRegistry();
+            provider = (ICommProvider<?>) moduleReg.loadSubModule(config.commSettings, true);
+            provider.start();
+            // AbstractModule.start() reports a connect failure as module state rather than
+            // throwing, leaving the provider with null streams.
+            if (!provider.isStarted() || provider.getInputStream() == null || provider.getOutputStream() == null)
+                throw new SensorException("D5 device is not reachable",
+                        provider.getCurrentError());
+            return provider;
+        } catch (Exception e) {
+            stopQuietly(provider);
+            throw new SensorException("Error while initializing communications ", e);
+        }
+    }
+
+    /** Caller holds {@link #connectionLock}. */
+    private void installConnection(ICommProvider<?> provider) throws SensorHubException {
+        try {
+            commProvider = provider;
+            messageRouter = new D5MessageRouter(this, provider.getInputStream(), provider.getOutputStream());
+            messageRouter.start();
+        } catch (Exception e) {
+            closeConnection();
+            throw new SensorException("Error while initializing communications ", e);
+        }
+    }
+
+    /** Caller holds {@link #connectionLock}. */
+    private void closeConnection() {
+        if (messageRouter != null) {
+            messageRouter.stop();
+            messageRouter = null;
+        }
+        if (commProvider != null) {
+            stopQuietly(commProvider);
+            commProvider = null;
+        }
+    }
+
+    private void stopQuietly(ICommProvider<?> provider) {
+        if (provider == null)
+            return;
+        try {
+            provider.stop();
+        } catch (Exception e) {
+            logger.debug("Error stopping D5 comm provider", e);
+        }
     }
 
     void createOutputs() {

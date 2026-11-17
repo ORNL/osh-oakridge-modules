@@ -16,6 +16,7 @@ import com.botts.impl.sensor.kromek.d5.reports.SerialReport;
 import com.fazecast.jSerialComm.SerialPort;
 
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -29,6 +30,18 @@ import static com.botts.impl.sensor.kromek.d5.reports.SerialReport.bytesToUInt;
 
 public class Shared {
     /**
+     * Read one byte, failing on end of stream. A closed peer makes {@code read()} return -1
+     * forever, and {@code (byte) -1} is never the framing byte, so without this check the
+     * framing loop in {@link #receiveData} would spin indefinitely inside the message router.
+     */
+    private static int readByte(InputStream in) throws IOException {
+        int b = in.read();
+        if (b < 0)
+            throw new EOFException("D5 connection closed by the device");
+        return b;
+    }
+
+    /**
      * Receive data from the given input stream.
      * Reads until a framing byte is received, then reads the length, then reads the rest of the message.
      *
@@ -41,17 +54,17 @@ public class Shared {
 
         // Read until we get a framing byte
         do {
-            b = in.read();
+            b = readByte(in);
         } while ((byte) b != KROMEK_SERIAL_FRAMING_FRAME_BYTE);
 
         // Read until we get a non-framing byte. Extra framing bytes are harmless and can be ignored.
         do {
-            b = in.read();
+            b = readByte(in);
         } while ((byte) b == KROMEK_SERIAL_FRAMING_FRAME_BYTE);
 
         // The first two bytes after framing byte are the message length
         byte length1 = (byte) b;
-        byte length2 = (byte) in.read();
+        byte length2 = (byte) readByte(in);
         int length = bytesToUInt(length1, length2);
 
         output.add(length1);
@@ -59,7 +72,7 @@ public class Shared {
 
         // Read the rest of the message, excluding the two bytes we already read
         for (int i = 0; i < length - 2; i++) {
-            b = in.read();
+            b = readByte(in);
             output.add((byte) b);
         }
 
