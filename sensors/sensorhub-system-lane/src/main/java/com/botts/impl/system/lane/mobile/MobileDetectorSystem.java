@@ -55,6 +55,17 @@ public class MobileDetectorSystem extends LaneSystem {
         super.doInit();
     }
 
+    /**
+     * A mobile detector's occupancy spans the whole alarm while the operator walks, so its
+     * duration says nothing about a vehicle dwelling in a portal. Without this opt-out a
+     * gamma-only alarm held longer than the lane threshold (default 1 min) would be
+     * auto-adjudicated as Code 9998 and disappear from the operator's alarm queue.
+     */
+    @Override
+    protected boolean isExtendedOccupancyMonitoringEnabled() {
+        return false;
+    }
+
     @Override
     public MobileDetectorConfig getConfiguration() {
         return (MobileDetectorConfig) this.config;

@@ -303,6 +303,15 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         }
     }
 
+    /**
+     * Whether this lane raises Extended Occupancy faults and auto-adjudicates long gamma-only
+     * occupancies (Code 9998). Portal lanes do; subclasses whose occupancies are not vehicle
+     * dwell times (mobile detectors) override this to opt out.
+     */
+    protected boolean isExtendedOccupancyMonitoringEnabled() {
+        return true;
+    }
+
     public int getExtendedOccupancyThresholdMinutes() {
         if (config == null || getConfiguration().extendedOccupancyThresholdMinutes <= 0) {
             return LaneConfig.DEFAULT_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES;
@@ -480,6 +489,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         if (occupancyProducer != null) {
             occupancyWrapper = new OccupancyWrapper(getParentHub(), occupancyProducer, occupancyStatusOutput);
             occupancyWrapper.setExtendedOccupancyThresholdMinutes(getExtendedOccupancyThresholdMinutes());
+            occupancyWrapper.setExtendedOccupancyMonitoringEnabled(isExtendedOccupancyMonitoringEnabled());
             for (var member : getMembers().values()) {
                 if (member instanceof FFMPEGSensorBase<?> cam
                         && cam.getCurrentState() == ModuleEvent.ModuleState.STARTED) {
