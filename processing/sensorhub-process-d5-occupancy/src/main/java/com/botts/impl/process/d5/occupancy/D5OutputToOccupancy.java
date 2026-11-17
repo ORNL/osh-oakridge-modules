@@ -357,6 +357,10 @@ public class D5OutputToOccupancy extends ExecutableProcessImpl implements ISenso
             if (!dailyFile.hasData()) {
                 dailyFile.renewDataBlock();
             }
+            // A D5 occupancy *is* an alarm episode (the walker has no portal occupancy sensor)
+            dailyFile.getComponent(DailyFileStruct.OCCUPIED_NAME).getData().setBooleanValue(inEpisode);
+            dailyFile.getComponent(DailyFileStruct.OCCUPANCY_START_TIME_NAME).getData()
+                    .setDoubleValue(inEpisode ? episodeStartMillis / 1000.0 : 0.0);
             dailyFile.getComponent(DailyFileStruct.ALARM_NAME).getData().setBooleanValue(inEpisode);
             dailyFile.getComponent(DailyFileStruct.samplingTime.getName()).getData().setDoubleValue(now / 1000.0);
             try {

@@ -10,9 +10,26 @@ public class DailyFileStruct {
     final static RADHelper radHelper = new RADHelper();
     public static final String DAILY_FILE_NAME = "dailyFile";
     public static final String DAILY_FILE_LABEL = "Daily File";
+    // Same field names and order as the RS350 process's dailyFile record: the lane's
+    // Rs350StateManager parses both, and requires isOccupied + occupancyStartTime.
+    public static final String OCCUPIED_NAME = "isOccupied";
+    public static final String OCCUPIED_LABEL = "Is Occupied";
+    public static final String OCCUPANCY_START_TIME_NAME = "occupancyStartTime";
     public static final String ALARM_NAME = "isAlarming";
     public static final String ALARM_LABEL = "Is Alarming";
     static Time samplingTime = radHelper.createPrecisionTimeStamp();
+    static Boolean occupied = radHelper.createBoolean()
+            .name(OCCUPIED_NAME)
+            .label(OCCUPIED_LABEL)
+            .definition(RADHelper.getRadUri("D5OccupancyStatus"))
+            .value(false)
+            .build();
+    static Time occupancyStartTime = radHelper.createTime()
+            .asPhenomenonTimeIsoUTC()
+            .name(OCCUPANCY_START_TIME_NAME)
+            .label("Occupancy Start Time")
+            .definition(RADHelper.getRadUri("OccupancyStartTime"))
+            .build();
     static Boolean rpmMsg = radHelper.createBoolean().name(ALARM_NAME).label(ALARM_LABEL).value(false).build();
 
     final static DataRecord dataStruct = radHelper.createRecord()
@@ -21,6 +38,8 @@ public class DailyFileStruct {
                 .updatable(true)
                 .definition(RADHelper.getRadUri("DailyFile"))
             .addField(samplingTime.getName(), samplingTime)
+            .addField(occupied.getName(), occupied)
+            .addField(occupancyStartTime.getName(), occupancyStartTime)
             .addField(rpmMsg.getName(), rpmMsg)
             .build();
 

@@ -445,8 +445,9 @@ public class OccupancyWrapper {
         } else if (sensor instanceof Rs350OccupancyProcessModule){
             return new Rs350StateManager();
         } else if (sensor instanceof D5OccupancyProcessModule){
-            // The D5 process publishes the same dailyFile record as the RS350
-            // one, so the RS350 state manager's semantics apply as-is
+            // The D5 process publishes a dailyFile record with the RS350 field names
+            // (isOccupied, occupancyStartTime, isAlarming), so the RS350 state manager applies.
+            // D5DailyFileStateManagerTest guards that contract.
             return new Rs350StateManager();
         }
         return null;
