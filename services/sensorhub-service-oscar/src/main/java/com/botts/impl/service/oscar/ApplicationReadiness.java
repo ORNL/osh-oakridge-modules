@@ -205,7 +205,12 @@ final class ApplicationReadiness implements AutoCloseable {
         var members = group.getMembers();
         if (members == null)
             return true;
+        IAutoStartDispatchStatus recoveryStatus = module instanceof IAutoStartDispatchStatus status ? status : null;
         for (var member : members.values()) {
+            // A member the lane is already retrying after it went offline has settled for
+            // readiness purposes, even while a reconnect attempt holds it in STARTING.
+            if (autoStartDispatchComplete && recoveryStatus != null && recoveryStatus.isMemberUnderRecovery(member))
+                continue;
             if (member instanceof IModule<?> memberModule &&
                     !autoStartTreeSettled(memberModule, visited, foundAutoStartModule,
                             false, autoStartDispatchComplete))

@@ -26,6 +26,11 @@ import java.util.function.Supplier;
  * re-runs init (if the member never initialized) and start; the driver's own bounded connection
  * loop runs inside that, so attempts are effectively continuous while the device is down, spaced
  * by {@link #BACKOFF_MS} between failed rounds.</p>
+ *
+ * <p>From the first recovery attempt until the member is back, {@link #isRecovering()} is true.
+ * Each attempt holds the member in {@code STARTING} for the driver's whole connection loop, which
+ * application readiness would otherwise read as a start still in flight: one unreachable detector
+ * would keep the whole node unhealthy.</p>
  */
 public final class RpmRecoverySupervisor implements AutoCloseable {
 
@@ -40,6 +45,7 @@ public final class RpmRecoverySupervisor implements AutoCloseable {
 
     private int failedRounds = 0;
     private long nextAttemptAt = Long.MIN_VALUE;
+    private volatile boolean recovering = false;
 
     public RpmRecoverySupervisor(Supplier<? extends IModule<?>> rpm, BooleanSupplier laneRunning, Logger logger) {
         this(rpm, laneRunning, System::currentTimeMillis, logger);
@@ -70,6 +76,7 @@ public final class RpmRecoverySupervisor implements AutoCloseable {
             executor.shutdownNow();
             executor = null;
         }
+        recovering = false;
     }
 
     private void tickSafely() {
@@ -84,8 +91,10 @@ public final class RpmRecoverySupervisor implements AutoCloseable {
     void tick() {
         IModule<?> module = rpm.get();
         if (module == null || !laneRunning.getAsBoolean() || !needsRecovery(module)) {
-            if (module != null && module.getCurrentState() == ModuleState.STARTED)
+            if (module != null && module.getCurrentState() == ModuleState.STARTED) {
                 failedRounds = 0;
+                recovering = false;
+            }
             return;
         }
         long now = clock.getAsLong();
@@ -94,8 +103,10 @@ public final class RpmRecoverySupervisor implements AutoCloseable {
 
         logger.warn("RPM {} is down after its connection retries ran out ({}); restarting it (attempt {})",
                 module.getName(), errorMessage(module), failedRounds + 1);
+        recovering = true;
         if (attemptRestart(module)) {
             logger.info("RPM {} recovered", module.getName());
+            recovering = false;
             failedRounds = 0;
             nextAttemptAt = Long.MIN_VALUE;
         } else {
@@ -104,6 +115,11 @@ public final class RpmRecoverySupervisor implements AutoCloseable {
             nextAttemptAt = clock.getAsLong() + delay;
             logger.warn("RPM {} still unreachable; next attempt in {} s", module.getName(), delay / 1000);
         }
+    }
+
+    /** True from the first recovery attempt until the member is started again. */
+    public boolean isRecovering() {
+        return recovering;
     }
 
     static boolean needsRecovery(IModule<?> module) {

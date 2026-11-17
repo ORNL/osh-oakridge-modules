@@ -97,7 +97,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     private final Object subscriptionLock = new Object();
     private long subscriptionGeneration = 0;
     private ExecutorService threadPool = null;
-    private RpmRecoverySupervisor rpmRecovery = null;
+    private volatile RpmRecoverySupervisor rpmRecovery = null;
     private volatile boolean autoStartDispatchComplete;
     private final AtomicBoolean syncingEndpoints = new AtomicBoolean(false);
     Map<String, FFMPEGConfig> ffmpegConfigs = null;
@@ -134,6 +134,12 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     @Override
     public boolean isAutoStartDispatchComplete() {
         return autoStartDispatchComplete;
+    }
+
+    @Override
+    public boolean isMemberUnderRecovery(Object member) {
+        RpmRecoverySupervisor recovery = rpmRecovery;
+        return recovery != null && member != null && member == existingRPMModule && recovery.isRecovering();
     }
 
     @Override

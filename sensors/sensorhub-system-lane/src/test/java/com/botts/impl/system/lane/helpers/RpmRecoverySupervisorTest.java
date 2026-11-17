@@ -23,6 +23,8 @@ public class RpmRecoverySupervisorTest {
         volatile boolean deviceUp = false;
         int initCalls = 0;
         int startCalls = 0;
+        Boolean recoveringDuringStart = null;
+        RpmRecoverySupervisor observer;
 
         FakeRpm() {
             var config = new ModuleConfig();
@@ -42,6 +44,8 @@ public class RpmRecoverySupervisorTest {
         @Override
         protected void doStart() throws SensorHubException {
             startCalls++;
+            if (observer != null)
+                recoveringDuringStart = observer.isRecovering();
             if (!deviceUp)
                 throw new SensorHubException("Maximum number of connection attempts reached");
         }
@@ -155,5 +159,31 @@ public class RpmRecoverySupervisorTest {
 
         rpm.getConfiguration().autoStart = true;
         assertTrue(RpmRecoverySupervisor.needsRecovery(rpm));
+    }
+
+    @Test
+    public void reportsRecoveringFromTheFirstAttemptUntilTheRpmIsBack() throws Exception {
+        failAtRuntime();
+        rpm.observer = supervisor;
+        assertFalse("a failure alone is not yet a recovery", supervisor.isRecovering());
+
+        supervisor.tick();
+        assertEquals("flagged while the attempt holds the RPM in STARTING", Boolean.TRUE, rpm.recoveringDuringStart);
+        assertTrue("still recovering through the backoff", supervisor.isRecovering());
+
+        rpm.deviceUp = true;
+        now.addAndGet(RpmRecoverySupervisor.BACKOFF_MS[0]);
+        supervisor.tick();
+        assertEquals(ModuleState.STARTED, rpm.getCurrentState());
+        assertFalse(supervisor.isRecovering());
+    }
+
+    @Test
+    public void closingClearsTheRecoveringFlag() throws Exception {
+        failAtRuntime();
+        supervisor.tick();
+        assertTrue(supervisor.isRecovering());
+        supervisor.close();
+        assertFalse(supervisor.isRecovering());
     }
 }
