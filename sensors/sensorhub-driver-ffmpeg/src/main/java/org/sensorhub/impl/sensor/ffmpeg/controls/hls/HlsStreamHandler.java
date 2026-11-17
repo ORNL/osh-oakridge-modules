@@ -7,9 +7,10 @@ import com.botts.impl.service.bucket.util.RequestContext;
 import com.botts.impl.service.bucket.util.ServiceErrors;
 import net.opengis.swe.v20.Category;
 import org.sensorhub.api.command.CommandData;
-import org.sensorhub.api.common.BigId;
 import org.sensorhub.api.datastore.DataStoreException;
 import org.sensorhub.impl.sensor.ffmpeg.controls.HLSControl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 public class HlsStreamHandler extends DefaultObjectHandler {
+
+    private static final Logger logger = LoggerFactory.getLogger(HlsStreamHandler.class);
 
     public static final String VIEWER_ID_HEADER = "X-OSCAR-HLS-Viewer";
     public static final String VIEWER_STATE_HEADER = "X-OSCAR-HLS-Viewer-State";
@@ -280,7 +283,9 @@ public class HlsStreamHandler extends DefaultObjectHandler {
             var command = control.getCommandDescription().clone();
             command.renewDataBlock();
             ((Category)command.getComponent(0)).setValue(HLSControl.CMD_END_STREAM);
-            control.submitCommand(new CommandData.Builder().withParams(command.getData()).withCommandStream(BigId.NONE).build());
+            // Direct-to-driver helper: the Builder rejects BigId.NONE as a command stream ID,
+            // and that exception escaping the scheduled sweep cancelled it on its first expiry.
+            control.submitCommand(new CommandData(1L, command.getData()));
         }
     }
 
@@ -292,7 +297,13 @@ public class HlsStreamHandler extends DefaultObjectHandler {
                 closedViewersByStream.remove(entry.getKey());
                 // Conditional removal ensures a manifest request racing this cleanup pass can
                 // atomically replace the activity record without having its stream stopped.
-                stopStream(entry.getValue().control());
+                try {
+                    stopStream(entry.getValue().control());
+                } catch (RuntimeException e) {
+                    // never let one stream's failure escape: scheduleAtFixedRate silently
+                    // cancels the whole sweep on the first uncaught exception
+                    logger.warn("Failed to stop inactive HLS stream {}", entry.getKey(), e);
+                }
             }
         }
     }
