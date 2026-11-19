@@ -253,12 +253,31 @@ public final class OidcClientHelper {
         return groups;
     }
 
+    private volatile SSLContext cachedDefaultSslContext;
+    private volatile HttpClient cachedDefaultSslHttpClient;
+
     private HttpClient clientFor(BasicSessionConfig config) throws IOException {
         if (fixedHttpClient != null)
             return fixedHttpClient;
         String rawCaPath = config == null ? null : config.oidcTrustedCaCertificatePath;
-        if (rawCaPath == null || rawCaPath.isBlank())
-            return defaultHttpClient;
+        if (rawCaPath == null || rawCaPath.isBlank()) {
+            try {
+                SSLContext currentDefault = SSLContext.getDefault();
+                if (cachedDefaultSslHttpClient != null && cachedDefaultSslContext == currentDefault) {
+                    return cachedDefaultSslHttpClient;
+                }
+                HttpClient refreshed = HttpClient.newBuilder()
+                        .connectTimeout(CONNECT_TIMEOUT)
+                        .followRedirects(HttpClient.Redirect.NEVER)
+                        .sslContext(currentDefault)
+                        .build();
+                this.cachedDefaultSslContext = currentDefault;
+                this.cachedDefaultSslHttpClient = refreshed;
+                return refreshed;
+            } catch (GeneralSecurityException ignored) {
+                return defaultHttpClient;
+            }
+        }
 
         Path path = Path.of(rawCaPath.trim()).toAbsolutePath().normalize();
         List<Path> certFiles = collectPemCertificateFiles(path);

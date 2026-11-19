@@ -9,6 +9,7 @@ dependencies {
     implementation project(':sensorhub-service-bucket')
 
     implementation project(':sensorhub-system-lane') // Lane for loading via spreadsheet
+    implementation project(':sensorhub-process-ocr') // Runtime OCR model & engine extensions
     implementation project(':sensorhub-service-bucket') // service for file system
     implementation("org.apache.pdfbox:pdfbox:3.0.3") // vector PDF generation (Apache-2.0)
 

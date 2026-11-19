@@ -41,6 +41,41 @@ public final class EmlArchiveExtractor {
                 || lower.endsWith(".tar");
     }
 
+    public static ExtractedBundle extractGeneric(Path archivePath, String originalFileName, Path targetDir) throws IOException {
+        ensurePrivateDirectory(targetDir);
+        String lower = (originalFileName != null ? originalFileName : archivePath.getFileName().toString())
+                .toLowerCase(Locale.ROOT);
+
+        if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
+            try (InputStream fis = Files.newInputStream(archivePath);
+                 BufferedInputStream bis = new BufferedInputStream(fis);
+                 GZIPInputStream gis = new GZIPInputStream(bis)) {
+                extractTar(gis, targetDir);
+            }
+        } else if (lower.endsWith(".tar")) {
+            try (InputStream fis = Files.newInputStream(archivePath);
+                 BufferedInputStream bis = new BufferedInputStream(fis)) {
+                extractTar(bis, targetDir);
+            }
+        } else if (lower.endsWith(".jar") || lower.endsWith(".zip")) {
+            try (InputStream fis = Files.newInputStream(archivePath);
+                 BufferedInputStream bis = new BufferedInputStream(fis);
+                 ZipInputStream zis = new ZipInputStream(bis, StandardCharsets.UTF_8)) {
+                extractZip(zis, targetDir);
+            }
+        } else {
+            throw new IOException("Unsupported archive format: " + originalFileName);
+        }
+
+        List<Path> jars = collectRuntimeJars(targetDir, targetDir);
+        if (jars.isEmpty() && lower.endsWith(".jar")) {
+            Path selfCopy = targetDir.resolve("plugin-self-bundle.jar");
+            Files.copy(archivePath, selfCopy, StandardCopyOption.REPLACE_EXISTING);
+            jars = List.of(selfCopy);
+        }
+        return new ExtractedBundle(targetDir, targetDir, jars);
+    }
+
     public static ExtractedBundle extract(Path archivePath, String originalFileName, Path targetDir) throws IOException {
         ensurePrivateDirectory(targetDir);
         String lower = (originalFileName != null ? originalFileName : archivePath.getFileName().toString())

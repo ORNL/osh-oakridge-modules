@@ -2679,8 +2679,8 @@ public final class VehicleIncidentAggregator {
         specByCode.put(10, new DispositionCodeSpec(10, "Code 10: Unauthorized Activity", "Tamper/Fault"));
         specByCode.put(11, new DispositionCodeSpec(11, "Code 11: Other", "Other"));
 
-        if (module != null && module.getConfiguration() != null && module.getConfiguration().customAdjudicationCodes != null) {
-            List<AdjudicationCodeConfig> customSorted = new ArrayList<>(module.getConfiguration().customAdjudicationCodes);
+        if (module != null) {
+            List<AdjudicationCodeConfig> customSorted = new ArrayList<>(module.getEffectiveCustomAdjudicationCodes());
             customSorted.removeIf(Objects::isNull);
             customSorted.sort(Comparator.comparingInt(c -> c.code));
             for (AdjudicationCodeConfig custom : customSorted) {

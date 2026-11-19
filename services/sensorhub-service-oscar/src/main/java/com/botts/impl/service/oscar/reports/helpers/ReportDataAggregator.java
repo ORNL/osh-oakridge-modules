@@ -777,9 +777,9 @@ public final class ReportDataAggregator {
             specByCode.put(builtin.code(), builtin);
         }
 
-        // Include administrator-configured custom disposition codes (> 11)
-        if (module != null && module.getConfiguration() != null && module.getConfiguration().customAdjudicationCodes != null) {
-            List<AdjudicationCodeConfig> customSorted = new ArrayList<>(module.getConfiguration().customAdjudicationCodes);
+        // Include administrator-configured and policy-pack custom disposition codes (> 11)
+        if (module != null) {
+            List<AdjudicationCodeConfig> customSorted = new ArrayList<>(module.getEffectiveCustomAdjudicationCodes());
             customSorted.removeIf(Objects::isNull);
             customSorted.sort(Comparator.comparingInt(c -> c.code));
             for (AdjudicationCodeConfig custom : customSorted) {
