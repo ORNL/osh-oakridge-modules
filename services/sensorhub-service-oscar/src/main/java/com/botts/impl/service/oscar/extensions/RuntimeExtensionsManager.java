@@ -43,7 +43,7 @@ import java.util.zip.ZipOutputStream;
  * across OSCAR's pluggable runtime extensions:
  * <ul>
  *   <li>OCR Model &amp; Rule Packs / {@code OcrEngine} SPI ({@code extensions/ocr/})</li>
- *   <li>Offline Regional Basemap {@code .pmtiles} Packs ({@code archive/maps/} + {@code extensions/maps/})</li>
+ *   <li>Offline Regional Basemap {@code .pmtiles} Packs ({@code extensions/maps-storage/} + {@code extensions/maps/})</li>
  *   <li>Secondary-Inspection Spectroscopy Libraries &amp; Classifiers ({@code extensions/spectroscopy/})</li>
  *   <li>Trusted Enterprise X.509 CA Certificates ({@code extensions/trusted-certs/})</li>
  *   <li>Agency Adjudication Code &amp; Policy Packs ({@code extensions/policy-packs/})</li>

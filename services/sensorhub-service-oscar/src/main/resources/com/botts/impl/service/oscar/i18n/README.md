@@ -1034,6 +1034,36 @@ records-destruction requirements.
   </video>
 </details>
 
+![Continual &amp; Occasional USB NVMe Backups Manager](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/45-usb-backups-manager.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#24, 16.7s): Manage Continual &amp; Occasional USB NVMe Backups &amp; Safe Field Eject</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/24-continual-and-occasional-usb-backups.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/24-continual-and-occasional-usb-backups.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
+![Pluggable Runtime Extensions &amp; Regional Packs Hub](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/46-runtime-extensions-hub.png)
+
+![Air-Gapped Offline PMTiles Regional Basemap on Map View](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/47-offline-pmtiles-basemap.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#25, 20.7s): Swap Pluggable OCR Packs &amp; Air-Gapped Regional .pmtiles Basemaps</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/25-pluggable-runtime-extensions-and-pmtiles.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#26, 15.6s): Stage Ubuntu 24.04 Off-Site &amp; Cut Over to Air-Gapped Portal Subnets</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/26-ubuntu-hotel-staging-and-airgapped-cutover.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
 ## 13. Validation checklist
 
 ### Certificate and access
@@ -1132,6 +1162,9 @@ When collecting support data, export a redacted troubleshooting support bundle (
 - [OSCAR video-guides index](https://github.com/ORNL/oscar/blob/main/docs/VIDEO_GUIDES.md)
 - [OSCAR release Quick Start](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
 - [OSCAR Deployment Guide](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
+- [Ubuntu Off-Site Staging & Air-Gapped Setup Guide](https://github.com/ORNL/oscar/blob/main/docs/UBUNTU_FIELD_SETUP_GUIDE.md)
+- [Continual & Occasional USB NVMe Backup Guide](https://github.com/ORNL/oscar/blob/main/docs/CONTINUAL_AND_USB_BACKUP_GUIDE.md)
+- [Pluggable Runtime Extensions & Offline Maps Guide](https://github.com/ORNL/oscar/blob/main/docs/PLUGGABLE_EXTENSIONS_GUIDE.md)
 - [OSCAR translation-system guide](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)
 - [Lane System module](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
 - [OSCAR Service module](https://github.com/ORNL/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)

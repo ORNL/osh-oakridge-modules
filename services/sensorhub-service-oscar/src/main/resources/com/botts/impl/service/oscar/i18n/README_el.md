@@ -1007,6 +1007,36 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   </video>
 </details>
 
+![Διαχείριση συνεχών &amp; περιστασιακών αντιγράφων ασφαλείας USB NVMe](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/45-usb-backups-manager.png)
+
+<details class="oscar-video-guide">
+  <summary>Βιντεοοδηγός (#24, 16.7s): Διαχείριση συνεχών &amp; περιστασιακών αντιγράφων USB NVMe &amp; ασφαλής εξαγωγή</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/24-continual-and-occasional-usb-backups.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/24-continual-and-occasional-usb-backups.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
+![Κέντρο επεκτάσεων εκτέλεσης &amp; τοπικών πακέτων](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/46-runtime-extensions-hub.png)
+
+![Τοπικός χάρτης .pmtiles εκτός δικτύου στην προβολή Χάρτης](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/47-offline-pmtiles-basemap.png)
+
+<details class="oscar-video-guide">
+  <summary>Βιντεοοδηγός (#25, 20.7s): Εναλλαγή πακέτων OCR &amp; τοπικών χαρτών .pmtiles εκτός δικτύου</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/25-pluggable-runtime-extensions-and-pmtiles.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
+<details class="oscar-video-guide">
+  <summary>Βιντεοοδηγός (#26, 15.6s): Προετοιμασία Ubuntu 24.04 εκτός σταθμού &amp; μετάβαση σε απομονωμένο υποδίκτυο πύλης</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/26-ubuntu-hotel-staging-and-airgapped-cutover.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
 ## 13. Λίστα ελέγχου
 
 ### Πιστοποιητικό και πρόσβαση
@@ -1103,6 +1133,9 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 - [Ευρετήριο βιντεοοδηγών OSCAR](https://github.com/ORNL/oscar/blob/main/docs/VIDEO_GUIDES.md)
 - [Γρήγορη εκκίνηση OSCAR](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
 - [Οδηγός εγκατάστασης](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
+- [Οδηγός προετοιμασίας εκτός σταθμού & εγκατάστασης εκτός δικτύου Ubuntu](https://github.com/ORNL/oscar/blob/main/docs/UBUNTU_FIELD_SETUP_GUIDE.md)
+- [Οδηγός συνεχών & περιστασιακών αντιγράφων ασφαλείας USB NVMe](https://github.com/ORNL/oscar/blob/main/docs/CONTINUAL_AND_USB_BACKUP_GUIDE.md)
+- [Οδηγός επεκτάσεων εκτέλεσης & χαρτών εκτός σύνδεσης](https://github.com/ORNL/oscar/blob/main/docs/PLUGGABLE_EXTENSIONS_GUIDE.md)
 - [Οδηγός συστήματος μεταφράσεων](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)
 - [Μονάδα Συστήματος λωρίδας](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
 - [Μονάδα υπηρεσίας OSCAR](https://github.com/ORNL/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)

@@ -37,8 +37,8 @@ import java.util.stream.Stream;
 /**
  * Manages administrator-uploaded offline regional {@code .pmtiles} basemap archives.
  *
- * <p>Stores {@code .pmtiles} payloads in {@code /var/lib/oscar/archive/maps/} (host archive disk,
- * preserved across upgrades and backed up incrementally) and active selection metadata in
+ * <p>Stores {@code .pmtiles} payloads in {@code /var/lib/oscar/extensions/maps-storage/} (persistent state
+ * volume, preserved across upgrades and backed up incrementally) and active selection metadata in
  * {@code /var/lib/oscar/extensions/maps/.active.json}. Serves RFC 9110 {@code HTTP 206 Partial Content}
  * byte-range slices directly from {@link FileChannel} with zero full-file memory buffering.</p>
  */
