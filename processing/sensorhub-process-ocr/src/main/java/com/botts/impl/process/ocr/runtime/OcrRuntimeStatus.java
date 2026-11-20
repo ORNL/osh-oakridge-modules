@@ -35,7 +35,7 @@ public record OcrRuntimeStatus(
                 "Bundled PP-OCRv3 + PARSeq (models/ocr)",
                 "",
                 "OnnxOcrEngine (PP-OCRv3 + PARSeq INT8)",
-                "3.11.0",
+                "3.11.1",
                 fastRoiSupported,
                 "builtin-latin",
                 "Built-In Latin & ISO-6346 Filter",
