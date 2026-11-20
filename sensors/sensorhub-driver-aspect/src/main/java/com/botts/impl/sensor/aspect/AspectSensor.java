@@ -63,12 +63,13 @@ public class AspectSensor extends AbstractSensorModule<AspectConfig> {
     public void doInit() throws SensorHubException {
         super.doInit();
 
+        // Generate identifiers before attempting network connection so offline RPMs
+        // still expose a valid system member UID during LaneSystem registration and stop.
+        generateUniqueID("urn:osh:sensor:aspect:", config != null ? config.serialNumber : null);
+        generateXmlID("Aspect", config != null ? config.serialNumber : null);
+
         // connect to aspect rpm
         tryConnection();
-
-        // Generate identifiers
-        generateUniqueID("urn:osh:sensor:aspect:", config.serialNumber);
-        generateXmlID("Aspect", config.serialNumber);
 
         laneID = config.laneId;
 

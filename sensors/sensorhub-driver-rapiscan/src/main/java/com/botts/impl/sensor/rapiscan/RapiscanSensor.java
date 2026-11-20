@@ -105,13 +105,14 @@ public class RapiscanSensor extends AbstractSensorModule<RapiscanConfig> {
 
         RepetitiveWarningFilter.install();
 
+        // Generate identifiers before attempting network connection so offline RPMs
+        // still expose a valid system member UID during LaneSystem registration and stop.
+        generateUniqueID("urn:osh:sensor:rapiscan:", config != null ? config.serialNumber : null);
+        generateXmlID("RAPISCAN_", config != null ? config.serialNumber : null);
+
         RapiscanThreadPoolManager.getInstance().registerSensor();
 
         tryConnection();
-
-        // Generate identifiers
-        generateUniqueID("urn:osh:sensor:rapiscan:", config.serialNumber);
-        generateXmlID("RAPISCAN_", config.serialNumber);
 
         // Add outputs
         createOutputs();
