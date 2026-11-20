@@ -11,9 +11,35 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import org.sensorhub.api.common.SensorHubException;
 
 public class RapiscanSensorConnectionLifecycleTest {
+
+    @Test
+    public void offlineInitFailureStillAssignsNonNullUniqueIdentifier() {
+        var config = new RapiscanConfig();
+        config.id = "lane-01-rpm";
+        config.serialNumber = "lane-01";
+        var sensor = new RapiscanSensor() {
+            @Override
+            public void tryConnection() throws SensorHubException {
+                throw new SensorHubException("Simulated offline RPM");
+            }
+        };
+        sensor.setConfiguration(config);
+
+        try {
+            sensor.doInit();
+            fail("Expected offline tryConnection to throw SensorHubException");
+        } catch (SensorHubException expected) {
+            assertEquals("urn:osh:sensor:rapiscan:lane-01", sensor.getUniqueIdentifier());
+            assertNotNull(sensor.getUniqueIdentifier());
+        }
+    }
 
     @Test
     public void publishesClearBeforeStartingNewConnectionReader() throws Exception {
