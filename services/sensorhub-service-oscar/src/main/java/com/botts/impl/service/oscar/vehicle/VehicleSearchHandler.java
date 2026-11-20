@@ -73,6 +73,26 @@ public final class VehicleSearchHandler implements IObjectHandler {
         if (!bucketStore.bucketExists(BUCKET_NAME)) {
             bucketStore.createBucket(BUCKET_NAME);
         }
+        warmSearchIndexAsync(module);
+    }
+
+    private static void warmSearchIndexAsync(OSCARServiceModule module) {
+        Thread warmThread = new Thread(() -> {
+            try {
+                Thread.sleep(3_000L);
+                if (module.isStarted()) {
+                    VehicleIncidentSpec warmSpec = new VehicleIncidentSpec(
+                            "__WARMUP__", "WARMUP", MatchMode.EQUALS, "", false, List.of(), List.of());
+                    VehicleIncidentAggregator.queryVehicleIncident(
+                            module, warmSpec, Instant.EPOCH, Instant.now().plusSeconds(60L), 1);
+                }
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            } catch (Throwable ignored) {
+            }
+        }, "oscar-vehicle-search-warmup");
+        warmThread.setDaemon(true);
+        warmThread.start();
     }
 
     @Override

@@ -98,11 +98,19 @@ public final class RetainedMediaBackend {
                 if (manifest.lifecycleState() == MediaManifest.LifecycleState.DELETING
                         || manifest.lifecycleState() == MediaManifest.LifecycleState.DELETED)
                     return new AttemptOutcome(true, Optional.empty());
-                mediaStore.verifyPublishedMedia(manifest);
+                String catalogSourceKey = MediaSetStore.stripVideoBucket(manifest.source().objectKey());
+                boolean expiredMissingSource = manifest.source().state() != MediaManifest.SourceState.DELETED
+                        && !Instant.now(clock).isBefore(manifest.source().rollbackDeleteAfter())
+                        && !bucketStore.objectExists(MediaSetStore.VIDEO_BUCKET,
+                                MediaSetStore.normalizedSourceKey(catalogSourceKey));
+                if (expiredMissingSource) {
+                    mediaStore.verifyPublishedAssetsOnly(manifest);
+                } else {
+                    mediaStore.verifyPublishedMedia(manifest);
+                }
                 // Repair the narrow crash window after manifest commit but before its lifecycle
                 // index entry was durably published.
                 mediaStore.ensureManifestMaintenance(identity, manifest);
-                String catalogSourceKey = MediaSetStore.stripVideoBucket(manifest.source().objectKey());
                 if (!catalogSourceKey.equals(normalizedSourceKey))
                     throw new IOException("Retained-media identity was reused for a different source object");
                 repairLedger(identity, manifest);
