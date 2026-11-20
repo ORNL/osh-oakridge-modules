@@ -34,7 +34,7 @@ public record SpectroscopyRuntimeStatus(
                 "Sandia Full Spectrum WebID + ANSI N42.42 / Cambio Parser",
                 "",
                 root,
-                "3.11.0",
+                "3.11.1",
                 "webid-primary",
                 0,
                 "",
