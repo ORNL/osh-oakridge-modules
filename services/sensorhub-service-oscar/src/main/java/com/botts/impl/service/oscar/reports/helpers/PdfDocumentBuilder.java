@@ -15,6 +15,7 @@
 
 package com.botts.impl.service.oscar.reports.helpers;
 
+import com.botts.impl.service.oscar.sandbox.TrainingSandboxEnvironment;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -701,18 +702,45 @@ public class PdfDocumentBuilder implements Closeable {
         }
 
         int totalPages = document.getNumberOfPages();
+        boolean sandboxWatermark = TrainingSandboxEnvironment.isSandboxMode();
         for (int pageIdx = 0; pageIdx < totalPages; pageIdx++) {
             PDPage page = document.getPage(pageIdx);
             float pw = page.getMediaBox().getWidth();
+            float ph = page.getMediaBox().getHeight();
             try (PDPageContentStream footerStream = new PDPageContentStream(
                     document, page, PDPageContentStream.AppendMode.APPEND, true, true)) {
+                if (sandboxWatermark) {
+                    String topNotice = sanitizeSingleLine(boldFont, TrainingSandboxEnvironment.WATERMARK_BANNER);
+                    float noticeW = measureTextWidth(boldFont, 7.6f, topNotice);
+                    float pillW = Math.min(pw - 2f * MARGIN_X, noticeW + 18f);
+                    float pillX = (pw - pillW) / 2f;
+                    float pillY = ph - 19f;
+                    footerStream.setNonStrokingColor(new Color(254, 243, 199));
+                    footerStream.addRect(pillX, pillY, pillW, 13f);
+                    footerStream.fill();
+                    footerStream.setStrokingColor(ACCENT_AMBER);
+                    footerStream.setLineWidth(0.6f);
+                    footerStream.addRect(pillX, pillY, pillW, 13f);
+                    footerStream.stroke();
+
+                    footerStream.beginText();
+                    footerStream.setFont(boldFont, 7.6f);
+                    footerStream.setNonStrokingColor(new Color(146, 64, 14));
+                    footerStream.newLineAtOffset((pw - noticeW) / 2f, pillY + 3.4f);
+                    footerStream.showText(topNotice);
+                    footerStream.endText();
+                }
+
                 footerStream.setStrokingColor(SLATE_200);
                 footerStream.setLineWidth(0.5f);
                 footerStream.moveTo(MARGIN_X, FOOTER_RULE_Y);
                 footerStream.lineTo(pw - MARGIN_X, FOOTER_RULE_Y);
                 footerStream.stroke();
 
-                String leftFooter = sanitizeSingleLine(regularFont, "OSCAR  |  " + reportTitle + "  |  Node: " + nodeId);
+                String footerPrefix = sandboxWatermark
+                        ? TrainingSandboxEnvironment.WATERMARK_TEXT + "  |  OSCAR  |  "
+                        : "OSCAR  |  ";
+                String leftFooter = sanitizeSingleLine(regularFont, footerPrefix + reportTitle + "  |  Node: " + nodeId);
                 String rightFooter = "Page " + (pageIdx + 1) + " of " + totalPages;
                 float rightWidth = measureTextWidth(regularFont, 7.8f, rightFooter);
 

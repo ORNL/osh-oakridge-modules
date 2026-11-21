@@ -28,6 +28,7 @@ import com.botts.impl.service.oscar.reports.types.LaneReport;
 import com.botts.impl.service.oscar.reports.types.RDSReport;
 import com.botts.impl.service.oscar.reports.types.Report;
 import com.botts.impl.service.oscar.reports.types.VehicleIncidentReport;
+import com.botts.impl.service.oscar.sandbox.TrainingSandboxEnvironment;
 import com.botts.impl.service.oscar.vehicle.VehicleIncidentAggregator;
 import net.opengis.swe.v20.DataBlock;
 import net.opengis.swe.v20.DataComponent;
@@ -282,6 +283,7 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
         ByteArrayOutputStream rendered = new ByteArrayOutputStream(65536);
         Report report = reportHandler.createReport(rendered);
         report.generate();
+        byte[] finalBytes = applySandboxTextWatermarkIfNeeded(filePath, rendered.toByteArray());
 
         Object fileLock = fileWriteLocks.computeIfAbsent(filePath, k -> new Object());
         synchronized (fileLock) {
@@ -289,10 +291,37 @@ public class RequestReportControl extends AbstractControlInterface<OSCARSystem> 
                 if (out == null) {
                     return null;
                 }
-                rendered.writeTo(out);
+                out.write(finalBytes);
             }
         }
         return bucketService.getBucketStore().getRelativeResourceURI(REPORT_BUCKET, filePath);
+    }
+
+    private static byte[] applySandboxTextWatermarkIfNeeded(String filePath, byte[] rawBytes) {
+        if (!TrainingSandboxEnvironment.isSandboxMode() || filePath == null || rawBytes == null || rawBytes.length == 0) {
+            return rawBytes;
+        }
+        String lower = filePath.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".csv")) {
+            byte[] banner = ("# " + TrainingSandboxEnvironment.WATERMARK_BANNER + "\n")
+                    .getBytes(StandardCharsets.UTF_8);
+            byte[] merged = new byte[banner.length + rawBytes.length];
+            System.arraycopy(banner, 0, merged, 0, banner.length);
+            System.arraycopy(rawBytes, 0, merged, banner.length, rawBytes.length);
+            return merged;
+        }
+        if (lower.endsWith(".json")) {
+            String json = new String(rawBytes, StandardCharsets.UTF_8);
+            int brace = json.indexOf('{');
+            if (brace >= 0) {
+                String injected = json.substring(0, brace + 1)
+                        + "\"sandboxMode\":true,\"sandboxWatermark\":\""
+                        + TrainingSandboxEnvironment.WATERMARK_TEXT + "\","
+                        + json.substring(brace + 1);
+                return injected.getBytes(StandardCharsets.UTF_8);
+            }
+        }
+        return rawBytes;
     }
 
     String buildPath(ReportCmdType type, Instant start, Instant end, String laneUIDs, EventReportType eventType) {
