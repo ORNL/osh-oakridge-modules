@@ -444,6 +444,23 @@ public class BasicSessionAuthenticatorTest
             Map.of("Authorization", "Bearer " + rawBearer)), revokedBearerResp.proxy(), true);
         assertEquals(Authentication.SEND_FAILURE, afterRevoke);
         assertEquals(401, revokedBearerResp.status);
+
+        // Upstream Zero-Trust edge proxy Bearer JWT (non-oscar_fed_) must not block a valid OSCAR_SESSION cookie,
+        // while still failing 401 when no valid session or trusted-tunnel identity is present.
+        ResponseCapture edgeProxyWithCookieResp = new ResponseCapture();
+        Authentication edgeProxyWithCookie = auth.validateRequest(createRequest(
+            "GET", "/sensorhub/api/systems", Map.of(), new Cookie[] {adminCookie},
+            Map.of("Authorization", "Bearer eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.octelium.edge")),
+            edgeProxyWithCookieResp.proxy(), true);
+        assertTrue(edgeProxyWithCookie instanceof Authentication.User);
+
+        ResponseCapture edgeProxyWithoutCookieResp = new ResponseCapture();
+        Authentication edgeProxyWithoutCookie = auth.validateRequest(createRequest(
+            "GET", "/sensorhub/api/systems", Map.of(), null,
+            Map.of("Authorization", "Bearer eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.octelium.edge")),
+            edgeProxyWithoutCookieResp.proxy(), true);
+        assertEquals(Authentication.SEND_CONTINUE, edgeProxyWithoutCookie);
+        assertEquals(401, edgeProxyWithoutCookieResp.status);
     }
 
 

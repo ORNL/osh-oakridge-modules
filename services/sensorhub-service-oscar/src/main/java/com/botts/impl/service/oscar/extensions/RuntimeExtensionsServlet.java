@@ -93,6 +93,67 @@ public final class RuntimeExtensionsServlet extends HttpServlet {
             return;
         }
 
+        // Authenticated viewer/operator/admin Cargo UFF read endpoints
+        if ("/uff/active".equals(sub)) {
+            if (!requireAuthenticatedUser(req, resp)) {
+                return;
+            }
+            sendJson(resp, HttpServletResponse.SC_OK, manager.getCargoUffManager().getPublicActiveInfo());
+            return;
+        }
+        if ("/uff/search".equals(sub)) {
+            if (!requireAuthenticatedUser(req, resp)) {
+                return;
+            }
+            sendJson(resp, HttpServletResponse.SC_OK, manager.getCargoUffManager().search(
+                    req.getParameter("uffId"),
+                    req.getParameter("vehicleId"),
+                    req.getParameter("scannerId"),
+                    req.getParameter("nearTime"),
+                    parseIntOrNull(req.getParameter("windowMinutes")),
+                    parseBoolOrNull(req.getParameter("fuzzy")),
+                    parseIntOrNull(req.getParameter("limit"))
+            ));
+            return;
+        }
+        if ("/uff/case".equals(sub)) {
+            if (!requireAuthenticatedUser(req, resp)) {
+                return;
+            }
+            try {
+                sendJson(resp, HttpServletResponse.SC_OK, manager.getCargoUffManager().getCaseMetadata(
+                        req.getParameter("uffUuid"),
+                        req.getParameter("bucketKey")
+                ));
+            } catch (IllegalArgumentException iae) {
+                sendJsonError(resp, HttpServletResponse.SC_BAD_REQUEST, iae.getMessage());
+            } catch (IOException ioe) {
+                sendJsonError(resp, HttpServletResponse.SC_NOT_FOUND, ioe.getMessage());
+            }
+            return;
+        }
+        if ("/uff/entry".equals(sub)) {
+            if (!requireAuthenticatedUser(req, resp)) {
+                return;
+            }
+            try {
+                manager.getCargoUffManager().streamEntryToResponse(
+                        req.getParameter("uffUuid"),
+                        req.getParameter("bucketKey"),
+                        req.getParameter("entry"),
+                        req,
+                        resp
+                );
+            } catch (SecurityException se) {
+                sendJsonError(resp, HttpServletResponse.SC_BAD_REQUEST, se.getMessage());
+            } catch (IOException ioe) {
+                if (!resp.isCommitted()) {
+                    sendJsonError(resp, HttpServletResponse.SC_NOT_FOUND, ioe.getMessage());
+                }
+            }
+            return;
+        }
+
         // All remaining GET endpoints require Administrator role
         if (!requireAdminUser(req, resp)) {
             return;
@@ -131,10 +192,28 @@ public final class RuntimeExtensionsServlet extends HttpServlet {
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String sub = normalizeSubpath(req);
+        if ("/uff/stage-adjudication".equals(sub)) {
+            if (!requireOperatorOrAdminUser(req, resp) || !requireCsrfHeader(req, resp)) {
+                return;
+            }
+            try {
+                JsonObject body = readJsonBody(req);
+                String uffUuid = getString(body, "uffUuid");
+                sendJson(resp, HttpServletResponse.SC_OK, manager.getCargoUffManager().stageForAdjudication(uffUuid));
+            } catch (IllegalArgumentException | SecurityException e) {
+                sendJsonError(resp, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
+            } catch (Exception e) {
+                logger.warn("Cargo UFF stage-adjudication failed: {}", e.getMessage());
+                sendJsonError(resp, HttpServletResponse.SC_BAD_REQUEST,
+                        e.getMessage() != null ? e.getMessage() : "Unable to stage Cargo UFF package");
+            }
+            return;
+        }
+
         if (!requireAdminUser(req, resp) || !requireCsrfHeader(req, resp)) {
             return;
         }
-        String sub = normalizeSubpath(req);
         String prefix = resolvePublicPrefix(req);
 
         try {
@@ -255,6 +334,65 @@ public final class RuntimeExtensionsServlet extends HttpServlet {
                     }
                     sendJson(resp, HttpServletResponse.SC_OK, manager.getFullStatus(prefix));
                 }
+                case "/uff/action" -> {
+                    JsonObject body = readJsonBody(req);
+                    String action = getString(body, "action");
+                    switch (action) {
+                        case "save-config" -> {
+                            boolean enabled = body.has("enabled") && body.get("enabled").isJsonPrimitive()
+                                    && body.get("enabled").getAsBoolean();
+                            boolean clearPassword = body.has("clearPassword") && body.get("clearPassword").isJsonPrimitive()
+                                    && body.get("clearPassword").getAsBoolean();
+                            String rawPass = body.has("password") && body.get("password").isJsonPrimitive()
+                                    ? body.get("password").getAsString()
+                                    : null;
+                            Integer winMin = body.has("correlationWindowMinutes") && body.get("correlationWindowMinutes").isJsonPrimitive()
+                                    ? body.get("correlationWindowMinutes").getAsInt()
+                                    : null;
+                            Boolean fuzzy = body.has("allowFuzzyOcrMatch") && body.get("allowFuzzyOcrMatch").isJsonPrimitive()
+                                    ? body.get("allowFuzzyOcrMatch").getAsBoolean()
+                                    : null;
+                            manager.getCargoUffManager().updateConfig(
+                                    enabled,
+                                    getString(body, "sourceType"),
+                                    getString(body, "shareUrl"),
+                                    getString(body, "subPath"),
+                                    getString(body, "localPath"),
+                                    getString(body, "domain"),
+                                    getString(body, "username"),
+                                    rawPass,
+                                    clearPassword,
+                                    winMin,
+                                    fuzzy
+                            );
+                            sendJson(resp, HttpServletResponse.SC_OK, manager.getFullStatus(prefix));
+                        }
+                        case "test-connection" -> {
+                            String rawPass = body.has("password") && body.get("password").isJsonPrimitive()
+                                    ? body.get("password").getAsString()
+                                    : null;
+                            Map<String, Object> testResult = manager.getCargoUffManager().testConnection(
+                                    getString(body, "sourceType"),
+                                    getString(body, "shareUrl"),
+                                    body.has("subPath") ? getString(body, "subPath") : null,
+                                    getString(body, "localPath"),
+                                    body.has("domain") ? getString(body, "domain") : null,
+                                    body.has("username") ? getString(body, "username") : null,
+                                    rawPass
+                            );
+                            sendJson(resp, HttpServletResponse.SC_OK, testResult);
+                        }
+                        case "refresh" -> {
+                            manager.getCargoUffManager().refreshIndex(true);
+                            sendJson(resp, HttpServletResponse.SC_OK, manager.getFullStatus(prefix));
+                        }
+                        case "reset" -> {
+                            manager.getCargoUffManager().resetToDisabled();
+                            sendJson(resp, HttpServletResponse.SC_OK, manager.getFullStatus(prefix));
+                        }
+                        default -> sendJsonError(resp, HttpServletResponse.SC_BAD_REQUEST, "Unsupported UFF action: " + action);
+                    }
+                }
                 default -> sendJsonError(resp, HttpServletResponse.SC_NOT_FOUND, "Unknown runtime extensions action path: " + sub);
             }
         } catch (SecurityException se) {
@@ -277,6 +415,43 @@ public final class RuntimeExtensionsServlet extends HttpServlet {
             return false;
         }
         return true;
+    }
+
+    private boolean requireOperatorOrAdminUser(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String user = resolveUsername(req);
+        if (user == null || user.isBlank()) {
+            sendJsonError(resp, HttpServletResponse.SC_UNAUTHORIZED, "Authentication required");
+            return false;
+        }
+        ISecurityManager sm = hub != null ? hub.getSecurityManager() : null;
+        IUserInfo info = sm != null ? sm.getUserInfo(user) : null;
+        if (info == null || info.getRoles() == null
+                || (!info.getRoles().contains("admin") && !info.getRoles().contains("operator"))) {
+            sendJsonError(resp, HttpServletResponse.SC_FORBIDDEN,
+                    "Operator or Administrator role is required to stage Cargo UFF adjudication files.");
+            return false;
+        }
+        return true;
+    }
+
+    private static Integer parseIntOrNull(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Boolean parseBoolOrNull(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        if ("true".equalsIgnoreCase(s.trim())) return Boolean.TRUE;
+        if ("false".equalsIgnoreCase(s.trim())) return Boolean.FALSE;
+        return null;
     }
 
     private boolean requireAdminUser(HttpServletRequest req, HttpServletResponse resp) throws IOException {

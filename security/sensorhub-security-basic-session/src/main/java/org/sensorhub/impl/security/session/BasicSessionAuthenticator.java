@@ -379,6 +379,15 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             return Authentication.SEND_FAILURE;
         }
         String rawToken = authHeader.substring(7).trim();
+        // Upstream Zero-Trust ingress proxies (e.g., Octelium WORKLOAD access tokens, Istio, or
+        // Cloudflare Access) validate their own edge JWT in Authorization: Bearer and forward the
+        // header upstream alongside OSCAR_SESSION cookies or X-Oscar-Tunnel-Secret / X-Octelium-User.
+        // Only oscar_fed_* tokens are OSCAR Federation Service Tokens; non-oscar_fed_ Bearer headers
+        // fall through to session-cookie / trusted-tunnel verification (and still fail 401 if neither
+        // is valid), whereas any oscar_fed_* token fails closed immediately on revocation or expiry.
+        if (!rawToken.startsWith(OscarIdentityStore.FED_TOKEN_PREFIX)) {
+            return null;
+        }
         FederationTokenRecord fed = identityStore.authenticateFederationToken(rawToken);
         if (fed == null) {
             log.warn("Rejected invalid or expired Federation Bearer token from {}", clientIp(request));

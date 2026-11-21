@@ -131,7 +131,8 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                 config,
                 emlPluginHandler,
                 getLogger(),
-                this::republishEffectiveAdjudicationCodes
+                this::republishEffectiveAdjudicationCodes,
+                () -> this.bucketStore
         );
         runtimeExtensionsManager.restoreAllOnStartup();
 

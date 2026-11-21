@@ -1,4 +1,4 @@
-# Manuel d'administration et d'exploitation d'OSCAR 3.11.1
+# Manuel d'administration et d'exploitation d'OSCAR 3.11.2
 
 Ce manuel couvre la première utilisation et l'exploitation complète : certificat, connexion, plan géoréférencé, import/création des voies, adjudication et preuves, événements, statistiques nationales, rapports et fédération de nœuds.
 
@@ -32,7 +32,7 @@ L'interface d'administration sélectionne automatiquement le manuel correspondan
 
 Vous avez besoin :
 
-- d'un déploiement OSCAR 3.11.1 installé et démarré ;
+- d'un déploiement OSCAR 3.11.2 installé et démarré ;
 - de l'URL OSCAR, généralement `https://oscar.local/` sauf si un autre hôte a été choisi ;
 - d'un compte administrateur pour `/sensorhub/admin` ;
 - de l'image de site approuvée et des coordonnées des coins inférieur gauche et supérieur droit ;
@@ -63,7 +63,7 @@ Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/mai
 | **Fichier quotidien et codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | Journal CSV quotidien par voie contenant les messages RPM bruts : `GB`/`NB` = bruit de fond gamma/neutrons, `GS` = début d'occupation, `GC`/`NC` = profil de comptage, `GA`/`NA`/`NS` = alarme gamma/neutrons, `GX` = fin d'occupation, `TT`/`TC` = défaut/rétablissement de sabotage, et `SG1`–`SG3`/`SN1`–`SN2` = paramètres quotidiens de configuration gamma/neutrons (qui mettent automatiquement à jour les paramètres du pilote Rapiscan en mémoire et regroupent les modifications dans `config.json`). |
 | **UUID d'événement (`Event UUID`)** | Identifiant unique global attribué à chaque événement d'occupation pour la recherche, l'exportation QR et le suivi dans les rapports et nœuds fédérés. |
 | **Vue opérationnelle (`Operational View`)** | Filtre nommé sélectionnable depuis le menu déroulant **Vue opérationnelle** de la barre supérieure (ou via `?view=<clé>` / `/view/<clé>`) limitant le Tableau de bord, les Événements, l'État de santé, la Carte et le Générateur de rapports à un groupe de voies précis dans le respect des permissions `allowedViews`. |
-| **Niveau froid Parquet (`PARQUET_PRIMARY`)** | Mode de stockage par défaut d'OSCAR 3.11.1 dans lequel PostgreSQL conserve une fenêtre de transit de 30 minutes et les partitions terminées sont exportées en fichiers Apache Parquet compressés ZSTD (`archive/parquet/`). |
+| **Niveau froid Parquet (`PARQUET_PRIMARY`)** | Mode de stockage par défaut d'OSCAR 3.11.2 dans lequel PostgreSQL conserve une fenêtre de transit de 30 minutes et les partitions terminées sont exportées en fichiers Apache Parquet compressés ZSTD (`archive/parquet/`). |
 | **Médias conservés à 5 images** | Pour chaque occupation avec alarme, OSCAR extrait 5 instantanés JPEG (`frame-01.jpg` à `frame-05.jpg`). Après 30 jours, les images secondaires (`01`, `02`, `04`, `05`) sont purgées et l'image centrale (`frame-03.jpg`) est conservée. |
 | **OCR des véhicules (`ocrConfig`)** | Lecture optique facultative par voie (`Activer l'OCR des véhicules = false` par défaut) analysant de façon asynchrone les codes conteneur ISO 6346 (avec chiffre de contrôle) et les plaques d'immatriculation selon les ressources CPU et mémoire disponibles (`OcrResourceGovernor`), publiant des candidats `vehicleOcr` (`PARQUET_PRIMARY`), des vignettes JPEG partitionnées par date (`/sensorhub/buckets/ocr/crops/<YYYY-MM-DD>/`, alignées sur `frame-03.jpg` et `ocrCropRetentionDays = 365`) et préremplissant l'**ID véhicule** pour les conteneurs ISO valides ou les plaques `>= 85%`. Lorsque `Alarmes uniquement` est décoché, les séquences hors alarme sont analysées de manière transitoire puis supprimées immédiatement tout en gardant `occupancy.videoPaths` vide (`[]`). |
 | **SAN (Nom alternatif du sujet)** | Liste des noms d'hôtes et adresses IP (tels que `oscar.local` et `192.0.2.10`) inscrits dans un certificat HTTPS que le navigateur vérifie avant d'établir la connexion. |
@@ -254,10 +254,10 @@ mémorise les suppressions sous pression sans un
 tombstone JSON permanent par caméra. Sauvegardez et restaurez comme une unité tout
 `videos/retained-media/v1`, notamment index, points de contrôle, files, manifestes et journaux.
 
-Ce format compact apparaît pour la première fois dans 3.11.1 et ne migre pas les prototypes
+Ce format compact apparaît pour la première fois dans 3.11.2 et ne migre pas les prototypes
 `.deleted.json` ni les arbres de marqueurs par observation. Les systèmes de test doivent démarrer
-avec une base et un préfixe de médias 3.11.1 neufs. Pour revenir en arrière, restaurez les deux depuis
-la même sauvegarde coordonnée antérieure à 3.11.1 ; n'exécutez jamais un ancien binaire sur ce stockage.
+avec une base et un préfixe de médias 3.11.2 neufs. Pour revenir en arrière, restaurez les deux depuis
+la même sauvegarde coordonnée antérieure à 3.11.2 ; n'exécutez jamais un ancien binaire sur ce stockage.
 
 ### Codes de disposition personnalisés
 
@@ -901,7 +901,7 @@ Une fois les portails distants connectés via des jetons `oscar_fed_...`, **Év�
 
 ## 12. Conservation des données et stockage
 
-Le profil standard 3.11.1 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet en mode
+Le profil standard 3.11.2 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet en mode
 `PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Les flux de configuration statiques
 (`sensorLocation`, `adjudicationCodes`, `siteInfo`) restent dans PostgreSQL `ONLY oscar.obs`, tandis que
 les 22 sorties opérationnelles et probantes autorisées (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
@@ -970,8 +970,8 @@ Utilisez les commandes `archive status`, `archive verify`, de conservation, d'ex
 suppression avec simulation/jeton du lanceur, ainsi que `backup` et `backup-verify` uniquement en mode
 `single`. Protégez séparément la clé de chiffrement et conservez une copie hors hôte si la politique
 du site exige un autre domaine de défaillance. Ne supprimez jamais à la main les fichiers catalogués.
-Une mise à niveau antérieure à 3.11.1 conserve l'ancienne base et configuration : elle ne crée pas tout
-le profil et n'active pas les sommes de contrôle PostgreSQL. Initialisez un nouveau déploiement 3.11.1
+Une mise à niveau antérieure à 3.11.2 conserve l'ancienne base et configuration : elle ne crée pas tout
+le profil et n'active pas les sommes de contrôle PostgreSQL. Initialisez un nouveau déploiement 3.11.2
 ou appliquez une migration de production validée séparément. Les guides de stockage de
 `documentation/` sont les procédures de référence.
 
@@ -1040,6 +1040,26 @@ reprise et destruction des documents.
   </video>
 </details>
 
+### Inspection non intrusive du fret (OMD UFF 2.0 et 3.0) et radiographie 16 bits
+
+L’intégration du partage UFF fret est **désactivée par défaut** (`enabled = false`) afin de ne présenter aucun bouton superflu, aucun thread d’arrière-plan ni aucune requête réseau sur les portiques RPM autonomes. Les opérateurs peuvent à tout moment inspecter des fichiers `.uff` locaux (`jusqu’à 200 Mo`) via **Téléverser des fichiers** dans **Inspection secondaire** (avec extraction automatique du spectre `.n42` vers WebID).
+
+Sur les sites équipés de scanners rayons X NII (`UFF 2.0` ou `UFF 3.0.0`), un administrateur peut ouvrir **Extensions d’exécution (`/extensions`) -> Fret NII (OMD UFF)**, connecter un partage SMBv2/SMBv3 en lecture seule (chiffré au repos en AES-256-GCM et masqué dans les archives d’assistance), tester la connexion et appliquer. Les opérateurs peuvent alors corréler automatiquement les conteneurs (avec tolérance OCR à 1 caractère `OCR ±1`), parcourir par scanner et fenêtre horaire (`Parcourir UFF fret`), rechercher un scan non étiqueté par UUID ou chemin `.uff` dans **Événements (`/event-log`)**, inspecter les radiographies TIFF 16 bits avec bandes atomiques **HEMD** (`Z_eff`) alignées au profil RPM et lier le dossier sans télécharger l’archive complète depuis le NAS.
+
+![Configuration du partage SMB en lecture seule Fret NII dans Extensions d’exécution](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/48-cargo-uff-smb-share-extension.png)
+
+![Explorateur UFF fret et corrélation OCR tolérante à 1 caractère](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/50-cargo-uff-smb-picker-and-fuzzy-ocr.png)
+
+![Radiographie fret 16 bits, superposition HEMD et alignement RPM](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/49-cargo-uff-16bit-xray-inspector.png)
+
+<details class="oscar-video-guide">
+  <summary>Guide vidéo (#27, 24.5s) : Connecter un partage SMB UFF fret, chercher par UUID et inspecter les rayons X 16 bits</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/27-cargo-uff-smb-and-xray-inspection.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
 ## 13. Liste de validation
 
 ### Certificat et accès
@@ -1052,7 +1072,7 @@ reprise et destruction des documents.
 
 - [ ] ID de nœud unique ; base, Web ID, statistiques et démarrage automatique vérifiés.
 - [ ] Conservation vidéo et pression examinées avant toute purge.
-- [ ] Une base/configuration 3.11.1 neuve ou une migration approuvée est utilisée ; l'état et l'intégrité de l'archive sont valides.
+- [ ] Une base/configuration 3.11.2 neuve ou une migration approuvée est utilisée ; l'état et l'intégrité de l'archive sont valides.
 - [ ] Le mode de sauvegarde est consigné. Le mode désactivé ne crée aucune sauvegarde gérée par OSCAR ; si `single` est activé, son instantané courant est vérifié, sa clé externe est séquestrée séparément et un exercice de restauration isolé a réussi.
 - [ ] Une voie témoin publie CSV/manifeste depuis le journal ; les événements retenus montrent cinq JPEG et les anciens restent lisibles.
 - [ ] Services de compartiments et OSCAR démarrés.
@@ -1097,7 +1117,7 @@ reprise et destruction des documents.
 | Tuiles OSM 403/bloquées | N'utilisez pas directement des serveurs bénévoles contrairement à leur politique. Configurez un fournisseur/proxy OSM approuvé ou utilisez Esri pendant la correction. |
 | CSV refusé | Vérifiez en-tête/ordre, groupes de six, index continus, nombre de cellules, nombres, cellules vides non citées et absence de virgules internes. |
 | Voie manquante après CSV | Cherchez un UniqueID déjà chargé, un nom trop long, des erreurs d'enfants et attendez le chargement asynchrone. |
-| **Capteurs** est vide après un redémarrage suivant le téléversement du CSV | Le téléversement a créé des modules en mémoire, mais la configuration complète n'a pas été persistée. Téléversez de nouveau si nécessaire, attendez toutes les voies et tous les enfants, utilisez l'action globale **Enregistrer**, redémarrez OSCAR et vérifiez encore **Capteurs**. Si un nœud 3.11.1 perd toujours les voies, consultez les journaux OSCAR et vérifiez que le propriétaire peut écrire dans `/var/lib/oscar/config.json`. |
+| **Capteurs** est vide après un redémarrage suivant le téléversement du CSV | Le téléversement a créé des modules en mémoire, mais la configuration complète n'a pas été persistée. Téléversez de nouveau si nécessaire, attendez toutes les voies et tous les enfants, utilisez l'action globale **Enregistrer**, redémarrez OSCAR et vérifiez encore **Capteurs**. Si un nœud 3.11.2 perd toujours les voies, consultez les journaux OSCAR et vérifiez que le propriétaire peut écrire dans `/var/lib/oscar/config.json`. |
 | Vue opérationnelle vide ou clé rejetée | Vérifiez que les **Clés de vue opérationnelle** de la voie contiennent exactement la clé en minuscules, appliquez et enregistrez globalement, redémarrez la voie si nécessaire, puis utilisez `?view=<clé>` ou `/view/<clé>`. Une affectation vide ne correspond jamais à une vue limitée. |
 | RPM ne démarre pas | Testez hôte, port, pare-feu, plage Aspect et disponibilité ; consultez l'erreur du pilote enfant. |
 | Caméra ne démarre pas | Testez RTSP/identifiants, retirez `rtsp://` de l'hôte, évitez un port en double, vérifiez codec Axis ou chemin Custom depuis l'hôte OSCAR. |
@@ -1139,10 +1159,11 @@ Pour l'assistance technique, exportez une archive de diagnostic expurgée (`.zip
 - [Guide de préparation hors site et d’installation hors ligne Ubuntu](https://github.com/ORNL/oscar/blob/main/docs/UBUNTU_FIELD_SETUP_GUIDE.md)
 - [Guide des sauvegardes USB NVMe continues et occasionnelles](https://github.com/ORNL/oscar/blob/main/docs/CONTINUAL_AND_USB_BACKUP_GUIDE.md)
 - [Guide des extensions d’exécution et cartes hors ligne](https://github.com/ORNL/oscar/blob/main/docs/PLUGGABLE_EXTENSIONS_GUIDE.md)
+- [Guide d’inspection non intrusive du fret (OMD UFF 2.0 et 3.0)](https://github.com/ORNL/oscar/blob/main/docs/CARGO_UFF_INTEGRATION.md)
 - [Guide du système de traduction](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)
 - [Module Système de voie](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
 - [Module de service OSCAR](https://github.com/ORNL/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)
 
 ---
 
-Référence du document : comportement du code OSCAR 3.11.1, revu le 2026-10-18. Si une version ultérieure change les champs ou procédures, mettez à jour ensemble le manuel canonique anglais et les trois traductions.
+Référence du document : comportement du code OSCAR 3.11.2, revu le 2026-10-18. Si une version ultérieure change les champs ou procédures, mettez à jour ensemble le manuel canonique anglais et les trois traductions.
