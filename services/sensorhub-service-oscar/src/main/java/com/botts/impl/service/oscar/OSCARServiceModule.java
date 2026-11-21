@@ -24,6 +24,8 @@ import com.botts.impl.service.oscar.diagnostics.SupportBundleHandler;
 import com.botts.impl.service.oscar.eml.EmlPluginHandler;
 import com.botts.impl.service.oscar.extensions.RuntimeExtensionsManager;
 import com.botts.impl.service.oscar.extensions.RuntimeExtensionsServlet;
+import com.botts.impl.service.oscar.sandbox.TrainingSandboxManager;
+import com.botts.impl.service.oscar.sandbox.TrainingSandboxServlet;
 import com.botts.impl.service.oscar.purge.DatabasePurger;
 import com.botts.impl.service.oscar.retention.StoragePressureRetention;
 import com.botts.impl.service.oscar.reports.RequestReportControl;
@@ -86,6 +88,8 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     EmlPluginHandler emlPluginHandler;
     RuntimeExtensionsManager runtimeExtensionsManager;
     RuntimeExtensionsServlet runtimeExtensionsServlet;
+    TrainingSandboxManager trainingSandboxManager;
+    TrainingSandboxServlet trainingSandboxServlet;
     HttpServer extensionsHttpServer;
     VideoRetention videoRetention;
     DatabasePurger databasePurger;
@@ -135,6 +139,13 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                 () -> this.bucketStore
         );
         runtimeExtensionsManager.restoreAllOnStartup();
+
+        trainingSandboxManager = new TrainingSandboxManager(
+                getParentHub(),
+                this,
+                runtimeExtensionsManager,
+                getLogger()
+        );
 
         spreadsheetHandler = new SpreadsheetHandler(getParentHub().getModuleRegistry(), bucketStore, getLogger(), config);
         if (config.spreadsheetConfigPath != null && !config.spreadsheetConfigPath.isEmpty())
@@ -307,6 +318,9 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         if (storagePressureRetention != null)
             storagePressureRetention.start();
 
+        if (trainingSandboxManager != null)
+            trainingSandboxManager.start();
+
         deployRuntimeExtensionsServlet();
         startStaticGuideMimeRegistration();
         startApplicationReadiness();
@@ -363,6 +377,8 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                 this::unregisterSupportBundleHandler);
         failure = runStopStep(failure, "runtime extensions servlet",
                 this::undeployRuntimeExtensionsServlet);
+        failure = runStopStep(failure, "training sandbox manager",
+                this::stopTrainingSandboxManager);
         failure = runStopStep(failure, "static guide MIME registration",
                 this::stopStaticGuideMimeRegistration);
         failure = runStopStep(failure, "OSCAR system registration", this::unregisterSystem);
@@ -785,6 +801,10 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         return runtimeExtensionsManager;
     }
 
+    public TrainingSandboxManager getTrainingSandboxManager() {
+        return trainingSandboxManager;
+    }
+
     private void deployRuntimeExtensionsServlet() {
         if (runtimeExtensionsManager == null || getParentHub() == null || getParentHub().getModuleRegistry() == null) {
             return;
@@ -801,6 +821,12 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                         getParentHub(), runtimeExtensionsManager, getLogger());
                 server.deployServlet(runtimeExtensionsServlet, RuntimeExtensionsServlet.ENDPOINT_WILDCARD);
                 server.addServletSecurity(RuntimeExtensionsServlet.ENDPOINT_WILDCARD, true);
+                if (trainingSandboxManager != null) {
+                    trainingSandboxServlet = new TrainingSandboxServlet(
+                            getParentHub(), trainingSandboxManager, getLogger());
+                    server.deployServlet(trainingSandboxServlet, TrainingSandboxServlet.ENDPOINT_WILDCARD);
+                    server.addServletSecurity(TrainingSandboxServlet.ENDPOINT_WILDCARD, true);
+                }
                 extensionsHttpServer = server;
             }
         } catch (Exception e) {
@@ -811,11 +837,26 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     void undeployRuntimeExtensionsServlet() {
         HttpServer server = extensionsHttpServer;
         RuntimeExtensionsServlet servlet = runtimeExtensionsServlet;
+        TrainingSandboxServlet sbServlet = trainingSandboxServlet;
         extensionsHttpServer = null;
         runtimeExtensionsServlet = null;
-        if (server != null && server.isStarted() && servlet != null) {
-            server.undeployServlet(servlet);
-            servlet.destroy();
+        trainingSandboxServlet = null;
+        if (server != null && server.isStarted()) {
+            if (servlet != null) {
+                server.undeployServlet(servlet);
+                servlet.destroy();
+            }
+            if (sbServlet != null) {
+                server.undeployServlet(sbServlet);
+                sbServlet.destroy();
+            }
+        }
+    }
+
+    void stopTrainingSandboxManager() {
+        TrainingSandboxManager sb = trainingSandboxManager;
+        if (sb != null) {
+            sb.close();
         }
     }
 

@@ -15,6 +15,8 @@
 
 package com.botts.impl.service.oscar.reports.helpers;
 
+import com.botts.impl.service.oscar.sandbox.TrainingSandboxEnvironment;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -77,6 +79,26 @@ public final class XlsxWorkbookWriter {
             throw new IllegalArgumentException("At least one worksheet is required");
         }
         List<SheetSpec> safeSheets = new ArrayList<>(sheets);
+        if (TrainingSandboxEnvironment.isSandboxMode() && !safeSheets.isEmpty()) {
+            SheetSpec first = safeSheets.get(0);
+            List<List<CellValue>> augRows = new ArrayList<>(first.rows().size() + 1);
+            List<CellValue> noticeRow = new ArrayList<>();
+            noticeRow.add(CellValue.text("SANDBOX WATERMARK"));
+            if (first.headers().size() > 1) {
+                noticeRow.add(CellValue.text(TrainingSandboxEnvironment.WATERMARK_BANNER));
+                for (int c = 2; c < first.headers().size(); c++) {
+                    noticeRow.add(CellValue.text(""));
+                }
+            }
+            augRows.add(noticeRow);
+            augRows.addAll(first.rows());
+            safeSheets.set(0, new SheetSpec(
+                    first.name(),
+                    first.headers(),
+                    first.columnWidths(),
+                    augRows,
+                    first.autoFilter()));
+        }
         try (ZipOutputStream zip = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
             writeEntry(zip, "[Content_Types].xml", buildContentTypesXml(safeSheets.size()));
             writeEntry(zip, "_rels/.rels", buildRootRelsXml());
