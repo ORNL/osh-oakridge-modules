@@ -4,11 +4,13 @@
  *******************************************************************************/
 package com.botts.impl.service.oscar.extensions;
 
+import com.botts.api.service.bucket.IBucketStore;
 import com.botts.impl.process.ocr.runtime.OcrRuntimeRegistry;
 import com.botts.impl.process.ocr.runtime.OcrRuntimeStatus;
 import com.botts.impl.service.oscar.AdjudicationCodeConfig;
 import com.botts.impl.service.oscar.OSCARServiceConfig;
 import com.botts.impl.service.oscar.eml.EmlPluginHandler;
+import com.botts.impl.service.oscar.uff.CargoUffManager;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import org.sensorhub.api.ISensorHub;
@@ -69,6 +71,7 @@ public final class RuntimeExtensionsManager {
     private final Path trustedCertsDir;
     private final OfflineMapManager offlineMapManager;
     private final PolicyPackManager policyPackManager;
+    private final CargoUffManager cargoUffManager;
 
     public RuntimeExtensionsManager(
             ISensorHub hub,
@@ -84,7 +87,28 @@ public final class RuntimeExtensionsManager {
                 logger,
                 resolveDefaultExtensionsRoot(),
                 resolveDefaultArchiveMapsDir(),
-                onPolicyChanged
+                onPolicyChanged,
+                () -> null
+        );
+    }
+
+    public RuntimeExtensionsManager(
+            ISensorHub hub,
+            OSCARServiceConfig oscarConfig,
+            EmlPluginHandler emlPluginHandler,
+            Logger logger,
+            Runnable onPolicyChanged,
+            java.util.function.Supplier<IBucketStore> bucketStoreSupplier
+    ) {
+        this(
+                hub,
+                oscarConfig,
+                emlPluginHandler,
+                logger,
+                resolveDefaultExtensionsRoot(),
+                resolveDefaultArchiveMapsDir(),
+                onPolicyChanged,
+                bucketStoreSupplier
         );
     }
 
@@ -96,6 +120,19 @@ public final class RuntimeExtensionsManager {
             Path extensionsRoot,
             Path archiveMapsDir,
             Runnable onPolicyChanged
+    ) {
+        this(hub, oscarConfig, emlPluginHandler, logger, extensionsRoot, archiveMapsDir, onPolicyChanged, () -> null);
+    }
+
+    public RuntimeExtensionsManager(
+            ISensorHub hub,
+            OSCARServiceConfig oscarConfig,
+            EmlPluginHandler emlPluginHandler,
+            Logger logger,
+            Path extensionsRoot,
+            Path archiveMapsDir,
+            Runnable onPolicyChanged,
+            java.util.function.Supplier<IBucketStore> bucketStoreSupplier
     ) {
         this.hub = hub;
         this.oscarConfig = oscarConfig;
@@ -122,6 +159,11 @@ public final class RuntimeExtensionsManager {
 
         this.offlineMapManager = new OfflineMapManager(this.extensionsRoot.resolve("maps"), archiveMapsDir, logger);
         this.policyPackManager = new PolicyPackManager(this.extensionsRoot.resolve("policy-packs"), logger, onPolicyChanged);
+        this.cargoUffManager = new CargoUffManager(
+                this.extensionsRoot.resolve("uff"),
+                logger,
+                bucketStoreSupplier != null ? bucketStoreSupplier : () -> null
+        );
     }
 
     private static Path resolveDefaultExtensionsRoot() {
@@ -148,6 +190,10 @@ public final class RuntimeExtensionsManager {
         return policyPackManager;
     }
 
+    public CargoUffManager getCargoUffManager() {
+        return cargoUffManager;
+    }
+
     public List<AdjudicationCodeConfig> getEffectiveCustomAdjudicationCodes() {
         List<AdjudicationCodeConfig> base = oscarConfig != null ? oscarConfig.customAdjudicationCodes : List.of();
         return policyPackManager.mergeEffectiveCodes(base);
@@ -163,6 +209,7 @@ public final class RuntimeExtensionsManager {
         restoreTrustedCertsOnStartup();
         offlineMapManager.restoreActiveOnStartup();
         policyPackManager.restoreActiveOnStartup();
+        cargoUffManager.restoreOnStartup();
     }
 
     private void restoreOcrOnStartup() {
@@ -221,6 +268,7 @@ public final class RuntimeExtensionsManager {
                 ? emlPluginHandler.getStatus()
                 : EmlRuntimeRegistry.forHub(hub).getStatus();
         root.put("eml", emlStatusToMap(emlSt));
+        root.put("uff", cargoUffManager.getAdminStatus());
         return root;
     }
 
