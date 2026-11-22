@@ -28,6 +28,8 @@ import com.botts.impl.system.lane.config.LaneOptionsConfig;
 import com.botts.impl.system.lane.config.OcrConfig;
 import com.botts.impl.system.lane.config.RPMConfig;
 import com.botts.impl.system.lane.config.RapiscanRPMConfig;
+import com.botts.impl.system.lane.config.WebRelayConfig;
+import com.botts.impl.system.lane.config.WebRelayOperatingMode;
 
 
 public class LaneConfigI18nTest
@@ -90,6 +92,7 @@ public class LaneConfigI18nTest
             LaneConfig.class,
             LaneOptionsConfig.class,
             OcrConfig.class,
+            WebRelayConfig.class,
             ConnectionConfig.class,
             RPMConfig.class,
             FFMpegConfig.class,
