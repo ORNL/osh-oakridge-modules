@@ -934,6 +934,94 @@ public final class OscarIdentityStore {
         return new CreatedOrResetUserResult(profile, currentRole, generatedPassword);
     }
 
+    public void consumePendingBreakGlassReset() {
+        if (storeFile == null)
+            return;
+        Path moduleData = storeFile.getParent();
+        if (moduleData == null)
+            return;
+        Path reqFile = moduleData.resolve(BreakGlassAdminResetTool.REQUEST_FILENAME);
+        if (!Files.isRegularFile(reqFile))
+            return;
+
+        synchronized (this) {
+            if (!Files.isRegularFile(reqFile))
+                return;
+            String reqId = "";
+            try {
+                String raw = Files.readString(reqFile, StandardCharsets.UTF_8);
+                Files.deleteIfExists(reqFile);
+                com.google.gson.JsonObject req = com.google.gson.JsonParser.parseString(raw).getAsJsonObject();
+                reqId = BreakGlassAdminResetTool.optStr(req, "requestId");
+                String username = BreakGlassAdminResetTool.optStr(req, "username").trim();
+                String passwordHash = BreakGlassAdminResetTool.optStr(req, "passwordHash").trim();
+                boolean mustChange = req.has("mustChangePassword") && req.get("mustChangePassword").getAsBoolean();
+                String hostActor = BreakGlassAdminResetTool.optStr(req, "hostActor").trim();
+                if (hostActor.isEmpty())
+                    hostActor = "host-admin";
+
+                BreakGlassAdminResetTool.validateTargetUsername(username);
+                if (!passwordHash.startsWith(PasswordHasher.PREFIX))
+                    throw new IllegalArgumentException("Break-glass passwordHash must be a valid PBKDF2 hash");
+
+                IUserInfo existing = securityManager != null ? securityManager.getUserInfo(username) : null;
+                String targetRole = (existing != null && !"admin".equals(username))
+                        ? getPrimaryRole(username)
+                        : ROLE_ADMIN;
+                UserProfileRecord profile = ensureProfile(username);
+                if (existing == null && "admin".equals(username))
+                    profile.displayName = "Administrator";
+
+                upsertRealmUser(username, profile.displayName, passwordHash, targetRole);
+                profile.enabled = true;
+                profile.mustChangePassword = mustChange;
+                profile.authSource = "local";
+                rateBuckets.clear();
+                int revoked = revokeSessionsForUser(username, null);
+                saveToDisk();
+                saveHubConfigurationQuietly();
+
+                String nowIso = java.time.Instant.now().toString();
+                BreakGlassAdminResetTool.appendAuditRecord(
+                        moduleData.resolve(BreakGlassAdminResetTool.AUDIT_LOG_FILENAME),
+                        reqId,
+                        username,
+                        hostActor,
+                        revoked,
+                        "live",
+                        nowIso);
+                if (log != null) {
+                    log.warn("[SECURITY BREAK-GLASS] Local password reset applied for user '{}' by '{}' "
+                            + "(revoked {} active session(s))", username, hostActor, revoked);
+                }
+
+                Map<String, Object> ack = new LinkedHashMap<>();
+                ack.put("requestId", reqId);
+                ack.put("username", username);
+                ack.put("revokedSessions", revoked);
+                ack.put("appliedAt", nowIso);
+                BreakGlassAdminResetTool.writeAtomic0600(
+                        moduleData.resolve(BreakGlassAdminResetTool.ACK_FILENAME),
+                        GSON.toJson(ack));
+            } catch (Exception e) {
+                if (log != null) {
+                    log.error("Failed processing break-glass password reset request", e);
+                }
+                if (!reqId.isEmpty()) {
+                    try {
+                        Map<String, Object> errAck = new LinkedHashMap<>();
+                        errAck.put("requestId", reqId);
+                        errAck.put("error", e.getMessage() != null ? e.getMessage() : "Reset failed");
+                        BreakGlassAdminResetTool.writeAtomic0600(
+                                moduleData.resolve(BreakGlassAdminResetTool.ACK_FILENAME),
+                                GSON.toJson(errAck));
+                    } catch (IOException ignored) {
+                    }
+                }
+            }
+        }
+    }
+
     public synchronized void changeOwnPassword(String username,
                                                String currentPassword,
                                                String newPassword,

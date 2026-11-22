@@ -248,6 +248,13 @@ public final class TrainingSandboxManager implements Closeable {
         if (target == null) {
             throw new IllegalStateException("Sandbox Rapiscan loopback emulator is not started.");
         }
+        String normScenario = scenario == null ? "" : scenario.trim().toLowerCase(Locale.ROOT);
+        boolean isFaultOnly = "fault_gamma_high".equals(normScenario)
+                || "fault_tamper".equals(normScenario)
+                || "clear_faults".equals(normScenario);
+        if (!isFaultOnly && cameraStreamer != null && !target.isBusyOccupancy()) {
+            cameraStreamer.triggerLaneTransit(slot, "extended_occupancy".equals(normScenario));
+        }
         String message = target.injectScenarioAsync(scenario);
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("ok", true);
@@ -300,6 +307,9 @@ public final class TrainingSandboxManager implements Closeable {
                         waitForRpmClientConnected(rapiscan1, 6_000L);
                         // Trigger one initial Gamma Alarm asynchronously so the Operator Queue has a live event ready
                         if (rapiscan1 != null && !rapiscan1.isBusyOccupancy()) {
+                            if (cameraStreamer != null) {
+                                cameraStreamer.triggerLaneTransit(1, false);
+                            }
                             rapiscan1.injectScenarioAsync("gamma_alarm");
                         }
                         stageStatusMessage = "Gatehouse Operator track staged: "
@@ -468,21 +478,29 @@ public final class TrainingSandboxManager implements Closeable {
             // Inject rapid deterministic passes on Lane 1 & Lane 2, then submit structured adjudications
             // so UpSet SNM / Medical / NORM charts and Multi-Pass Vehicle Incident search are populated!
             int beforeCount = countTotalOccupancies();
+            if (cameraStreamer != null) {
+                cameraStreamer.triggerLaneTransit(1, false);
+                cameraStreamer.triggerLaneTransit(2, false);
+            }
             rapiscan1.injectScenarioAsync("gamma_alarm");
             if (rapiscan2 != null) {
                 rapiscan2.injectScenarioAsync("neutron_alarm");
             }
-            waitForOccupancyCountAtLeast(beforeCount + 2, 8_000L);
+            waitForOccupancyCountAtLeast(beforeCount + 2, 10_000L);
 
             int secondBase = countTotalOccupancies();
+            if (cameraStreamer != null) {
+                cameraStreamer.triggerLaneTransit(1, false);
+                cameraStreamer.triggerLaneTransit(2, false);
+            }
             rapiscan1.injectScenarioAsync("norm_eml");
             if (rapiscan2 != null) {
                 rapiscan2.injectScenarioAsync("gamma_neutron_alarm");
             }
-            waitForOccupancyCountAtLeast(secondBase + 2, 8_000L);
+            waitForOccupancyCountAtLeast(secondBase + 2, 10_000L);
 
             // Adjudicate the un-adjudicated alarms with SNM (U-235 + Cs-137), SNM (Pu), and Medical (Tc-99m)
-            // plus multi-pass container ID MSCU5285725 across both gates!
+            // plus multi-pass container ID SCFU8572724 across both gates!
             IObsSystemDatabase db = hub.getDatabaseRegistry().getFederatedDatabase();
             IdEncoder obsEncoder = hub.getIdEncoders().getObsIdEncoder();
             List<UnadjudicatedAlarmRef> pending = findUnadjudicatedAlarms(db, obsEncoder);
@@ -522,6 +540,9 @@ public final class TrainingSandboxManager implements Closeable {
             }
 
             // Leave 1 fresh un-adjudicated alarm on Lane 1 so queue/adjudication demos remain active too
+            if (cameraStreamer != null) {
+                cameraStreamer.triggerLaneTransit(1, false);
+            }
             rapiscan1.injectScenarioAsync("gamma_alarm");
         } catch (Exception e) {
             log.debug("Supervisor dataset seeding completed with warning: {}", e.getMessage());
@@ -879,7 +900,7 @@ public final class TrainingSandboxManager implements Closeable {
 
             Instant now = Instant.now();
             pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
-                    "OSCAR 3.11.5 Hands-On Training Completion Record",
+                    "OSCAR 3.11.6 Hands-On Training Completion Record",
                     nodeId,
                     "Trainee: " + safeTrainee,
                     TrainingSandboxEnvironment.WATERMARK_TEXT + "  |  Zero Production Database / Parquet Impact",

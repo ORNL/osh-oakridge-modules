@@ -32,10 +32,10 @@ public final class TrainingSandboxEnvironment {
     public static final String WATERMARK_TEXT = "TRAINING SANDBOX — NON-OPERATIONAL";
     public static final String WATERMARK_BANNER = "TRAINING SANDBOX — NON-OPERATIONAL PRACTICE DATA (FLUSHED ON EXIT)";
 
-    public static final String CONTAINER_1 = buildIso6346ContainerId("MSCU528572");
-    public static final String CONTAINER_2 = buildIso6346ContainerId("OSCU482910");
-    public static final String PLATE_1 = "TN482KMP";
-    public static final String PLATE_2 = "VA917TRL";
+    public static final String CONTAINER_1 = buildIso6346ContainerId("SCFU857272");
+    public static final String CONTAINER_2 = buildIso6346ContainerId("RSTU240294");
+    public static final String PLATE_1 = "SWT03";
+    public static final String PLATE_2 = "M50M1";
 
     private static final long PROCESS_START_EPOCH_SEC = Instant.now().getEpochSecond();
 
