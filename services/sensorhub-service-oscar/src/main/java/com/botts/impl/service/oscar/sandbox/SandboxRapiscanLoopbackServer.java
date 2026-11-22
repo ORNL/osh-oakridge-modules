@@ -55,6 +55,7 @@ public final class SandboxRapiscanLoopbackServer implements Closeable {
     private final AtomicInteger occupancySeq = new AtomicInteger(100);
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean busyOccupancy = new AtomicBoolean(false);
+    private volatile boolean cancelOccupancyRequested = false;
     private volatile String activeFaultCode = null; // "GH" or null
     private volatile boolean tamperActive = false;
 
@@ -221,15 +222,29 @@ public final class SandboxRapiscanLoopbackServer implements Closeable {
             case "clear_faults" -> {
                 this.activeFaultCode = null;
                 this.tamperActive = false;
+                if (busyOccupancy.get()) {
+                    this.cancelOccupancyRequested = true;
+                }
                 broadcast("TC");
                 broadcast("GB,186,190,188,186");
                 broadcast("NB,1,0,1,0");
+                ScheduledExecutorService sched = this.tickScheduler;
+                if (sched != null && running.get()) {
+                    sched.schedule(() -> {
+                        if (running.get() && activeFaultCode == null && !tamperActive && !busyOccupancy.get()) {
+                            broadcast("TC");
+                            broadcast("GB,186,190,188,186");
+                            broadcast("NB,1,0,1,0");
+                        }
+                    }, 350L, TimeUnit.MILLISECONDS);
+                }
                 return "Cleared faults and tamper state on " + label;
             }
             default -> {
                 if (!busyOccupancy.compareAndSet(false, true)) {
                     throw new IllegalStateException("An occupancy pass is already in progress on " + label + "; wait a few seconds and retry.");
                 }
+                this.cancelOccupancyRequested = false;
                 int occNum = occupancySeq.incrementAndGet();
                 acceptAndInjectExecutor.submit(() -> {
                     try {
@@ -245,85 +260,89 @@ public final class SandboxRapiscanLoopbackServer implements Closeable {
 
     private void runOccupancyScenario(String scenario, int occNum) {
         try {
-            // Ensure fresh background baseline right before entry
+            // Ensure fresh background baseline right before entry (~250ms lead-in so RTSP transit aligns at frame 0)
             broadcast("GB,186,190,188,186");
             broadcast("NB,1,0,1,0");
-            sleepQuietly(120L);
+            sleepQuietly(240L);
 
             switch (scenario) {
                 case "clean_pass" -> {
                     broadcast("SP,0.45,11.2,18.0");
-                    for (int i = 0; i < 12; i++) {
+                    for (int i = 0; i < 21 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("GS,37,38,38,37");
-                        if (i % 4 == 0) {
+                        if (i % 5 == 0) {
                             broadcast("NS,0,1,0,0");
                         }
-                        sleepQuietly(180L);
+                        sleepQuietly(195L);
                     }
                     broadcast("GX," + occNum + ",1000");
                 }
                 case "gamma_alarm" -> {
-                    // Localized high-intensity point-source spike on detector 1 -> active Gamma Alarm
+                    // Localized high-intensity point-source spike on detector 1 -> active Gamma Alarm (~4.1s full truck pass)
                     broadcast("SP,0.52,8.4,13.5");
-                    for (int i = 0; i < 4; i++) {
+                    for (int i = 0; i < 5 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("GS,38,39,37,38");
-                        sleepQuietly(180L);
+                        sleepQuietly(195L);
                     }
                     broadcast("NS,1,0,0,1");
-                    for (int i = 0; i < 8; i++) {
-                        int peak = (i >= 2 && i <= 5) ? 640 : 280;
+                    for (int i = 0; i < 11 && running.get() && !cancelOccupancyRequested; i++) {
+                        int peak = (i >= 3 && i <= 7) ? 640 : 280;
                         broadcast("GA," + peak + ",46,43,41");
-                        sleepQuietly(180L);
+                        sleepQuietly(195L);
                     }
-                    for (int i = 0; i < 3; i++) {
+                    for (int i = 0; i < 5 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("GS,39,38,37,38");
-                        sleepQuietly(180L);
+                        sleepQuietly(195L);
                     }
                     broadcast("GX," + occNum + ",1000");
                 }
                 case "neutron_alarm" -> {
                     broadcast("SP,0.58,7.6,12.2");
-                    for (int i = 0; i < 5; i++) {
+                    for (int i = 0; i < 6 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("GS,40,41,39,40");
-                        sleepQuietly(180L);
+                        sleepQuietly(195L);
                     }
-                    for (int i = 0; i < 4; i++) {
+                    for (int i = 0; i < 9 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("NA,18,16,19,15");
                         broadcast("GS,42,41,40,41");
-                        sleepQuietly(200L);
+                        sleepQuietly(195L);
                     }
-                    for (int i = 0; i < 3; i++) {
+                    for (int i = 0; i < 6 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("GS,38,39,38,37");
-                        sleepQuietly(180L);
+                        sleepQuietly(195L);
                     }
                     broadcast("GX," + occNum + ",1000");
                 }
                 case "gamma_neutron_alarm" -> {
                     broadcast("SP,0.61,6.9,11.1");
-                    for (int i = 0; i < 3; i++) {
+                    for (int i = 0; i < 5 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("GS,39,40,38,39");
-                        sleepQuietly(180L);
+                        sleepQuietly(195L);
                     }
-                    for (int i = 0; i < 7; i++) {
+                    for (int i = 0; i < 11 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("GA,710,55,48,44");
                         if (i % 2 == 0) {
                             broadcast("NA,22,19,21,18");
                         }
-                        sleepQuietly(180L);
+                        sleepQuietly(195L);
+                    }
+                    for (int i = 0; i < 5 && running.get() && !cancelOccupancyRequested; i++) {
+                        broadcast("GS,39,38,38,37");
+                        sleepQuietly(195L);
                     }
                     broadcast("GX," + occNum + ",1000");
                 }
                 case "norm_eml" -> {
-                    // Spatially uniform 4-panel distributed cargo elevation (e.g. K-40 fertilizer) -> Code 9999
+                    // Spatially uniform 4-panel distributed cargo elevation (e.g. K-40 / granite) -> Code 9999
                     broadcast("SP,0.55,8.1,13.0");
-                    for (int i = 0; i < 3; i++) {
+                    for (int i = 0; i < 5 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("GS,39,40,39,38");
-                        sleepQuietly(160L);
+                        sleepQuietly(195L);
                     }
                     broadcast("NS,0,1,0,0");
-                    for (int i = 0; i < 10; i++) {
+                    for (int i = 0; i < 16 && running.get() && !cancelOccupancyRequested; i++) {
                         broadcast("GA,128,132,130,126");
-                        sleepQuietly(160L);
+                        sleepQuietly(195L);
                     }
                     broadcast("GX," + occNum + ",1000");
                 }
@@ -333,7 +352,7 @@ public final class SandboxRapiscanLoopbackServer implements Closeable {
                     int holdSeconds = Math.max(3, Integer.getInteger("oscar.sandbox.extendedOccupancySeconds", 8)) + 2;
                     int totalSlices = holdSeconds * 5;
                     broadcast("SP,1.20,1.4,2.3");
-                    for (int i = 0; i < totalSlices && running.get(); i++) {
+                    for (int i = 0; i < totalSlices && running.get() && !cancelOccupancyRequested; i++) {
                         if (i >= 5 && i <= 15) {
                             broadcast("GA,390,48,44,42");
                         } else {

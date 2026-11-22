@@ -216,8 +216,10 @@ public class TrainingSandboxIntegrationTest {
     public void sampleAssetsValidateAgainstSpreadsheetPmTilesAndWcoUff3Parsers() throws Exception {
         tempRoot = Files.createTempDirectory("oscar-sandbox-samples-test-");
 
-        assertEquals(11, TrainingSandboxEnvironment.CONTAINER_1.length());
-        assertEquals(11, TrainingSandboxEnvironment.CONTAINER_2.length());
+        assertEquals("SCFU8572724", TrainingSandboxEnvironment.CONTAINER_1);
+        assertEquals("RSTU2402941", TrainingSandboxEnvironment.CONTAINER_2);
+        assertEquals("SWT03", TrainingSandboxEnvironment.PLATE_1);
+        assertEquals("M50M1", TrainingSandboxEnvironment.PLATE_2);
 
         // 1. Tutorial 1-lane CSV parses cleanly with archiveEnabled=false
         SandboxSampleAssets.SamplePayload csvPayload = SandboxSampleAssets.buildSample(
@@ -230,16 +232,16 @@ public class TrainingSandboxIntegrationTest {
         assertTrue(parsedLanes.get(0).name.length() <= 12);
         assertFalse(parser.getRetentionPolicyConfig().archiveEnabled);
 
-        // 1b. JNI H.264 synthetic container MP4 encodes cleanly with zero external CLI ffmpeg binary
+        // 1b. JNI H.264 synthetic moving tractor-trailer MP4 encodes cleanly with zero external CLI ffmpeg binary
         Path testMp4 = tempRoot.resolve("jni-container-test.mp4");
         SandboxRtspCameraStreamer.encodeSyntheticContainerMp4(
                 testMp4,
                 TrainingSandboxEnvironment.CONTAINER_1,
                 TrainingSandboxEnvironment.PLATE_1,
                 "DEMOLANE01 · NORTH GATE",
-                new java.awt.Color(20, 48, 92));
+                SandboxRtspCameraStreamer.LANE1_CONTAINER_COLOR);
         assertTrue(Files.isRegularFile(testMp4));
-        assertTrue("Expected non-trivial H.264 MP4 payload", Files.size(testMp4) > 8_192L);
+        assertTrue("Expected non-trivial 75-frame H.264 MP4 payload", Files.size(testMp4) > 24_576L);
 
         // 2. Minimal PMTiles v3 archive passes strict header & bounds validation
         SandboxSampleAssets.SamplePayload pmPayload = SandboxSampleAssets.buildSample(
@@ -249,20 +251,38 @@ public class TrainingSandboxIntegrationTest {
         assertEquals(3, header.specVersion());
         assertEquals("png", header.tileType());
 
-        // 3. WCO UFF 3.0 archive parses via UffZipReader + WcoUffParser with X-ray + HEMD + OCR + Annotation
+        // 3. WCO UFF 3.0 full-truck archive parses via UffZipReader + WcoUffParser with X-ray + HEMD + Manifest + N42 + OCR + Annotation
         Path uffDir = SandboxSampleAssets.populateLocalUffSampleShare(tempRoot);
         Path exactUff = uffDir.resolve(SandboxSampleAssets.UFF_UUID_EXACT + ".uff");
+        Path normUff = uffDir.resolve(SandboxSampleAssets.UFF_UUID_NORM + ".uff");
+        Path fuzzyUff = uffDir.resolve(SandboxSampleAssets.UFF_UUID_FUZZY + ".uff");
         assertTrue(Files.isRegularFile(exactUff));
+        assertTrue(Files.isRegularFile(normUff));
+        assertTrue(Files.isRegularFile(fuzzyUff));
         try (UffSeekableSource src = UffSeekableSource.fromLocalPath(exactUff)) {
             UffZipReader zip = UffZipReader.open(src);
             WcoUffModels.UffCaseMetadata meta = WcoUffParser.parseArchiveMetadata(
                     zip, exactUff.getFileName().toString(), exactUff.getFileName().toString(), Files.size(exactUff), System.currentTimeMillis());
             assertEquals(SandboxSampleAssets.UFF_UUID_EXACT, meta.uffUuid());
+            assertEquals("3.0", meta.uffVersion());
+            assertFalse("Expected embedded Trade Manifest PDF", meta.manifestEntryPath().isEmpty());
+            assertEquals(1, meta.radiationFiles().size());
+            assertEquals(2, meta.ocrResults().size());
             assertEquals(1, meta.xrayFiles().size());
             assertFalse(meta.xrayFiles().get(0).hemdEntryPath().isEmpty());
             assertEquals(4, meta.xrayFiles().get(0).zMaps().size());
             assertEquals(1, meta.annotations().size());
+            assertTrue("Expected normalized [0..1] annotation bounds", meta.annotations().get(0).left() > 0.70 && meta.annotations().get(0).right() < 0.85);
             assertTrue(meta.allNormalizedVehicleIds().contains(TrainingSandboxEnvironment.CONTAINER_1));
+            assertTrue(meta.allNormalizedVehicleIds().contains(TrainingSandboxEnvironment.PLATE_1));
+        }
+
+        String qaDirProp = System.getProperty("oscar.sandbox.exportQaDir");
+        if (qaDirProp != null && !qaDirProp.isBlank()) {
+            Path qaDir = java.nio.file.Paths.get(qaDirProp);
+            Files.createDirectories(qaDir);
+            Files.copy(testMp4, qaDir.resolve("lane1-transit-scfu8572724.mp4"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(exactUff, qaDir.resolve("sample-cargo-uff3-scfu8572724.uff"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
@@ -329,6 +349,42 @@ public class TrainingSandboxIntegrationTest {
                 }
                 assertTrue(occupancyLines.stream().anyMatch(l -> l.startsWith("GA,")));
                 assertTrue(occupancyLines.stream().anyMatch(l -> l.startsWith("GX,")));
+
+                // Verify fault_tamper + clear_faults broadcasts TT followed by TC + clean GB/NB restoration
+                MockResp tamperResp = invoke(
+                        servlet,
+                        "POST",
+                        "/inject",
+                        "operator1",
+                        Map.of("X-Requested-With", "XMLHttpRequest"),
+                        "{\"scenario\":\"fault_tamper\",\"laneSlot\":1}".getBytes(StandardCharsets.UTF_8));
+                assertEquals(200, tamperResp.status);
+
+                MockResp clearResp = invoke(
+                        servlet,
+                        "POST",
+                        "/inject",
+                        "operator1",
+                        Map.of("X-Requested-With", "XMLHttpRequest"),
+                        "{\"scenario\":\"clear_faults\",\"laneSlot\":1}".getBytes(StandardCharsets.UTF_8));
+                assertEquals(200, clearResp.status);
+
+                List<String> faultLines = new ArrayList<>();
+                long clearDeadline = System.currentTimeMillis() + 2_500L;
+                int clearConfirmations = 0;
+                while (System.currentTimeMillis() < clearDeadline && clearConfirmations < 2) {
+                    String line = reader.readLine();
+                    if (line == null) {
+                        break;
+                    }
+                    faultLines.add(line);
+                    if ("TC".equals(line.trim())) {
+                        clearConfirmations++;
+                    }
+                }
+                assertTrue(faultLines.contains("TT"));
+                assertTrue("Expected initial + confirmation TC frames on clear_faults", clearConfirmations >= 2);
+                assertTrue(faultLines.stream().anyMatch(l -> l.startsWith("GB,186,190,188,186")));
 
                 // Verify SandboxEmlTrainingAlgorithm keeps asymmetric gamma_alarm as INVESTIGATE,
                 // while uniform 4-panel NORM cargo auto-releases as RELEASE (Code 9999)

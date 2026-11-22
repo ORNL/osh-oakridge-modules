@@ -19,6 +19,30 @@ public class TamperOutputTest {
         assertFalse(output.lastTamperState);
     }
 
+    @Test
+    public void subSecondTamperClearPreservesMonotonicMillisecondTimestamps() throws Exception {
+        RapiscanSensor sensor = new RapiscanSensor() {
+            @Override
+            public String getUniqueIdentifier() {
+                return "urn:osh:sensor:rapiscan:test";
+            }
+        };
+        var output = new TamperOutput(sensor);
+        output.init();
+
+        output.onNewMessage(true);
+        var alarmRecord = output.getLatestRecord();
+        double alarmTs = alarmRecord.getDoubleValue(0);
+        assertTrue(alarmRecord.getBooleanValue(1));
+
+        Thread.sleep(15L);
+        output.onNewMessage(false);
+        var clearRecord = output.getLatestRecord();
+        double clearTs = clearRecord.getDoubleValue(0);
+        assertFalse(clearRecord.getBooleanValue(1));
+        assertTrue("Expected millisecond-precision timestamp monotonic progression", clearTs > alarmTs);
+    }
+
     private static class RecordingTamperOutput extends TamperOutput {
         private boolean lastTamperState;
 

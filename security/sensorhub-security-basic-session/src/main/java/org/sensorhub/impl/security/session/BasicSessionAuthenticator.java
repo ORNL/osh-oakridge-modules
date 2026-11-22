@@ -273,6 +273,7 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             }
 
             if (LOGIN_PATH.equals(path)) {
+                identityStore.consumePendingBreakGlassReset();
                 handleLogin(request, response);
                 return Authentication.SEND_CONTINUE;
             }
