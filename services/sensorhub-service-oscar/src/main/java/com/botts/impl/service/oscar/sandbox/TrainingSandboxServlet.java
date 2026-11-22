@@ -37,8 +37,10 @@ import java.util.Map;
  *   <li>{@code GET /samples/<file>}: Downloads built-in practice files inside sandbox mode.</li>
  *   <li>{@code POST /inject}, {@code POST /stage-track}, {@code POST /certificate}:
  *       Interactive Training Coach controls inside sandbox mode (CSRF-protected).</li>
- *   <li>{@code GET|POST /host}: Administrator-only host sandbox launcher/status bridge
- *       available from {@code Help (?)} on production or sandbox nodes.</li>
+ *   <li>{@code GET|POST /host}: Host sandbox launcher/status bridge available from
+ *       {@code Guided Walkthrough} and {@code Help (?)}. Any authenticated user may inspect
+ *       host status/shutdown countdown and queue an idempotent {@code start}; only
+ *       Administrators may execute {@code stop} or {@code reset}.</li>
  * </ul>
  */
 public final class TrainingSandboxServlet extends HttpServlet {
@@ -71,10 +73,13 @@ public final class TrainingSandboxServlet extends HttpServlet {
         }
 
         if ("/host".equals(sub)) {
-            if (!requireAdminUser(req, resp)) {
+            if (!requireAuthenticatedUser(req, resp)) {
                 return;
             }
-            sendJson(resp, HttpServletResponse.SC_OK, manager.getHostControlBridge().readStatus());
+            boolean isAdmin = isEffectiveAdmin(req.getRemoteUser(), req);
+            JsonObject status = manager.getHostControlBridge().readStatus();
+            status.addProperty("canStopOrReset", isAdmin);
+            sendJson(resp, HttpServletResponse.SC_OK, status);
             return;
         }
 
@@ -114,14 +119,24 @@ public final class TrainingSandboxServlet extends HttpServlet {
         }
 
         if ("/host".equals(sub)) {
-            if (!requireAdminUser(req, resp)) {
+            if (!requireAuthenticatedUser(req, resp)) {
                 return;
             }
+            String username = req.getRemoteUser();
+            boolean isAdmin = isEffectiveAdmin(username, req);
             try {
                 JsonObject body = parseJsonBody(req);
-                String username = req.getRemoteUser();
-                sendJson(resp, HttpServletResponse.SC_OK,
-                        manager.getHostControlBridge().submitAction(body, username));
+                String action = optStr(body, "action").toLowerCase(Locale.ROOT);
+                if (("stop".equals(action) || "reset".equals(action)) && !isAdmin) {
+                    sendJsonError(resp, HttpServletResponse.SC_FORBIDDEN,
+                            "Administrator role required to stop or reset an active Training Sandbox.");
+                    return;
+                }
+                JsonObject result = manager.getHostControlBridge().submitAction(body, username, isAdmin);
+                result.addProperty("canStopOrReset", isAdmin);
+                sendJson(resp, HttpServletResponse.SC_OK, result);
+            } catch (SecurityException se) {
+                sendJsonError(resp, HttpServletResponse.SC_FORBIDDEN, se.getMessage());
             } catch (IllegalArgumentException iae) {
                 sendJsonError(resp, HttpServletResponse.SC_BAD_REQUEST, iae.getMessage());
             } catch (IllegalStateException ise) {

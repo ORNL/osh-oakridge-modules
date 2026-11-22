@@ -125,31 +125,90 @@ public class TrainingSandboxIntegrationTest {
             MockResp blockedSample = invoke(servlet, "GET", "/samples/tutorial-1-lane.csv", "admin", Map.of(), null);
             assertEquals(403, blockedSample.status);
 
-            // 3. Host bridge enforces Admin RBAC and queues start requests when host agent status is active
+            // 3. Host bridge allows authenticated status + idempotent start, while reserving stop/reset for Admin
+            MockResp unauthHost = invoke(servlet, "GET", "/host", null, Map.of(), null);
+            assertEquals(401, unauthHost.status);
+
             MockResp opHost = invoke(servlet, "GET", "/host", "operator1", Map.of(), null);
-            assertEquals(403, opHost.status);
+            assertEquals(200, opHost.status);
+            JsonObject opHostJson = JsonParser.parseString(opHost.bodyString()).getAsJsonObject();
+            assertFalse(opHostJson.get("canStopOrReset").getAsBoolean());
 
             MockResp adminHostNoAgent = invoke(servlet, "GET", "/host", "admin", Map.of(), null);
             assertEquals(200, adminHostNoAgent.status);
             JsonObject hostInit = JsonParser.parseString(adminHostNoAgent.bodyString()).getAsJsonObject();
             assertFalse(hostInit.get("agentActive").getAsBoolean());
+            assertTrue(hostInit.get("canStopOrReset").getAsBoolean());
             assertTrue(hostInit.get("linuxStartCommand").getAsString().contains("oscar.sh sandbox start"));
 
             Files.writeString(
                     controlDir.resolve("status.json"),
                     "{\"agentActive\":true,\"sandboxRunning\":false,\"httpsPort\":8444,\"ttlMinutes\":120}",
                     StandardCharsets.UTF_8);
-            MockResp startReq = invoke(
+
+            // Operator can start (TTL clamped to 120m), but cannot stop or reset
+            MockResp opStartReq = invoke(
+                    servlet,
+                    "POST",
+                    "/host",
+                    "operator1",
+                    Map.of("X-Requested-With", "XMLHttpRequest"),
+                    "{\"action\":\"start\",\"httpsPort\":9444,\"ttlMinutes\":300}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(200, opStartReq.status);
+            assertTrue(Files.isRegularFile(controlDir.resolve("request.json")));
+            String queuedOp = Files.readString(controlDir.resolve("request.json"), StandardCharsets.UTF_8);
+            assertTrue(queuedOp.contains("\"action\":\"start\""));
+            assertTrue(queuedOp.contains("\"httpsPort\":8444"));
+            assertTrue(queuedOp.contains("\"ttlMinutes\":120"));
+
+            Files.deleteIfExists(controlDir.resolve("request.json"));
+            Files.writeString(
+                    controlDir.resolve("status.json"),
+                    "{\"agentActive\":true,\"sandboxRunning\":true,\"httpsPort\":8444,\"ttlMinutes\":120,\"expiresAt\":\"2026-11-22T02:00:00Z\"}",
+                    StandardCharsets.UTF_8);
+
+            // Idempotent start when already running does NOT overwrite request.json or reset active work
+            MockResp noopStart = invoke(
+                    servlet,
+                    "POST",
+                    "/host",
+                    "operator1",
+                    Map.of("X-Requested-With", "XMLHttpRequest"),
+                    "{\"action\":\"start\"}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(200, noopStart.status);
+            assertFalse(Files.exists(controlDir.resolve("request.json")));
+            JsonObject noopJson = JsonParser.parseString(noopStart.bodyString()).getAsJsonObject();
+            assertEquals("noop-already-running", noopJson.getAsJsonObject("activeJob").get("requestId").getAsString());
+
+            MockResp opStopBlocked = invoke(
+                    servlet,
+                    "POST",
+                    "/host",
+                    "operator1",
+                    Map.of("X-Requested-With", "XMLHttpRequest"),
+                    "{\"action\":\"stop\"}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(403, opStopBlocked.status);
+
+            MockResp opResetBlocked = invoke(
+                    servlet,
+                    "POST",
+                    "/host",
+                    "operator1",
+                    Map.of("X-Requested-With", "XMLHttpRequest"),
+                    "{\"action\":\"reset\"}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(403, opResetBlocked.status);
+
+            MockResp adminStopReq = invoke(
                     servlet,
                     "POST",
                     "/host",
                     "admin",
                     Map.of("X-Requested-With", "XMLHttpRequest"),
-                    "{\"action\":\"start\",\"httpsPort\":8444,\"ttlMinutes\":90}".getBytes(StandardCharsets.UTF_8));
-            assertEquals(200, startReq.status);
+                    "{\"action\":\"stop\"}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(200, adminStopReq.status);
             assertTrue(Files.isRegularFile(controlDir.resolve("request.json")));
-            String queued = Files.readString(controlDir.resolve("request.json"), StandardCharsets.UTF_8);
-            assertTrue(queued.contains("\"action\":\"start\""));
+            String queuedStop = Files.readString(controlDir.resolve("request.json"), StandardCharsets.UTF_8);
+            assertTrue(queuedStop.contains("\"action\":\"stop\""));
         }
     }
 

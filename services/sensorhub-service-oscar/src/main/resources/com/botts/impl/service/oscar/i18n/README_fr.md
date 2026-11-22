@@ -1108,14 +1108,16 @@ Sur les sites équipés de scanners rayons X NII (`UFF 2.0` ou `UFF 3.0.0`), un 
 - [ ] L'URL non limitée affiche toutes les voies, et chaque URL approuvée `?view=<clé>` ou `/view/<clé>` n'affiche que ses voies affectées dans Tableau de bord, Événements, rapports, Transfert d'alarme et État de santé.
 - [ ] Chaque nœud fédéré a été revérifié après rechargement; aucun identifiant n'est stocké par le navigateur.
 
-### Bac à sable éphémère de formation pratique et académie guidée
+### Parcours guidé de révision (`:443`) et bac à sable éphémère de formation pratique (`:8444`)
 
-Avant de modifier des capteurs réels ou de former du nouveau personnel, lancez le **Bac à sable de formation pratique (`oscar-sandbox`)** isolé sur le port HTTPS `8444` :
+Tout utilisateur connecté peut cliquer à tout moment sur **Parcours guidé** dans la barre supérieure (ou dans **Aide (`?`)**) sur la console opérationnelle (`:443`) pour ouvrir le **Mode révision en lecture seule** — parcourant les **13 ateliers par rôle**, les guides vidéo 1080p sous-titrés, les captures annotées et la mise en évidence des contrôles à l’écran sans injecter de fausses alarmes ni modifier les données réelles.
+
+Pour s’entraîner à injecter des alarmes simulées, téléverser des échantillons ou configurer des voies sans toucher aux capteurs réels, lancez le **Bac à sable de formation pratique (`oscar-sandbox`)** isolé sur le port HTTPS `8444` (en 1 clic depuis **Parcours guidé** / **Aide (`?`)** lorsque `sudo bash oscar.sh sandbox enable-ui-bridge` est activé sous Ubuntu, ou via CLI ; le démarrage idempotent `start` est ouvert à tout utilisateur connecté, tandis que `stop`/`reset` anticipé est réservé aux **Administrateurs**) :
 
 - **Ubuntu Server 24.04 :** `sudo bash oscar.sh sandbox start` (arrêt et purge avec `sudo bash oscar.sh sandbox stop`).
 - **Windows 11 + WSL 2 :** `.\oscar.bat sandbox start` (arrêt et purge avec `.\oscar.bat sandbox stop`).
 
-Le bac à sable réutilise les images OSCAR installées avec des volumes jetables (`oscar_sandbox_state`, `oscar_sandbox_pg`), `archive.enabled = false` (`0` fichier `.parquet`), extinction automatique TTL (`120 min`), filigrane `TRAINING SANDBOX — NON-OPERATIONAL` sur chaque export et micro-émulateurs locaux Rapiscan (`127.0.0.1:10099`) et caméra RTSP (`127.0.0.1:8554/tutorial-cam`) à travers **12 ateliers auto-vérifiés** (**Opérateur**, **Superviseur et analyste** et **Administrateur système** avec **vue scindée `/sensorhub/admin`**) ainsi qu'une attestation PDF d'achèvement.
+Le bac à sable réutilise les images OSCAR installées avec des volumes jetables (`oscar_sandbox_state`, `oscar_sandbox_pg`), une copie unidirectionnelle en lecture seule des identifiants/Passkeys (connectez-vous sur `https://<hôte>:8444` avec vos identifiants habituels sans écriture vers `:443`), un contrôle préalable de `>= 3.5 GiB` de RAM libre, `archive.enabled = false` (`0` fichier `.parquet`), une extinction automatique après `120 min` (2 heures) avec compte à rebours en direct purgeant toutes les données d’exercice à l’expiration (`< 2 s`), le filigrane `TRAINING SANDBOX — NON-OPERATIONAL` sur chaque export et des micro-émulateurs locaux Rapiscan (`127.0.0.1:10099`) et caméra RTSP (`127.0.0.1:8554/tutorial-cam`) à travers **13 ateliers guidés** (**Opérateur**, **Superviseur et analyste** et **Administrateur système** avec **vue scindée `/sensorhub/admin`**) ainsi qu'une attestation PDF d'achèvement (à télécharger avant la fin du minuteur).
 
 ![Coach de formation et atelier opérateur dans le bac à sable isolé](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/51-training-sandbox-coach-and-operator-lab.png)
 

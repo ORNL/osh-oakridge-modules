@@ -102,7 +102,11 @@ public final class SandboxHostControlBridge {
         obj.addProperty("windowsEnableBridgeCommand", ".\\oscar.bat sandbox enable-ui-bridge");
     }
 
-    public synchronized JsonObject submitAction(JsonObject body, String adminUsername) throws IOException {
+    public synchronized JsonObject submitAction(JsonObject body, String username) throws IOException {
+        return submitAction(body, username, true);
+    }
+
+    public synchronized JsonObject submitAction(JsonObject body, String username, boolean isAdmin) throws IOException {
         if (body == null) {
             throw new IllegalArgumentException("Request body is required.");
         }
@@ -110,9 +114,17 @@ public final class SandboxHostControlBridge {
         if (!ALLOWED_ACTIONS.contains(action)) {
             throw new IllegalArgumentException("Unsupported sandbox host action: " + action);
         }
+        if (!isAdmin && ("stop".equals(action) || "reset".equals(action))) {
+            throw new SecurityException("Administrator role is required to stop or reset an active Training Sandbox session.");
+        }
 
-        int port = optInt(body, "httpsPort", TrainingSandboxEnvironment.DEFAULT_SANDBOX_HTTPS_PORT);
-        int ttlMinutes = optInt(body, "ttlMinutes", TrainingSandboxEnvironment.DEFAULT_TTL_MINUTES);
+        JsonObject currentStatus = readStatus();
+        int configuredPort = optInt(currentStatus, "httpsPort", TrainingSandboxEnvironment.DEFAULT_SANDBOX_HTTPS_PORT);
+        int port = isAdmin
+                ? optInt(body, "httpsPort", configuredPort)
+                : configuredPort;
+        int requestedTtl = optInt(body, "ttlMinutes", TrainingSandboxEnvironment.DEFAULT_TTL_MINUTES);
+        int ttlMinutes = isAdmin ? requestedTtl : Math.min(requestedTtl, TrainingSandboxEnvironment.DEFAULT_TTL_MINUTES);
         if (port < 1024 || port > 65535 || port == 8443 || port == 443) {
             throw new IllegalArgumentException("Sandbox HTTPS port must be between 1024 and 65535 and must not collide with 443 or 8443.");
         }
@@ -120,11 +132,24 @@ public final class SandboxHostControlBridge {
             throw new IllegalArgumentException("Sandbox TTL must be between 15 and 480 minutes.");
         }
 
-        JsonObject currentStatus = readStatus();
+        if ("start".equals(action) && optBoolean(currentStatus, "sandboxRunning", false)) {
+            JsonObject alreadyRunning = currentStatus.deepCopy();
+            alreadyRunning.addProperty("canStopOrReset", isAdmin);
+            JsonObject job = new JsonObject();
+            job.addProperty("requestId", "noop-already-running");
+            job.addProperty("action", "start");
+            job.addProperty("state", "COMPLETED");
+            job.addProperty("startedAt", Instant.now().toString());
+            job.addProperty("message", "Training Sandbox is already running on port " + configuredPort
+                    + ". Open it in a new tab to join without resetting active practice data.");
+            alreadyRunning.add("activeJob", job);
+            return alreadyRunning;
+        }
+
         if (!optBoolean(currentStatus, "agentActive", false)) {
             throw new IllegalStateException(
                     "Host Training Sandbox UI bridge is not enabled on this server. "
-                            + "Start the sandbox via CLI (`sudo bash oscar.sh sandbox start` or `.\\oscar.bat sandbox start`), "
+                            + "An Administrator can start the sandbox via CLI (`sudo bash oscar.sh sandbox start` or `.\\oscar.bat sandbox start`), "
                             + "or enable 1-click browser launch once with `sudo bash oscar.sh sandbox enable-ui-bridge`.");
         }
 
@@ -132,7 +157,7 @@ public final class SandboxHostControlBridge {
         Map<String, Object> req = new LinkedHashMap<>();
         req.put("requestId", requestId);
         req.put("requestedAt", Instant.now().toString());
-        req.put("requestedBy", adminUsername == null || adminUsername.isBlank() ? "admin" : adminUsername);
+        req.put("requestedBy", username == null || username.isBlank() ? "user" : username);
         req.put("action", action);
         req.put("httpsPort", port);
         req.put("ttlMinutes", ttlMinutes);

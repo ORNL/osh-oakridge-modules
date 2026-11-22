@@ -1107,14 +1107,16 @@ En instalaciones con escáneres NII de rayos X (`UFF 2.0` o `UFF 3.0.0`), un adm
 - [ ] La URL sin ámbito muestra todos los carriles, y cada URL aprobada `?view=<clave>` o `/view/<clave>` muestra solo sus carriles asignados en Panel, Eventos, informes, Transferencia de alarmas y Estado de salud.
 - [ ] Se revisaron nodos federados tras recargar y no hay credenciales en almacenamiento del navegador.
 
-### Entorno práctico efímero de formación y academia guiada
+### Recorrido guiado de repaso (`:443`) y entorno práctico efímero de formación (`:8444`)
 
-Antes de modificar sensores reales o incorporar personal nuevo, inicie el **Entorno práctico de formación (`oscar-sandbox`)** aislado en el puerto HTTPS `8444`:
+Cualquier usuario autenticado puede pulsar **Recorrido guiado** en la barra superior (o dentro de **Ayuda (`?`)**) en cualquier momento en la consola operativa (`:443`) para abrir el **Modo de repaso de solo lectura** — consultando los **13 laboratorios por rol**, videoguías 1080p con subtítulos, capturas comentadas y resaltado de controles en pantalla sin inyectar alarmas simuladas ni modificar registros reales.
+
+Para practicar la inyección de alarmas, subida de muestras o edición de carriles sin tocar sensores reales, inicie el **Entorno práctico de formación (`oscar-sandbox`)** aislado en el puerto HTTPS `8444` (en 1 clic desde **Recorrido guiado** / **Ayuda (`?`)** cuando `sudo bash oscar.sh sandbox enable-ui-bridge` está activo en Ubuntu, o por CLI; el inicio idempotente `start` está abierto a cualquier usuario autenticado, mientras que `stop`/`reset` anticipado requiere **Administrador**):
 
 - **Ubuntu Server 24.04:** `sudo bash oscar.sh sandbox start` (detener y purgar con `sudo bash oscar.sh sandbox stop`).
 - **Windows 11 + WSL 2:** `.\oscar.bat sandbox start` (detener y purgar con `.\oscar.bat sandbox stop`).
 
-El entorno reutiliza las imágenes OSCAR instaladas con volúmenes desechables (`oscar_sandbox_state`, `oscar_sandbox_pg`), `archive.enabled = false` (`0` archivos `.parquet`), apagado automático por inactividad (`120 min`), marca `TRAINING SANDBOX — NON-OPERATIONAL` en cada exportación y microemuladores locales Rapiscan (`127.0.0.1:10099`) y cámara RTSP (`127.0.0.1:8554/tutorial-cam`) en **12 laboratorios autoverificados** (**Operador**, **Supervisor y analista** y **Administrador del sistema** con **vista dividida `/sensorhub/admin`**) más certificado PDF de finalización.
+El entorno reutiliza las imágenes OSCAR instaladas con volúmenes desechables (`oscar_sandbox_state`, `oscar_sandbox_pg`), copia unidireccional de credenciales y Passkeys (inicie sesión en `https://<host>:8444` con su cuenta habitual sin afectar `:443`), verificación previa de `>= 3.5 GiB` de RAM libre, `archive.enabled = false` (`0` archivos `.parquet`), apagado automático tras `120 min` (2 horas) con cuenta atrás en vivo que purga todos los datos de práctica al expirar (`< 2 s`), marca `TRAINING SANDBOX — NON-OPERATIONAL` en cada exportación y microemuladores locales Rapiscan (`127.0.0.1:10099`) y cámara RTSP (`127.0.0.1:8554/tutorial-cam`) en **13 laboratorios guiados** (**Operador**, **Supervisor y analista** y **Administrador del sistema** con **vista dividida `/sensorhub/admin`**) más certificado PDF de finalización (descárguelo antes de que finalice el temporizador).
 
 ![Asistente de formación y laboratorio de operador en el entorno aislado](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/51-training-sandbox-coach-and-operator-lab.png)
 

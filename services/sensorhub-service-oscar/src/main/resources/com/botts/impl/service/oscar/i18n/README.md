@@ -1134,14 +1134,16 @@ For commercial portals operating alongside X-ray NII scanners (`UFF 2.0` or `UFF
 - [ ] The unscoped URL shows all lanes, and each approved `?view=<key>` or `/view/<key>` URL shows only its assigned lanes across Dashboard, Events, reports, alarm transfer, and Status of Health.
 - [ ] Every federated node was rechecked after a browser reload; no credential was found in browser storage.
 
-### Ephemeral hands-on training sandbox and guided academy
+### Guided walkthrough refresher (`:443`) and ephemeral hands-on training sandbox (`:8444`)
 
-Before modifying live sensors or onboarding new personnel, launch the isolated **Hands-On Training Sandbox (`oscar-sandbox`)** on HTTPS port `8444`:
+Any signed-in user can click **Guided Walkthrough** in the top bar (or inside **Help (`?`)**) at any time on the live operational console (`:443`) to open the side-by-side **Read-Only Refresher Mode** — browsing all **13 role-based labs** (**Operator**, **Supervisor & Analyst**, and **System Administrator**), watching offline 1080p captioned video guides, reviewing annotated screenshots, and highlighting UI controls on screen without injecting fake alarms or altering operational records.
+
+To practice injecting simulated alarms, uploading sample files, or editing lanes safely before modifying live sensors, launch the isolated **Hands-On Training Sandbox (`oscar-sandbox`)** on HTTPS port `8444` (in 1 click from **Guided Walkthrough** / **Help (`?`)** when `sudo bash oscar.sh sandbox enable-ui-bridge` is enabled on Ubuntu, or via CLI; idempotent `start` is open to all signed-in users while early `stop`/`reset` requires **Administrator**):
 
 - **Ubuntu Server 24.04:** `sudo bash oscar.sh sandbox start` (stop and flush with `sudo bash oscar.sh sandbox stop`).
 - **Windows 11 + WSL 2:** `.\oscar.bat sandbox start` (stop and flush with `.\oscar.bat sandbox stop`).
 
-The sandbox reuses the installed OSCAR images with disposable volumes (`oscar_sandbox_state`, `oscar_sandbox_pg`), `archive.enabled = false` (`0` `.parquet` files written), an automatic `120 min` TTL shutdown, `TRAINING SANDBOX — NON-OPERATIONAL` watermarks on every exported file, and built-in loopback Rapiscan (`127.0.0.1:10099`) and RTSP container camera (`127.0.0.1:8554/tutorial-cam`) micro-emulators across **12 auto-verified labs** (**Operator**, **Supervisor & Analyst**, and **System Administrator** with **Split-Pane `/sensorhub/admin`**) plus a downloadable 1-page PDF Completion Record.
+The sandbox reuses the installed OSCAR images with disposable volumes (`oscar_sandbox_state`, `oscar_sandbox_pg`), one-way read-only credential/Passkey seeding (sign in on `https://<host>:8444` with existing OSCAR credentials; sandbox edits never write back to `:443`), `>= 3.5 GiB` free-RAM preflight, `archive.enabled = false` (`0` `.parquet` files written), an automatic `120 min` (2-hour) TTL shutdown with a live countdown and expiration timestamp that completely wipes all practice data on expiry (`< 2 s`), `TRAINING SANDBOX — NON-OPERATIONAL` watermarks on every exported file, and built-in loopback Rapiscan (`127.0.0.1:10099`) and RTSP container camera (`127.0.0.1:8554/tutorial-cam`) micro-emulators across **13 guided labs** (including **Split-Pane `/sensorhub/admin`** and per-lane **WebRelay-Quad** lights/sound) plus a downloadable 1-page PDF Completion Record (export before the auto-shutdown timer ends).
 
 ![Hands-On Training Sandbox Coach and Operator Lab](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/51-training-sandbox-coach-and-operator-lab.png)
 
