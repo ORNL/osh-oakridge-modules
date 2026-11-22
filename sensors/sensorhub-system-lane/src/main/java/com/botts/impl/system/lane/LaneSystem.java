@@ -281,6 +281,9 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                         .forEach(keywords::addKeyword);
             }
             keywords.addKeyword(EXTENDED_OCCUPANCY_THRESHOLD_KEYWORD_PREFIX + getExtendedOccupancyThresholdMinutes());
+            if (getConfiguration().webRelayConfig != null && getConfiguration().webRelayConfig.enabled) {
+                keywords.addKeyword("oscar:webrelay-enabled:true");
+            }
 
             if (keywords.getNumKeywords() > 0)
                 sensorDescription.addKeywords(keywords);
@@ -361,6 +364,9 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         boolean runtimeActive = state == ModuleEvent.ModuleState.STARTING
                 || state == ModuleEvent.ModuleState.STARTED
                 || state == ModuleEvent.ModuleState.INITIALIZED;
+        if (sensorDescription != null) {
+            updateSensorDescription();
+        }
         if (!runtimeActive || !wrCfg.enabled) {
             if (webRelayController != null) {
                 webRelayController.close();
