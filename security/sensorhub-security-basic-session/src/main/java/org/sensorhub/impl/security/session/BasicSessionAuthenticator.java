@@ -998,6 +998,8 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             if (user != null && user.enabled && user.passkeys != null && !user.passkeys.isEmpty()) {
                 List<Map<String, Object>> allowList = new ArrayList<>();
                 for (PasskeyRecord pk : user.passkeys) {
+                    if (!passkeyMatchesRpId(pk, rpId))
+                        continue;
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("type", "public-key");
                     item.put("id", pk.id);
@@ -1005,7 +1007,8 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
                         item.put("transports", pk.transports);
                     allowList.add(item);
                 }
-                out.put("allowCredentials", allowList);
+                if (!allowList.isEmpty())
+                    out.put("allowCredentials", allowList);
             }
         }
 
@@ -1732,10 +1735,13 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
         List<String> acceptedIds = new ArrayList<>();
         if (profile.passkeys != null) {
             for (PasskeyRecord pk : profile.passkeys) {
-                acceptedIds.add(pk.id);
+                if (passkeyMatchesRpId(pk, rpId)) {
+                    acceptedIds.add(pk.id);
+                }
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("id", pk.id);
                 item.put("name", pk.name);
+                item.put("rpId", pk.rpId);
                 item.put("aaguid", pk.aaguid);
                 item.put("authenticatorLabel", WebAuthnCodec.friendlyAuthenticatorName(pk.aaguid));
                 item.put("backupEligible", pk.backupEligible);
@@ -2108,9 +2114,15 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
         return accept != null && accept.contains("text/html");
     }
 
-    private String resolveRpId(HttpServletRequest request) {
-        if (config.webAuthnRpId != null && !config.webAuthnRpId.isBlank())
-            return config.webAuthnRpId.trim().toLowerCase(Locale.ROOT);
+    static boolean passkeyMatchesRpId(PasskeyRecord pk, String rpId) {
+        if (pk == null)
+            return false;
+        if (pk.rpId == null || pk.rpId.isBlank() || rpId == null || rpId.isBlank())
+            return true;
+        return pk.rpId.equalsIgnoreCase(rpId);
+    }
+
+    static String extractRequestHost(HttpServletRequest request) {
         String forwardedHost = request.getHeader("X-Forwarded-Host");
         String host = (forwardedHost != null && !forwardedHost.isBlank())
                 ? forwardedHost.split(",")[0].trim()
@@ -2125,6 +2137,74 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
         }
         int colon = host.indexOf(':');
         return (colon >= 0 ? host.substring(0, colon) : host).toLowerCase(Locale.ROOT);
+    }
+
+    static boolean matchesRpIdSuffix(String requestHost, String candidateRpId) {
+        if (requestHost == null || candidateRpId == null)
+            return false;
+        String h = requestHost.trim().toLowerCase(Locale.ROOT);
+        String c = candidateRpId.trim().toLowerCase(Locale.ROOT);
+        if (!isDomainRpId(h) || !isDomainRpId(c))
+            return false;
+        if (!c.contains("."))
+            return h.equals(c);
+        return h.equals(c) || h.endsWith("." + c);
+    }
+
+    static String deriveFederationHubRpId(String oidcIssuerUrl, String externalConsoleUrl) {
+        for (String raw : new String[]{oidcIssuerUrl, externalConsoleUrl}) {
+            if (raw == null || raw.isBlank())
+                continue;
+            try {
+                java.net.URI uri = java.net.URI.create(raw.trim());
+                String host = uri.getHost();
+                if (host == null)
+                    continue;
+                String lower = host.toLowerCase(Locale.ROOT);
+                if (lower.startsWith("auth.") && lower.length() > 5) {
+                    String parent = lower.substring(5);
+                    if (parent.contains(".") && isDomainRpId(parent))
+                        return parent;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+    static String selectEffectiveRpId(String requestHost,
+                                      String configuredRpId,
+                                      String envParentRpId,
+                                      String oidcIssuerUrl,
+                                      String externalConsoleUrl) {
+        String host = (requestHost == null || requestHost.isBlank())
+                ? "localhost"
+                : requestHost.trim().toLowerCase(Locale.ROOT);
+        if (configuredRpId != null && !configuredRpId.isBlank()) {
+            String cfg = configuredRpId.trim().toLowerCase(Locale.ROOT);
+            if (matchesRpIdSuffix(host, cfg))
+                return cfg;
+        }
+        if (envParentRpId != null && !envParentRpId.isBlank()) {
+            String env = envParentRpId.trim().toLowerCase(Locale.ROOT);
+            if (matchesRpIdSuffix(host, env))
+                return env;
+        }
+        String hubRpId = deriveFederationHubRpId(oidcIssuerUrl, externalConsoleUrl);
+        if (hubRpId != null && matchesRpIdSuffix(host, hubRpId)) {
+            return hubRpId;
+        }
+        return host;
+    }
+
+    private String resolveRpId(HttpServletRequest request) {
+        String requestHost = extractRequestHost(request);
+        return selectEffectiveRpId(
+                requestHost,
+                config.webAuthnRpId,
+                System.getenv("OSCAR_WEBAUTHN_RP_ID"),
+                config.oidcIssuerUrl,
+                config.externalIdentityConsoleUrl);
     }
 
     static boolean isDomainRpId(String rpId) {

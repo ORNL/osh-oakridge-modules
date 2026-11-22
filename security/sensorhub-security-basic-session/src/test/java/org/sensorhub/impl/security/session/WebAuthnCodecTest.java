@@ -270,4 +270,39 @@ public class WebAuthnCodecTest {
         System.arraycopy(u, 0, padded, size - u.length, u.length);
         return padded;
     }
+
+    @Test
+    public void resolvesSharedParentHubRpIdAcrossSiteAndSandboxSubdomainsWhilePreservingLanHosts() {
+        String oidcIssuer = "https://auth.hub.example.org/application/o/oscar-federation-sso/";
+
+        // Both <site>.<hub> and <site>-sandbox.<hub> share parent rpId "hub.example.org"
+        assertEquals(
+                "hub.example.org",
+                BasicSessionAuthenticator.selectEffectiveRpId(
+                        "north-gate.hub.example.org", "", null, oidcIssuer, ""));
+        assertEquals(
+                "hub.example.org",
+                BasicSessionAuthenticator.selectEffectiveRpId(
+                        "north-gate-sandbox.hub.example.org", "", null, oidcIssuer, ""));
+
+        // Mode B (CLI-only Hub without OIDC) resolves via OSCAR_WEBAUTHN_RP_ID env var
+        assertEquals(
+                "hub.example.org",
+                BasicSessionAuthenticator.selectEffectiveRpId(
+                        "south-gate-sandbox.hub.example.org", "", "hub.example.org", "", ""));
+
+        // Local LAN / Tailscale hostnames are unaffected and never forced onto hub.example.org
+        assertEquals(
+                "oscar.ubuntu",
+                BasicSessionAuthenticator.selectEffectiveRpId(
+                        "oscar.ubuntu", "hub.example.org", "hub.example.org", oidcIssuer, ""));
+        assertEquals(
+                "localhost",
+                BasicSessionAuthenticator.selectEffectiveRpId(
+                        "localhost", "hub.example.org", "hub.example.org", oidcIssuer, ""));
+        assertEquals(
+                "198.51.100.21",
+                BasicSessionAuthenticator.selectEffectiveRpId(
+                        "198.51.100.21", "hub.example.org", "hub.example.org", oidcIssuer, ""));
+    }
 }

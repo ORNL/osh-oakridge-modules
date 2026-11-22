@@ -86,6 +86,7 @@ public final class OscarIdentityStore {
     public static final class PasskeyRecord {
         public String id;
         public String name;
+        public String rpId;
         public String publicKeyCose;
         public int algorithm;
         public String aaguid;
@@ -1132,6 +1133,7 @@ public final class OscarIdentityStore {
         if (cleanName.length() > 64)
             cleanName = cleanName.substring(0, 64);
         rec.name = cleanName;
+        rec.rpId = verified.rpId;
         rec.publicKeyCose = verified.publicKeyCoseB64Url;
         rec.algorithm = verified.coseAlgorithm;
         rec.aaguid = verified.aaguid;
@@ -1424,6 +1426,7 @@ public final class OscarIdentityStore {
         if (cleanPkName.length() > 64)
             cleanPkName = cleanPkName.substring(0, 64);
         pk.name = cleanPkName;
+        pk.rpId = verified.rpId;
         pk.publicKeyCose = verified.publicKeyCoseB64Url;
         pk.algorithm = verified.coseAlgorithm;
         pk.aaguid = verified.aaguid;

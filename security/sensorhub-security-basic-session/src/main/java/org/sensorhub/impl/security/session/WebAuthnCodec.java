@@ -76,6 +76,7 @@ public final class WebAuthnCodec {
 
     public static final class VerifiedRegistration {
         public final String credentialId;
+        public final String rpId;
         public final String publicKeyCoseB64Url;
         public final int coseAlgorithm;
         public final String aaguid;
@@ -86,6 +87,7 @@ public final class WebAuthnCodec {
         public final boolean backupState;
 
         VerifiedRegistration(String credentialId,
+                             String rpId,
                              String publicKeyCoseB64Url,
                              int coseAlgorithm,
                              String aaguid,
@@ -95,6 +97,7 @@ public final class WebAuthnCodec {
                              boolean backupEligible,
                              boolean backupState) {
             this.credentialId = credentialId;
+            this.rpId = rpId;
             this.publicKeyCoseB64Url = publicKeyCoseB64Url;
             this.coseAlgorithm = coseAlgorithm;
             this.aaguid = aaguid;
@@ -169,6 +172,7 @@ public final class WebAuthnCodec {
 
         return new VerifiedRegistration(
                 attestedCredId,
+                expectedRpId.toLowerCase(Locale.ROOT),
                 PasswordHasher.encodeBase64Url(parsed.cosePublicKeyBytes),
                 coseKey.algorithm,
                 parsed.aaguid,
