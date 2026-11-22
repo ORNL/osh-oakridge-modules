@@ -511,6 +511,16 @@ La liste varie selon les paquets installés. Pour une voie ordinaire, choisissez
 | Supprimer les données avec la voie | Activé par défaut. La suppression de la voie efface ses données. Désactivez-le si l'historique doit être conservé. |
 | Informations de source de données | Métadonnées héritées facultatives, seulement si le modèle SensorML du site les exige. |
 
+![Contrôle des feux et de la sirène physique du RPM par voie (WebRelay-Quad)](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/53-lane-webrelay-lights-and-sound.png)
+
+<details class="oscar-video-guide">
+  <summary>Guide vidéo (#29) : Configurer et commander les feux et la sirène physique du RPM par voie (WebRelay-Quad)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/29-lane-webrelay-lights-and-sound.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/29-lane-webrelay-lights-and-sound.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
 ### 7.3 Onglet Emplacement fixe
 
 Saisissez latitude, longitude et altitude facultative (hauteur au-dessus de l'ellipsoïde WGS 84, en mètres).

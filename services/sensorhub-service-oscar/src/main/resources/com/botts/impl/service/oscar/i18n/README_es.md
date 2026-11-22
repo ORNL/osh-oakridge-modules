@@ -511,6 +511,16 @@ La lista varía con los paquetes instalados. Para un carril normal, seleccione *
 | Eliminar datos al eliminar el carril | Activo de forma predeterminada. Al eliminar el carril borra sus registros de base de datos. Desactívelo si debe conservar el historial. |
 | Información de fuente de datos | Metadatos heredados opcionales; úselos solo si el modelo SensorML del sitio los exige. |
 
+![Control de luces y sonido físico del RPM por carril (WebRelay-Quad)](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/53-lane-webrelay-lights-and-sound.png)
+
+<details class="oscar-video-guide">
+  <summary>Videoguía (#29): Configurar y controlar luces y sonido físico del RPM por carril (WebRelay-Quad)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/29-lane-webrelay-lights-and-sound.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/29-lane-webrelay-lights-and-sound.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
 ### 7.3 Pestaña Ubicación fija
 
 Introduzca latitud, longitud y altitud opcional (altura sobre el elipsoide WGS 84, en metros).

@@ -509,6 +509,16 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 | Διαγραφή δεδομένων κατά την αφαίρεση λωρίδας | Ενεργή από προεπιλογή. Η αφαίρεση διαγράφει τα δεδομένα. Απενεργοποιήστε αν πρέπει να διατηρηθεί ιστορικό. |
 | Πληροφορίες προέλευσης δεδομένων | Προαιρετικά κληρονομημένα μεταδεδομένα, μόνο αν τα απαιτεί το SensorML της εγκατάστασης. |
 
+![Έλεγχος φυσικών φώτων και σειρήνας RPM ανά λωρίδα (WebRelay-Quad)](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/53-lane-webrelay-lights-and-sound.png)
+
+<details class="oscar-video-guide">
+  <summary>Βιντεοοδηγός (#29): Ρύθμιση &amp; έλεγχος φυσικών φώτων και ήχου RPM ανά λωρίδα (WebRelay-Quad)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/29-lane-webrelay-lights-and-sound.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/29-lane-webrelay-lights-and-sound.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
 ### 7.3 Καρτέλα Σταθερή τοποθεσία
 
 Εισαγάγετε πλάτος, μήκος και προαιρετικό υψόμετρο (ύψος πάνω από το ελλειψοειδές WGS 84, σε μέτρα).

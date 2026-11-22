@@ -511,6 +511,16 @@ The available list can change with installed bundles. For ordinary lane setup, s
 | Delete Data on Lane Removal | Defaults enabled. If selected, removing the lane deletes its database records. Clear it when decommissioning must preserve historical data. |
 | Data Source Info | Optional inherited metadata shown by some builds; use only when the site's SensorML/data-source model requires it. |
 
+![Per-Lane Physical RPM Lights & Sound Control (WebRelay-Quad)](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/53-lane-webrelay-lights-and-sound.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#29): Configure &amp; Control Per-Lane Physical RPM Lights &amp; Sound (WebRelay-Quad)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/29-lane-webrelay-lights-and-sound.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/29-lane-webrelay-lights-and-sound.vtt" srclang="en" label="English" default>
+  </video>
+</details>
+
 ### 7.3 Fixed Location tab
 
 Enter the lane's latitude, longitude, and optional altitude (height above the WGS 84 ellipsoid, in meters).
