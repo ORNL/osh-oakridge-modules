@@ -45,6 +45,9 @@ public class LaneConfig extends SensorSystemConfig {
     @DisplayInfo(label = "Vehicle OCR", desc = "Optional asynchronous OCR of container numbers and license plates from lane camera recordings. Disabled by default.")
     public OcrConfig ocrConfig = new OcrConfig();
 
+    @DisplayInfo(label = "WebRelay Lights & Sound", desc = "Optional ControlByWeb WebRelay-Quad physical RPM lights and sounder control. Disabled by default.")
+    public WebRelayConfig webRelayConfig = new WebRelayConfig();
+
     @DisplayInfo(label = "Delete Data on Lane Removal", desc = "Select this to automatically delete all records of this lane when the lane is deleted.")
     public boolean autoDelete = true;
 }

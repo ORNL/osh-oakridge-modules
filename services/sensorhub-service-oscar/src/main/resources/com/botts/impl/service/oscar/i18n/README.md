@@ -1,4 +1,4 @@
-# OSCAR 3.11.3 administrator and operator manual
+# OSCAR 3.11.4 administrator and operator manual
 
 This manual covers the complete first-use and operations workflow including certificate trust, sign-in, site-diagram georeferencing, lane import/manual creation, alarm adjudication and evidence, event review, national statistics, reports, and node federation.
 
@@ -32,7 +32,7 @@ The screenshots show the English interface. OSCAR also supplies Spanish, French,
 
 You need:
 
-- an installed and running OSCAR 3.11.3 deployment;
+- an installed and running OSCAR 3.11.4 deployment;
 - the OSCAR URL, normally `https://oscar.local/` unless deployment selected another hostname;
 - an administrator account for `/sensorhub/admin`;
 - the approved site image and the latitude/longitude of its lower-left and upper-right corners;
@@ -63,7 +63,7 @@ Use the release [Quick Start](https://github.com/ORNL/oscar/blob/main/dist/relea
 | **Daily File & Record Codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | The per-lane daily CSV log of raw RPM messages: `GB`/`NB` = gamma/neutron background, `GS` = occupancy start, `GC`/`NC` = gamma/neutron count profile, `GA`/`NA`/`NS` = gamma/neutron alarm, `GX` = occupancy end, `TT`/`TC` = tamper fault/clear, and `SG1`–`SG3`/`SN1`–`SN2` = daily gamma/neutron hardware setup parameters (which automatically update the Rapiscan driver's parameters in memory and coalesce changes into `config.json`). |
 | **Event UUID** | Globally unique identifier (`UUID`) assigned to each occupancy event so operators can search, export QR summaries, and trace the exact event across reports and federated nodes. |
 | **Operational View** | A named filter selectable from the top-bar **Scoped View** dropdown (or via `?view=<key>` / `/view/<key>` URLs) that scopes a workstation's Dashboard, Events, Status of Health, Map, and Report Generator to a specific group of lanes (for example, `north-gate`) while honoring user `allowedViews` permissions. |
-| **Parquet Cold Tier (`PARQUET_PRIMARY`)** | OSCAR 3.11.3's default storage mode where PostgreSQL holds a 30-minute hot staging window and completed 30-minute partitions are exported to ZSTD-compressed Apache Parquet files (`archive/parquet/`) for fast, compact long-term querying. |
+| **Parquet Cold Tier (`PARQUET_PRIMARY`)** | OSCAR 3.11.4's default storage mode where PostgreSQL holds a 30-minute hot staging window and completed 30-minute partitions are exported to ZSTD-compressed Apache Parquet files (`archive/parquet/`) for fast, compact long-term querying. |
 | **Retained 5-Frame Media** | For every alarm occupancy, OSCAR extracts 5 evenly spaced JPEG snapshots (`frame-01.jpg` to `frame-05.jpg`). After 30 days, secondary frames (`01`, `02`, `04`, `05`) are pruned while the midpoint keyframe (`frame-03.jpg`) is preserved. |
 | **Vehicle OCR (`ocrConfig`)** | Optional per-lane background OCR (`Enable Vehicle OCR = false` by default) that asynchronously reads ISO 6346 shipping container codes (with check-digit verification) and license plates from occupancy camera clips as CPU and heap resources allow (`OcrResourceGovernor`), publishing `vehicleOcr` (`PARQUET_PRIMARY`) candidates, date-partitioned JPEG evidence crops (`/sensorhub/buckets/ocr/crops/<YYYY-MM-DD>/`, aligned with retained `frame-03.jpg` media and `ocrCropRetentionDays = 365`), and auto-filled **Vehicle ID** for checksum-valid containers or high-confidence (`>= 85%`) plates. When `Alarms Only` is cleared, non-alarm clips are scanned transiently and deleted immediately after OCR while keeping `occupancy.videoPaths` empty (`[]`). |
 | **SAN (Subject Alternative Name)** | The list of hostnames and IP addresses (such as `oscar.local` and `192.0.2.10`) embedded inside an HTTPS certificate that a browser checks before trusting the connection. |
@@ -72,6 +72,7 @@ Use the release [Quick Start](https://github.com/ORNL/oscar/blob/main/dist/relea
 | **USB Backups (`/usb-backups`)** | Optional zero-downtime (`0.0 s` portal outage) incremental backup onto an external USB 3.x NVMe SSD (`NTFS` default) managed from **OSCAR Viewer -> USB Backups** or `oscar usb-backup`, supporting `continual` background sync, `occasional` visit sync, safe `eject` (`SAFE_TO_UNPLUG`), laptop delta copy, and `usb-backup restore`. |
 | **Pluggable Extensions (`/extensions`)** | Administrator workspace (**OSCAR Viewer -> Extensions**) for uploading upgrade-safe regional OCR rules/models (`plate-rules.json`, `.onnx`, or `OcrEngine` `.jar`), offline `.pmtiles` vector/raster basemaps, custom spectroscopy libraries/algorithms, enterprise CA `.pem`/`.crt` certificates, agency adjudication policy packs, and EML plugins while keeping shipped built-in defaults active on fresh installs and supporting 1-click reset. |
 | **Hands-On Training Sandbox (`oscar-sandbox`, `:8444`)** | Isolated ephemeral Docker Compose stack (`sudo bash oscar.sh sandbox start` / `.\oscar.bat sandbox start`) reusing the installed OSCAR images on `:8444` with built-in loopback Rapiscan RPM and RTSP container camera micro-emulators, 12 guided labs (`Watch · Read · Do · Auto-Verify`) across Operator, Supervisor, and Administrator tracks (including Split-Pane `/sensorhub/admin`), `archive.enabled = false`, watermarked exports (`TRAINING SANDBOX — NON-OPERATIONAL`), and complete wipe on `sandbox stop` without touching operational PostgreSQL or Parquet archives. |
+| **RPM Lights & Sound (`webRelayConfig` — WebRelay-Quad)** | Optional per-lane network relay integration (`Enable WebRelay Control = false` by default) for ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`) HTTP/XML modules (`stateFull.xml` / `state.xml`) across a Primary Pillar unit and optional Ancillary Dry-Contact unit. Supports **Automatic (`AUTO`)** occupancy/EML gatekeeping (arming `R1=1, R2=1` during occupancies, suppressing physical lights & sound on `Code 9999: EML Non-Threat` and optionally `Code 9998: Extended Occupancy Gamma Alarm`, pulsing `R3` Gamma Red Light + Audible Siren and/or `R4` Neutron Blue Light on actionable alarms, and failing safe to `0,0,0,0` pass-through when stopped), **Pass-Through (`PASS_THROUGH`)**, **Muted (`MUTED`)**, and live Administrator manual controls in `/sensorhub/admin`, **Status of Health (`/health`)**, and **Lane View (`/lane-view`)**. |
 
 ## 2. Trust the OSCAR certificate
 
@@ -255,10 +256,10 @@ historical reconciliation to recreate deleted media. Back up and restore the com
 `videos/retained-media/v1` prefix as one unit; its indexes, checkpoints, queues, manifests, and
 ledgers are application state.
 
-The compact layout first ships in 3.11.3 and does not scan/migrate pre-release prototype
-`.deleted.json` or per-observation marker trees. Test/pre-release systems need a fresh 3.11.3 database
+The compact layout first ships in 3.11.4 and does not scan/migrate pre-release prototype
+`.deleted.json` or per-observation marker trees. Test/pre-release systems need a fresh 3.11.4 database
 and retained-media prefix. To downgrade, restore both from the same coordinated pre-3.11.0 backup;
-never run an older binary against 3.11.3 storage.
+never run an older binary against 3.11.4 storage.
 
 ### Custom disposition codes
 
@@ -506,6 +507,7 @@ The available list can change with installed bundles. For ordinary lane setup, s
 | Operational View Keys | Optional list of workstation view keys allowed to display this lane. Add each key separately; use 1–63 lowercase ASCII letters (`a`–`z`), numbers, or hyphens, with no leading or trailing hyphen. Leave empty when the lane should have no scoped-view assignment. |
 | Extended Occupancy Threshold (min) | Duration in minutes (`1`–`1440`, default `1`) before an active occupancy publishes a `Fault - Extended Occupancy` status observation and increments the lane's `Ext-Occ` fault count. When an extended occupancy completes with a gamma-only alarm (no neutron alarm), OSCAR suppresses it from the live Dashboard queue and automatically adjudicates it as **Code 9998: Extended Occupancy Gamma Alarm**. |
 | Vehicle OCR | Optional per-lane OCR settings (`Enable Vehicle OCR`, `Alarms Only`, `Model Directory`, `Read Container Numbers`, `Read License Plates`, `Camera UIDs`, `Frames Per Clip`, `Container Min Confidence`, `Plate Min Confidence`, `Ignore Top Band Fraction`, `Ignore Bottom Band Fraction`, default `enabled = false`). When enabled on a lane, OSCAR runs PP-OCRv3 ONNX recognition asynchronously on a low-priority resource-governed worker, publishes `vehicleOcr` (`PARQUET_PRIMARY`) candidates and date-partitioned crop thumbnails (`ocrCropRetentionDays = 365`, preserved alongside `frame-03.jpg`, media holds, and operator adjudications), discards temporary non-alarm clips immediately when `Alarms Only = false`, and auto-fills **Vehicle ID** during adjudication; disabled lanes register no active OCR worker subscription and incur zero runtime overhead. |
+| RPM Lights & Sound (`webRelayConfig`) | Optional per-lane ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`) settings (`Enable WebRelay Control = false` default, `Operating Mode` `AUTO` / `PASS_THROUGH` / `MUTED`, `Suppress Extended Occupancy Gamma (Code 9998)`, `Primary Host / IP`, `HTTP Port`, optional `Username` / `Password`, `Gamma Pulse Duration (s)`, `Neutron Pulse Duration (s)`, `Poll Interval (s)`, `HTTP Timeout (ms)`, and optional `Ancillary Dry-Contact Unit`). Includes live administrator pulse/latch/silence/pass-through buttons in SensorHub Admin and OSCAR Viewer (`Status of Health` and `Lane View`) and `#WEBRELAY,<laneUid>,<key>,<value>` round-trip preservation in `config.csv`. |
 | Delete Data on Lane Removal | Defaults enabled. If selected, removing the lane deletes its database records. Clear it when decommissioning must preserve historical data. |
 | Data Source Info | Optional inherited metadata shown by some builds; use only when the site's SensorML/data-source model requires it. |
 
@@ -937,7 +939,7 @@ Once one or more remote portals are connected via `oscar_fed_...` Federation Ser
 
 ## 12. Data retention and storage behavior
 
-The standard 3.11.3 profile uses the tiered PostgreSQL + Apache Parquet architecture in `PARQUET_PRIMARY`
+The standard 3.11.4 profile uses the tiered PostgreSQL + Apache Parquet architecture in `PARQUET_PRIMARY`
 mode (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Static singleton configuration streams (`sensorLocation`,
 `adjudicationCodes`, `siteInfo`) remain in PostgreSQL `ONLY oscar.obs`, while all 22 allowlisted operational
 and evidentiary outputs (`gammaCounts`, `gammaThreshold`, `neutronCounts`, `setupGamma`, `setupNeutron`,
@@ -999,7 +1001,7 @@ dry-run/purge workflows, plus `backup` and `backup-verify` only in `single` mode
 encryption key separately and retain an off-host copy if site policy requires another failure
 domain. Never delete cataloged archive/media files directly. A pre-3.11.0 `upgrade` preserves its old
 database and configuration and does not create the full storage profile or enable PostgreSQL
-checksums; initialize a fresh 3.11.3 deployment or use a separately validated production migration.
+checksums; initialize a fresh 3.11.4 deployment or use a separately validated production migration.
 The packaged `documentation/` storage guides are the authoritative runbooks.
 
 Use the release launcher for deployment-wide `stop` and `restart`. It stops the gateway first,
@@ -1099,7 +1101,7 @@ For commercial portals operating alongside X-ray NII scanners (`UFF 2.0` or `UFF
 - [ ] Node ID is unique and stable.
 - [ ] Database ID, Web ID root, statistics interval, and Auto Start match site policy.
 - [ ] Video and pressure-retention settings were reviewed before enabling cleanup.
-- [ ] A fresh 3.11.3 database/configuration or an approved migration was used; archive status and integrity verification pass.
+- [ ] A fresh 3.11.4 database/configuration or an approved migration was used; archive status and integrity verification pass.
 - [ ] Backup mode is recorded. Disabled mode creates no OSCAR-managed backup; if `single` is enabled, its current snapshot verifies, its external key is escrowed separately, and an isolated restore drill has passed.
 - [ ] A sample lane publishes a journal-backed daily CSV/manifest; retained events show five JPEGs while legacy events still play.
 - [ ] Bucket Storage Service and OSCAR Service Module are started.
@@ -1165,7 +1167,7 @@ The sandbox reuses the installed OSCAR images with disposable volumes (`oscar_sa
 | OSM tiles show 403/blocked | Do not point production traffic directly at volunteer OSM tiles in violation of tile policy. Use the deployment's approved OSM provider/proxy or select Esri while the tile-service configuration is corrected. |
 | CSV rejected | Compare the exact header/order, camera groups of six with sequential indexes, cell count on every row, numeric fields, and plain unquoted empty cells. Remove commas from values. |
 | CSV says success but a lane is missing | Check for an existing loaded lane with the same UniqueID, a name longer than 12 characters, device-child initialization errors, and whether asynchronous loading has finished. |
-| **Sensors** is empty after restart following CSV upload | The upload created in-memory modules, but the complete configuration was not persisted. Upload again if necessary, wait for every lane and child to appear, select the global **Save**, restart OSCAR, and verify **Sensors** again. If a 3.11.3 node still loses the lanes, check OSCAR logs and verify that `/var/lib/oscar/config.json` is owner-writable. |
+| **Sensors** is empty after restart following CSV upload | The upload created in-memory modules, but the complete configuration was not persisted. Upload again if necessary, wait for every lane and child to appear, select the global **Save**, restart OSCAR, and verify **Sensors** again. If a 3.11.4 node still loses the lanes, check OSCAR logs and verify that `/var/lib/oscar/config.json` is owner-writable. |
 | Scoped operational view is empty or rejects its key | Confirm the lane's **Operational View Keys** contains the exact lowercase key, apply and globally save the configuration, restart the lane if required, and use `?view=<key>` or `/view/<key>`. A blank assignment never matches a scoped view. |
 | RPM does not start | Verify host reachability, exact TCP port, firewall, Aspect range, and device availability. Review the child driver status/error, not only the parent lane. |
 | Camera does not start | Verify RTSP reachability and credentials, omit `rtsp://` from host, include a needed port once, confirm Axis codec or Custom path, and test the generated endpoint from the OSCAR host. |
@@ -1215,4 +1217,4 @@ When collecting support data, export a redacted troubleshooting support bundle (
 
 ---
 
-Document baseline: OSCAR 3.11.3 source behavior, reviewed 2026-10-18. If a later release changes fields or workflows, update the English canonical manual and all three translations together.
+Document baseline: OSCAR 3.11.4 source behavior, reviewed 2026-10-18. If a later release changes fields or workflows, update the English canonical manual and all three translations together.

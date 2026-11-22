@@ -1,4 +1,4 @@
-# Manuel d'administration et d'exploitation d'OSCAR 3.11.3
+# Manuel d'administration et d'exploitation d'OSCAR 3.11.4
 
 Ce manuel couvre la première utilisation et l'exploitation complète : certificat, connexion, plan géoréférencé, import/création des voies, adjudication et preuves, événements, statistiques nationales, rapports et fédération de nœuds.
 
@@ -32,7 +32,7 @@ L'interface d'administration sélectionne automatiquement le manuel correspondan
 
 Vous avez besoin :
 
-- d'un déploiement OSCAR 3.11.3 installé et démarré ;
+- d'un déploiement OSCAR 3.11.4 installé et démarré ;
 - de l'URL OSCAR, généralement `https://oscar.local/` sauf si un autre hôte a été choisi ;
 - d'un compte administrateur pour `/sensorhub/admin` ;
 - de l'image de site approuvée et des coordonnées des coins inférieur gauche et supérieur droit ;
@@ -63,7 +63,7 @@ Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/mai
 | **Fichier quotidien et codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | Journal CSV quotidien par voie contenant les messages RPM bruts : `GB`/`NB` = bruit de fond gamma/neutrons, `GS` = début d'occupation, `GC`/`NC` = profil de comptage, `GA`/`NA`/`NS` = alarme gamma/neutrons, `GX` = fin d'occupation, `TT`/`TC` = défaut/rétablissement de sabotage, et `SG1`–`SG3`/`SN1`–`SN2` = paramètres quotidiens de configuration gamma/neutrons (qui mettent automatiquement à jour les paramètres du pilote Rapiscan en mémoire et regroupent les modifications dans `config.json`). |
 | **UUID d'événement (`Event UUID`)** | Identifiant unique global attribué à chaque événement d'occupation pour la recherche, l'exportation QR et le suivi dans les rapports et nœuds fédérés. |
 | **Vue opérationnelle (`Operational View`)** | Filtre nommé sélectionnable depuis le menu déroulant **Vue opérationnelle** de la barre supérieure (ou via `?view=<clé>` / `/view/<clé>`) limitant le Tableau de bord, les Événements, l'État de santé, la Carte et le Générateur de rapports à un groupe de voies précis dans le respect des permissions `allowedViews`. |
-| **Niveau froid Parquet (`PARQUET_PRIMARY`)** | Mode de stockage par défaut d'OSCAR 3.11.3 dans lequel PostgreSQL conserve une fenêtre de transit de 30 minutes et les partitions terminées sont exportées en fichiers Apache Parquet compressés ZSTD (`archive/parquet/`). |
+| **Niveau froid Parquet (`PARQUET_PRIMARY`)** | Mode de stockage par défaut d'OSCAR 3.11.4 dans lequel PostgreSQL conserve une fenêtre de transit de 30 minutes et les partitions terminées sont exportées en fichiers Apache Parquet compressés ZSTD (`archive/parquet/`). |
 | **Médias conservés à 5 images** | Pour chaque occupation avec alarme, OSCAR extrait 5 instantanés JPEG (`frame-01.jpg` à `frame-05.jpg`). Après 30 jours, les images secondaires (`01`, `02`, `04`, `05`) sont purgées et l'image centrale (`frame-03.jpg`) est conservée. |
 | **OCR des véhicules (`ocrConfig`)** | Lecture optique facultative par voie (`Activer l'OCR des véhicules = false` par défaut) analysant de façon asynchrone les codes conteneur ISO 6346 (avec chiffre de contrôle) et les plaques d'immatriculation selon les ressources CPU et mémoire disponibles (`OcrResourceGovernor`), publiant des candidats `vehicleOcr` (`PARQUET_PRIMARY`), des vignettes JPEG partitionnées par date (`/sensorhub/buckets/ocr/crops/<YYYY-MM-DD>/`, alignées sur `frame-03.jpg` et `ocrCropRetentionDays = 365`) et préremplissant l'**ID véhicule** pour les conteneurs ISO valides ou les plaques `>= 85%`. Lorsque `Alarmes uniquement` est décoché, les séquences hors alarme sont analysées de manière transitoire puis supprimées immédiatement tout en gardant `occupancy.videoPaths` vide (`[]`). |
 | **SAN (Nom alternatif du sujet)** | Liste des noms d'hôtes et adresses IP (tels que `oscar.local` et `192.0.2.10`) inscrits dans un certificat HTTPS que le navigateur vérifie avant d'établir la connexion. |
@@ -72,6 +72,7 @@ Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/mai
 | **Sauvegardes USB (`/usb-backups`)** | Sauvegarde incrémentale optionnelle sans interruption (`0,0 s`) sur SSD NVMe USB 3.x externe (`NTFS` par défaut) gérée depuis **OSCAR Viewer -> Sauvegardes USB** ou `oscar usb-backup`, avec modes `continual` ou `occasional`, éjection sécurisée (`SAFE_TO_UNPLUG`) et restauration `usb-backup restore`. |
 | **Extensions enfichables (`/extensions`)** | Espace d'administration (**OSCAR Viewer -> Extensions**) permettant de téléverser des règles/modèles OCR régionaux (`plate-rules.json`, `.onnx` ou `.jar` `OcrEngine`), des fonds de carte hors ligne `.pmtiles`, des bibliothèques de spectroscopie, des certificats d'AC d'entreprise (`.pem`/`.crt`), des packs de politiques d'adjudication et des modules EML préservés lors d'`oscar upgrade`, avec retour en un clic aux valeurs fournies par défaut. |
 | **Bac à sable de formation pratique (`oscar-sandbox`, `:8444`)** | Pile Docker Compose éphémère isolée (`sudo bash oscar.sh sandbox start` / `.\oscar.bat sandbox start`) réutilisant les images OSCAR installées sur `:8444` avec micro-émulateurs locaux Rapiscan RPM et caméra RTSP conteneur, 12 ateliers guidés (`Regarder · Lire · Pratiquer · Auto-vérifier`) pour Opérateur, Superviseur et Administrateur (avec vue scindée `/sensorhub/admin`), `archive.enabled = false`, filigrane `TRAINING SANDBOX — NON-OPERATIONAL` et purge complète via `sandbox stop` sans toucher à PostgreSQL ni aux archives Parquet. |
+| **Feux et sirène du RPM (`webRelayConfig` — WebRelay-Quad)** | Intégration réseau facultative par voie (`Activer le contrôle WebRelay = false` par défaut) pour modules ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`) via HTTP/XML (`stateFull.xml` / `state.xml`) sur unité primaire et unité auxiliaire facultative à contacts secs. Prend en charge le mode **Automatique (`AUTO`)** (armement `R1=1, R2=1` pendant l'occupation, suppression des feux et de la sirène pour `Code 9999: EML Non-Threat` et en option `Code 9998: Extended Occupancy Gamma Alarm`, impulsion `R3` feu rouge gamma + sirène et/ou `R4` feu bleu neutron sur alarme réelle, retour de sécurité `0,0,0,0` à l'arrêt), **Passage direct (`PASS_THROUGH`)**, **Muet (`MUTED`)** et les commandes manuelles administrateur dans `/sensorhub/admin`, **État de santé (`/health`)** et **Vue de voie (`/lane-view`)**. |
 
 ## 2. Approuver le certificat OSCAR
 
@@ -255,10 +256,10 @@ mémorise les suppressions sous pression sans un
 tombstone JSON permanent par caméra. Sauvegardez et restaurez comme une unité tout
 `videos/retained-media/v1`, notamment index, points de contrôle, files, manifestes et journaux.
 
-Ce format compact apparaît pour la première fois dans 3.11.3 et ne migre pas les prototypes
+Ce format compact apparaît pour la première fois dans 3.11.4 et ne migre pas les prototypes
 `.deleted.json` ni les arbres de marqueurs par observation. Les systèmes de test doivent démarrer
-avec une base et un préfixe de médias 3.11.3 neufs. Pour revenir en arrière, restaurez les deux depuis
-la même sauvegarde coordonnée antérieure à 3.11.3 ; n'exécutez jamais un ancien binaire sur ce stockage.
+avec une base et un préfixe de médias 3.11.4 neufs. Pour revenir en arrière, restaurez les deux depuis
+la même sauvegarde coordonnée antérieure à 3.11.4 ; n'exécutez jamais un ancien binaire sur ce stockage.
 
 ### Codes de disposition personnalisés
 
@@ -506,6 +507,7 @@ La liste varie selon les paquets installés. Pour une voie ordinaire, choisissez
 | Clés de vue opérationnelle | Liste facultative des clés de poste autorisées à afficher cette voie. Ajoutez chaque clé séparément ; utilisez 1 à 63 lettres ASCII minuscules (`a`–`z`), chiffres ou tirets, sans tiret initial ni final. Laissez vide si la voie ne doit appartenir à aucune vue limitée. |
 | Seuil d'occupation prolongée (min) | Durée en minutes (`1`–`1440`, défaut `1`) avant qu'une occupation active ne publie `Fault - Extended Occupancy` et n'incrémente le compteur de défauts `Ext-Occ`. Lorsqu'une occupation prolongée se termine par une alarme gamma seule (sans alarme neutron), OSCAR la masque du tableau de bord actif et l'adjuge automatiquement comme **Code 9998 : Alarme gamma d'occupation prolongée**. |
 | OCR des véhicules | Réglages facultatifs par voie (`Activer l'OCR des véhicules`, `Alarmes uniquement`, `Répertoire des modèles`, `Lire les numéros de conteneur`, `Lire les plaques d'immatriculation`, `UID des caméras`, `Images par séquence`, `Confiance minimale conteneur`, `Confiance minimale plaque`, `Fraction supérieure ignorée`, `Fraction inférieure ignorée`, `enabled = false` par défaut). Lorsqu'il est activé sur une voie, OSCAR exécute la reconnaissance PP-OCRv3 ONNX en arrière-plan selon les ressources disponibles, publie les candidats `vehicleOcr` (`PARQUET_PRIMARY`) et des vignettes partitionnées par date (`ocrCropRetentionDays = 365`, conservées avec `frame-03.jpg`, les rétentions et les adjudications opérateur), supprime immédiatement les séquences transitoires hors alarme lorsque `Alarmes uniquement = false` et préremplit l'**ID véhicule** lors de l'adjudication ; les voies désactivées n'ajoutent aucune surcharge. |
+| Feux et sirène du RPM (`webRelayConfig`) | Réglages facultatifs par voie pour ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`, `enabled = false` par défaut), avec modes `AUTO`, `PASS_THROUGH` et `MUTED`, masquage configurable du `Code 9998`, hôte/port/identifiants HTTP primaires, durées d'impulsion gamma/neutron, unité auxiliaire facultative, boutons de commande en direct pour administrateurs et conservation `#WEBRELAY` dans `config.csv`. |
 | Supprimer les données avec la voie | Activé par défaut. La suppression de la voie efface ses données. Désactivez-le si l'historique doit être conservé. |
 | Informations de source de données | Métadonnées héritées facultatives, seulement si le modèle SensorML du site les exige. |
 
@@ -902,7 +904,7 @@ Une fois les portails distants connectés via des jetons `oscar_fed_...`, **Év�
 
 ## 12. Conservation des données et stockage
 
-Le profil standard 3.11.3 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet en mode
+Le profil standard 3.11.4 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet en mode
 `PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Les flux de configuration statiques
 (`sensorLocation`, `adjudicationCodes`, `siteInfo`) restent dans PostgreSQL `ONLY oscar.obs`, tandis que
 les 22 sorties opérationnelles et probantes autorisées (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
@@ -971,8 +973,8 @@ Utilisez les commandes `archive status`, `archive verify`, de conservation, d'ex
 suppression avec simulation/jeton du lanceur, ainsi que `backup` et `backup-verify` uniquement en mode
 `single`. Protégez séparément la clé de chiffrement et conservez une copie hors hôte si la politique
 du site exige un autre domaine de défaillance. Ne supprimez jamais à la main les fichiers catalogués.
-Une mise à niveau antérieure à 3.11.3 conserve l'ancienne base et configuration : elle ne crée pas tout
-le profil et n'active pas les sommes de contrôle PostgreSQL. Initialisez un nouveau déploiement 3.11.3
+Une mise à niveau antérieure à 3.11.4 conserve l'ancienne base et configuration : elle ne crée pas tout
+le profil et n'active pas les sommes de contrôle PostgreSQL. Initialisez un nouveau déploiement 3.11.4
 ou appliquez une migration de production validée séparément. Les guides de stockage de
 `documentation/` sont les procédures de référence.
 
@@ -1073,7 +1075,7 @@ Sur les sites équipés de scanners rayons X NII (`UFF 2.0` ou `UFF 3.0.0`), un 
 
 - [ ] ID de nœud unique ; base, Web ID, statistiques et démarrage automatique vérifiés.
 - [ ] Conservation vidéo et pression examinées avant toute purge.
-- [ ] Une base/configuration 3.11.3 neuve ou une migration approuvée est utilisée ; l'état et l'intégrité de l'archive sont valides.
+- [ ] Une base/configuration 3.11.4 neuve ou une migration approuvée est utilisée ; l'état et l'intégrité de l'archive sont valides.
 - [ ] Le mode de sauvegarde est consigné. Le mode désactivé ne crée aucune sauvegarde gérée par OSCAR ; si `single` est activé, son instantané courant est vérifié, sa clé externe est séquestrée séparément et un exercice de restauration isolé a réussi.
 - [ ] Une voie témoin publie CSV/manifeste depuis le journal ; les événements retenus montrent cinq JPEG et les anciens restent lisibles.
 - [ ] Services de compartiments et OSCAR démarrés.
@@ -1139,7 +1141,7 @@ Le bac à sable réutilise les images OSCAR installées avec des volumes jetable
 | Tuiles OSM 403/bloquées | N'utilisez pas directement des serveurs bénévoles contrairement à leur politique. Configurez un fournisseur/proxy OSM approuvé ou utilisez Esri pendant la correction. |
 | CSV refusé | Vérifiez en-tête/ordre, groupes de six, index continus, nombre de cellules, nombres, cellules vides non citées et absence de virgules internes. |
 | Voie manquante après CSV | Cherchez un UniqueID déjà chargé, un nom trop long, des erreurs d'enfants et attendez le chargement asynchrone. |
-| **Capteurs** est vide après un redémarrage suivant le téléversement du CSV | Le téléversement a créé des modules en mémoire, mais la configuration complète n'a pas été persistée. Téléversez de nouveau si nécessaire, attendez toutes les voies et tous les enfants, utilisez l'action globale **Enregistrer**, redémarrez OSCAR et vérifiez encore **Capteurs**. Si un nœud 3.11.3 perd toujours les voies, consultez les journaux OSCAR et vérifiez que le propriétaire peut écrire dans `/var/lib/oscar/config.json`. |
+| **Capteurs** est vide après un redémarrage suivant le téléversement du CSV | Le téléversement a créé des modules en mémoire, mais la configuration complète n'a pas été persistée. Téléversez de nouveau si nécessaire, attendez toutes les voies et tous les enfants, utilisez l'action globale **Enregistrer**, redémarrez OSCAR et vérifiez encore **Capteurs**. Si un nœud 3.11.4 perd toujours les voies, consultez les journaux OSCAR et vérifiez que le propriétaire peut écrire dans `/var/lib/oscar/config.json`. |
 | Vue opérationnelle vide ou clé rejetée | Vérifiez que les **Clés de vue opérationnelle** de la voie contiennent exactement la clé en minuscules, appliquez et enregistrez globalement, redémarrez la voie si nécessaire, puis utilisez `?view=<clé>` ou `/view/<clé>`. Une affectation vide ne correspond jamais à une vue limitée. |
 | RPM ne démarre pas | Testez hôte, port, pare-feu, plage Aspect et disponibilité ; consultez l'erreur du pilote enfant. |
 | Caméra ne démarre pas | Testez RTSP/identifiants, retirez `rtsp://` de l'hôte, évitez un port en double, vérifiez codec Axis ou chemin Custom depuis l'hôte OSCAR. |
@@ -1189,4 +1191,4 @@ Pour l'assistance technique, exportez une archive de diagnostic expurgée (`.zip
 
 ---
 
-Référence du document : comportement du code OSCAR 3.11.3, revu le 2026-10-18. Si une version ultérieure change les champs ou procédures, mettez à jour ensemble le manuel canonique anglais et les trois traductions.
+Référence du document : comportement du code OSCAR 3.11.4, revu le 2026-10-18. Si une version ultérieure change les champs ou procédures, mettez à jour ensemble le manuel canonique anglais et les trois traductions.

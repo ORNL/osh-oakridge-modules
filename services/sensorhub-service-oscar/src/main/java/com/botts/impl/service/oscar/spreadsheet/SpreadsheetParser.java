@@ -337,6 +337,7 @@ public class SpreadsheetParser {
 
     public List<LaneConfig> deserialize(String csv) throws IOException {
         List<LaneConfig> lanes = new ArrayList<>();
+        Map<String, Map<String, String>> webRelayDirectivesByUid = new LinkedHashMap<>();
         retentionPolicyConfig = new RetentionPolicyConfig();
         try (BufferedReader reader = new BufferedReader(new StringReader(csv))) {
             String headerLine = null;
@@ -349,6 +350,16 @@ public class SpreadsheetParser {
                     String[] parts = trimmed.split(DELIMITER, 3);
                     if (parts.length >= 3)
                         retentionPolicyConfig.applyKeyValue(parts[1], parts[2]);
+                    continue;
+                }
+                if (trimmed.startsWith("#WEBRELAY,")) {
+                    String[] parts = trimmed.split(DELIMITER, 4);
+                    if (parts.length >= 4) {
+                        String uidKey = parts[1].trim();
+                        webRelayDirectivesByUid
+                                .computeIfAbsent(uidKey, k -> new LinkedHashMap<>())
+                                .put(parts[2].trim(), parts[3].trim());
+                    }
                     continue;
                 }
                 if (trimmed.startsWith("#"))
@@ -367,7 +378,60 @@ public class SpreadsheetParser {
             if (headerLine == null)
                 validateHeader(null);
         }
+        if (!webRelayDirectivesByUid.isEmpty()) {
+            for (LaneConfig lane : lanes) {
+                Map<String, String> props = webRelayDirectivesByUid.get(lane.uniqueID);
+                if (props == null && lane.name != null) {
+                    props = webRelayDirectivesByUid.get(lane.name);
+                }
+                if (props != null) {
+                    applyWebRelayDirectives(lane, props);
+                }
+            }
+        }
         return lanes;
+    }
+
+    private static void applyWebRelayDirectives(LaneConfig lane, Map<String, String> props) {
+        if (lane.webRelayConfig == null) {
+            lane.webRelayConfig = new WebRelayConfig();
+        }
+        WebRelayConfig wr = lane.webRelayConfig;
+        for (var entry : props.entrySet()) {
+            String k = entry.getKey();
+            String v = entry.getValue();
+            if (v == null) continue;
+            switch (k) {
+                case "enabled" -> wr.enabled = Boolean.parseBoolean(v);
+                case "mode" -> {
+                    if (!v.isEmpty()) {
+                        wr.mode = WebRelayOperatingMode.valueOf(v.toUpperCase(Locale.ROOT));
+                    }
+                }
+                case "primaryHost" -> wr.primaryHost = v;
+                case "primaryPort" -> {
+                    if (!v.isEmpty()) wr.primaryPort = WebRelayConfig.normalizePort(Integer.parseInt(v));
+                }
+                case "ancillaryEnabled" -> wr.ancillaryEnabled = Boolean.parseBoolean(v);
+                case "ancillaryHost" -> wr.ancillaryHost = v;
+                case "ancillaryPort" -> {
+                    if (!v.isEmpty()) wr.ancillaryPort = WebRelayConfig.normalizePort(Integer.parseInt(v));
+                }
+                case "username" -> wr.username = v;
+                case "password" -> wr.password = v;
+                case "alarmPulseSeconds" -> {
+                    if (!v.isEmpty()) wr.alarmPulseSeconds = Integer.parseInt(v);
+                }
+                case "suppressExtendedOccupancyGamma" -> wr.suppressExtendedOccupancyGamma = Boolean.parseBoolean(v);
+                case "soundOnNeutronAlarm" -> wr.soundOnNeutronAlarm = Boolean.parseBoolean(v);
+                case "pollIntervalSeconds" -> {
+                    if (!v.isEmpty()) wr.pollIntervalSeconds = Integer.parseInt(v);
+                }
+                default -> {
+                    // Ignore unknown future keys
+                }
+            }
+        }
     }
 
     public LaneConfig deserializeLane(Map<String, String> row) {
@@ -512,7 +576,35 @@ public class SpreadsheetParser {
                 builder.append("\n");
         });
 
+        for (LaneConfig lane : lanes) {
+            if (lane.webRelayConfig != null && (lane.webRelayConfig.enabled
+                    || (lane.webRelayConfig.primaryHost != null && !lane.webRelayConfig.primaryHost.isBlank()))) {
+                WebRelayConfig wr = lane.webRelayConfig;
+                String uid = lane.uniqueID != null && !lane.uniqueID.isBlank() ? lane.uniqueID : lane.name;
+                appendWebRelayDirective(builder, uid, "enabled", wr.enabled);
+                appendWebRelayDirective(builder, uid, "mode", wr.mode != null ? wr.mode.name() : "AUTO");
+                appendWebRelayDirective(builder, uid, "primaryHost", wr.primaryHost);
+                appendWebRelayDirective(builder, uid, "primaryPort", wr.primaryPort);
+                appendWebRelayDirective(builder, uid, "ancillaryEnabled", wr.ancillaryEnabled);
+                appendWebRelayDirective(builder, uid, "ancillaryHost", wr.ancillaryHost);
+                appendWebRelayDirective(builder, uid, "ancillaryPort", wr.ancillaryPort);
+                appendWebRelayDirective(builder, uid, "username", wr.username);
+                appendWebRelayDirective(builder, uid, "alarmPulseSeconds", wr.alarmPulseSeconds);
+                appendWebRelayDirective(builder, uid, "suppressExtendedOccupancyGamma", wr.suppressExtendedOccupancyGamma);
+                appendWebRelayDirective(builder, uid, "soundOnNeutronAlarm", wr.soundOnNeutronAlarm);
+                appendWebRelayDirective(builder, uid, "pollIntervalSeconds", wr.pollIntervalSeconds);
+            }
+        }
+
         return builder.toString();
+    }
+
+    private void appendWebRelayDirective(StringBuilder sb, String uid, String key, Object val) {
+        sb.append("#WEBRELAY").append(DELIMITER)
+                .append(uid != null ? uid : "").append(DELIMITER)
+                .append(key).append(DELIMITER)
+                .append(val != null ? String.valueOf(val) : "")
+                .append("\n");
     }
 
     public String serializeLane(LaneConfig lane, int maxCameras) {

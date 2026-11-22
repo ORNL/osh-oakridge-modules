@@ -30,6 +30,7 @@ import com.botts.impl.sensor.rs350.RS350Sensor;
 import com.botts.impl.system.lane.helpers.eml.EmlAutoAdjudicationHelper;
 import com.botts.impl.system.lane.helpers.ocr.OcrHelper;
 import com.botts.impl.system.lane.helpers.webid.WebIdHelper;
+import com.botts.impl.system.lane.helpers.webrelay.LaneWebRelayController;
 import org.sensorhub.impl.utils.rad.output.N42Output;
 import com.botts.impl.system.lane.config.*;
 import com.botts.impl.system.lane.helpers.occupancy.OccupancyWrapper;
@@ -103,6 +104,8 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     EmlAutoAdjudicationHelper emlAutoAdjudicationHelper;
 
     AdjudicationControl adjudicationControl;
+    LaneRelayControl laneRelayControl;
+    LaneWebRelayController webRelayController;
     WebIdOutput webIdOutput;
     N42Output<?> n42Output;
     VehicleOcrOutput vehicleOcrOutput;
@@ -197,6 +200,13 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
 
         adjudicationControl = new AdjudicationControl(this);
         addControlInput(adjudicationControl);
+
+        if (getConfiguration().webRelayConfig != null && getConfiguration().webRelayConfig.enabled) {
+            laneRelayControl = new LaneRelayControl(this);
+            addControlInput(laneRelayControl);
+        } else {
+            laneRelayControl = null;
+        }
 
         String statusMsg = "Note: ";
         if (existingRPMModule == null)
@@ -335,6 +345,42 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         return occupancyWrapper;
     }
 
+    public LaneWebRelayController getWebRelayController() {
+        return webRelayController;
+    }
+
+    public synchronized void refreshWebRelayRuntime() {
+        WebRelayConfig wrCfg = getConfiguration() != null ? getConfiguration().webRelayConfig : null;
+        if (wrCfg == null) {
+            wrCfg = new WebRelayConfig();
+            if (getConfiguration() != null) {
+                getConfiguration().webRelayConfig = wrCfg;
+            }
+        }
+        var state = getCurrentState();
+        boolean runtimeActive = state == ModuleEvent.ModuleState.STARTING
+                || state == ModuleEvent.ModuleState.STARTED
+                || state == ModuleEvent.ModuleState.INITIALIZED;
+        if (!runtimeActive || !wrCfg.enabled) {
+            if (webRelayController != null) {
+                webRelayController.close();
+                webRelayController = null;
+            }
+            return;
+        }
+        if (laneRelayControl == null) {
+            laneRelayControl = new LaneRelayControl(this);
+            if (!getCommandInputs().containsKey(LaneRelayControl.NAME)) {
+                addControlInput(laneRelayControl);
+            }
+        }
+        if (webRelayController == null) {
+            webRelayController = new LaneWebRelayController(this, occupancyProducer, wrCfg);
+        } else {
+            webRelayController.reconfigure(wrCfg, occupancyProducer);
+        }
+    }
+
     private FFMPEGSensorBase<?> createFFmpegModule(FFMPEGConfig ffmpegConfig) throws SensorHubException {
         // Get ffmpeg submodule with the same unique serial num
         // If there is a module registered for this serial number, then the driver was already registered
@@ -435,11 +481,17 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         if (ocrConfig != null && ocrConfig.enabled && vehicleOcrOutput != null && occupancyProducer != null) {
             ocrHelper = new OcrHelper(this, occupancyProducer, vehicleOcrOutput, ocrConfig);
         }
+
+        refreshWebRelayRuntime();
     }
 
     protected void doStop() throws SensorHubException {
         cancelLaneEventSubscription();
         shutdownThreadPool();
+        if (webRelayController != null) {
+            webRelayController.close();
+            webRelayController = null;
+        }
         if (emlAutoAdjudicationHelper != null) {
             emlAutoAdjudicationHelper.stop();
             emlAutoAdjudicationHelper = null;
@@ -464,6 +516,10 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     public void cleanup() throws SensorHubException {
         cancelLaneEventSubscription();
         shutdownThreadPool();
+        if (webRelayController != null) {
+            webRelayController.close();
+            webRelayController = null;
+        }
         if (emlAutoAdjudicationHelper != null) {
             emlAutoAdjudicationHelper.stop();
             emlAutoAdjudicationHelper = null;
@@ -584,6 +640,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                     if (event.getNewState() == ModuleEvent.ModuleState.STARTED) {
                         if (occupancyWrapper != null)
                             occupancyWrapper.start();
+                        refreshWebRelayRuntime();
                     } else if (event.getNewState() == ModuleEvent.ModuleState.STOPPING) {
                         if (occupancyWrapper != null)
                             occupancyWrapper.stop();
@@ -639,6 +696,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                     if (occupancyWrapper != null) {
                         occupancyWrapper.setExtendedOccupancyThresholdMinutes(thresholdMinutes);
                     }
+                    refreshWebRelayRuntime();
                     updateSensorDescription();
                     if (isStarted() && !syncingEndpoints.get() && threadPool != null && !threadPool.isShutdown()) {
                         threadPool.execute(() -> {

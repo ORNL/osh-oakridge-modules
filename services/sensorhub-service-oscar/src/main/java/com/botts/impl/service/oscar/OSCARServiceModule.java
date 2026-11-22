@@ -26,6 +26,7 @@ import com.botts.impl.service.oscar.extensions.RuntimeExtensionsManager;
 import com.botts.impl.service.oscar.extensions.RuntimeExtensionsServlet;
 import com.botts.impl.service.oscar.sandbox.TrainingSandboxManager;
 import com.botts.impl.service.oscar.sandbox.TrainingSandboxServlet;
+import com.botts.impl.service.oscar.webrelay.LaneWebRelayServlet;
 import com.botts.impl.service.oscar.purge.DatabasePurger;
 import com.botts.impl.service.oscar.retention.StoragePressureRetention;
 import com.botts.impl.service.oscar.reports.RequestReportControl;
@@ -90,6 +91,7 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     RuntimeExtensionsServlet runtimeExtensionsServlet;
     TrainingSandboxManager trainingSandboxManager;
     TrainingSandboxServlet trainingSandboxServlet;
+    LaneWebRelayServlet laneWebRelayServlet;
     HttpServer extensionsHttpServer;
     VideoRetention videoRetention;
     DatabasePurger databasePurger;
@@ -827,6 +829,9 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                     server.deployServlet(trainingSandboxServlet, TrainingSandboxServlet.ENDPOINT_WILDCARD);
                     server.addServletSecurity(TrainingSandboxServlet.ENDPOINT_WILDCARD, true);
                 }
+                laneWebRelayServlet = new LaneWebRelayServlet(getParentHub(), getLogger());
+                server.deployServlet(laneWebRelayServlet, LaneWebRelayServlet.ENDPOINT_WILDCARD);
+                server.addServletSecurity(LaneWebRelayServlet.ENDPOINT_WILDCARD, true);
                 extensionsHttpServer = server;
             }
         } catch (Exception e) {
@@ -838,9 +843,11 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         HttpServer server = extensionsHttpServer;
         RuntimeExtensionsServlet servlet = runtimeExtensionsServlet;
         TrainingSandboxServlet sbServlet = trainingSandboxServlet;
+        LaneWebRelayServlet wrServlet = laneWebRelayServlet;
         extensionsHttpServer = null;
         runtimeExtensionsServlet = null;
         trainingSandboxServlet = null;
+        laneWebRelayServlet = null;
         if (server != null && server.isStarted()) {
             if (servlet != null) {
                 server.undeployServlet(servlet);
@@ -849,6 +856,10 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
             if (sbServlet != null) {
                 server.undeployServlet(sbServlet);
                 sbServlet.destroy();
+            }
+            if (wrServlet != null) {
+                server.undeployServlet(wrServlet);
+                wrServlet.destroy();
             }
         }
     }
