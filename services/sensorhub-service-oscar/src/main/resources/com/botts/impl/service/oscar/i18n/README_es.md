@@ -128,7 +128,7 @@ Abra `https://<host-oscar>/sensorhub/admin` e introduzca las credenciales creada
 
 ### 3.1 Idioma
 
-Use el selector de idioma (o **Configuración**, identificada por el **icono de engranaje**) de la parte superior de la administración o de OSCAR Viewer. Se admiten inglés, español, francés y griego. La preferencia se comparte entre ambas interfaces y se aplica al cargar o recargar la otra interfaz. Esta pestaña README abre automáticamente el manual localizado, y las 29 videoguías sin conexión `1080p` a `30 fps` incluyen pistas nativas de subtítulos en inglés (`en`), español (`es`), francés (`fr`) y griego (`el`) que cambian automáticamente según el idioma seleccionado por el operador.
+Use el selector de idioma (o **Configuración**, identificada por el **icono de engranaje**) de la parte superior de la administración o de OSCAR Viewer. Se admiten inglés, español, francés y griego. La preferencia se comparte entre ambas interfaces y se aplica al cargar o recargar la otra interfaz. Esta pestaña README abre automáticamente el manual localizado, y las 31 videoguías sin conexión `1080p` a `30 fps` incluyen pistas nativas de subtítulos en inglés (`en`), español (`es`), francés (`fr`) y griego (`el`) que cambian automáticamente según el idioma seleccionado por el operador.
 
 ### 3.2 Tres acciones distintas
 
@@ -1226,7 +1226,7 @@ En instalaciones con escáneres NII de rayos X (`UFF 2.0` o `UFF 3.0.0`), un adm
 
 ### Recorrido guiado de repaso (`:443`) y entorno práctico efímero de formación (`:8444`)
 
-Cualquier usuario autenticado puede pulsar **Recorrido guiado** (**icono de birrete** en la barra superior, o dentro de **Ayuda (`?`)**, **icono de signo de interrogación en círculo (`?`)**) en cualquier momento en la consola operativa (`:443`) para abrir el **Modo de repaso de solo lectura** — consultando los **13 laboratorios por rol**, las **29 videoguías sin conexión `1080p` a `30 fps`** (con subtítulos nativos en inglés `en`, español `es`, francés `fr` y griego `el` que cambian automáticamente según el idioma activo), capturas comentadas y botones **Resaltar icono** de 1 clic para señalar **Estado de salud** (icono de monitor de pulso cardíaco) o cualquier otra página o control sin inyectar alarmas simuladas ni modificar registros reales.
+Cualquier usuario autenticado puede pulsar **Recorrido guiado** (**icono de birrete** en la barra superior, o dentro de **Ayuda (`?`)**, **icono de signo de interrogación en círculo (`?`)**) en cualquier momento en la consola operativa (`:443`) para abrir el **Modo de repaso de solo lectura** — consultando los **13 laboratorios por rol**, las **31 videoguías sin conexión `1080p` a `30 fps`** (con subtítulos nativos en inglés `en`, español `es`, francés `fr` y griego `el` que cambian automáticamente según el idioma activo), capturas comentadas y botones **Resaltar icono** de 1 clic para señalar **Estado de salud** (icono de monitor de pulso cardíaco) o cualquier otra página o control sin inyectar alarmas simuladas ni modificar registros reales.
 
 Para practicar la inyección de alarmas, subida de muestras o edición de carriles sin tocar sensores reales, inicie el **Entorno práctico de formación (`oscar-sandbox`)** aislado en el puerto HTTPS `8444` (en 1 clic desde **Recorrido guiado** / **Ayuda (`?`)** cuando `sudo bash oscar.sh sandbox enable-ui-bridge` está activo en Ubuntu, o por CLI; el inicio idempotente `start` está abierto a cualquier usuario autenticado, mientras que `stop`/`reset` anticipado requiere **Administrador**):
 
@@ -1247,6 +1247,38 @@ El entorno reutiliza las imágenes OSCAR instaladas con volúmenes desechables (
     <track kind="captions" src="/video-guides/captions/es/28-hands-on-training-sandbox.vtt" srclang="es" label="Español" default>
     <track kind="captions" src="/video-guides/captions/fr/28-hands-on-training-sandbox.vtt" srclang="fr" label="Français">
     <track kind="captions" src="/video-guides/captions/el/28-hands-on-training-sandbox.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+### 13.3 Actualización del sistema sin login de GitHub y creador USB de autoinstalación
+
+Los administradores pueden actualizar OSCAR directamente desde **OSCAR Viewer -> Usuarios y acceso (`/users?tab=update`) -> Actualización del sistema** (o mediante `sudo bash oscar.sh update check|apply` en Ubuntu 24.04 y `.\oscar.bat update check|apply` en Windows 11) **sin cuenta ni token de GitHub**. OSCAR consulta de forma anónima las versiones oficiales de `ORNL/oscar`, verifica el resumen SHA-256 antes de extraer en un directorio limpio paralelo, conserva `.env`, `secrets/`, `tls/` y los volúmenes Docker, y revierte automáticamente si falla `/healthz`. En portales aislados sin internet, se puede cargar `oscar-<version>.zip` directamente en el mismo panel.
+
+![Actualización del sistema desde GitHub sin login y sin conexión](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/54-zero-login-github-system-update.png)
+
+<details class="oscar-video-guide">
+  <summary>Videoguía (#30): Actualizar OSCAR desde la GUI sin cuenta de GitHub (GitHub y .zip sin conexión)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/30-zero-login-github-system-update.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/30-zero-login-github-system-update.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/30-zero-login-github-system-update.vtt" srclang="es" label="Español" default>
+    <track kind="captions" src="/video-guides/captions/fr/30-zero-login-github-system-update.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/30-zero-login-github-system-update.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+Para nuevos servidores físicos Ubuntu Server 24.04 LTS, descargue el paquete independiente **`oscar-3.11.9-autoinstall-usb-creator.zip`** (`~49 KiB`) junto con `ubuntu-24.04.x-live-server-amd64.iso` y `oscar-3.11.9-ubuntu-x86_64-offline-full.zip` sin descomprimir antes el paquete sin conexión. Ejecute la **GUI de escritorio** (`create-autoinstall-usb.bat` en Windows 11 o `sudo bash create-autoinstall-usb.sh --gui` en Ubuntu), la **TUI interactiva** (`-Tui` / `--tui`) o la **CLI** para crear un USB UEFI Secure-Boot con hash SHA-512 (`$6$`), cifrado LUKS2 opcional, `--require-sudo-password` y `--ssh-keys-only`, protegiendo siempre los discos internos y `OSCAR_BACKUP`.
+
+![Creador USB de autoinstalación Ubuntu 24.04 sin conexión](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/55-bare-metal-autoinstall-usb-creator.png)
+
+<details class="oscar-video-guide">
+  <summary>Videoguía (#31): Crear una unidad USB de autoinstalación Ubuntu 24.04 sin conexión (GUI, TUI y CLI)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/31-bare-metal-autoinstall-usb-creator.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/31-bare-metal-autoinstall-usb-creator.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/31-bare-metal-autoinstall-usb-creator.vtt" srclang="es" label="Español" default>
+    <track kind="captions" src="/video-guides/captions/fr/31-bare-metal-autoinstall-usb-creator.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/31-bare-metal-autoinstall-usb-creator.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 

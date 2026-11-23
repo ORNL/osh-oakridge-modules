@@ -128,7 +128,7 @@ Open `https://<oscar-host>/sensorhub/admin` and enter the administrator credenti
 
 ### 3.1 Language
 
-Use the language selector (or **Settings**, marked by the **gear icon**) at the top of the administration interface or OSCAR Viewer. English, Spanish, French, and Greek are supported. The choice is shared between the two interfaces and takes effect when the destination interface loads or reloads. This README tab automatically opens the matching localized manual, and all 29 bundled offline `1080p` `30 fps` video guides include native English (`en`), Spanish (`es`), French (`fr`), and Greek (`el`) subtitle tracks that switch automatically with the operator's selected language.
+Use the language selector (or **Settings**, marked by the **gear icon**) at the top of the administration interface or OSCAR Viewer. English, Spanish, French, and Greek are supported. The choice is shared between the two interfaces and takes effect when the destination interface loads or reloads. This README tab automatically opens the matching localized manual, and all 31 bundled offline `1080p` `30 fps` video guides include native English (`en`), Spanish (`es`), French (`fr`), and Greek (`el`) subtitle tracks that switch automatically with the operator's selected language.
 
 ### 3.2 Three actions that are easy to confuse
 
@@ -1253,7 +1253,7 @@ For commercial portals operating alongside X-ray NII scanners (`UFF 2.0` or `UFF
 
 ### Guided walkthrough refresher (`:443`) and ephemeral hands-on training sandbox (`:8444`)
 
-Any signed-in user can click **Guided Walkthrough** (marked by the **graduation-cap icon** in the top bar, or inside **Help (`?`)**, marked by the **circled question-mark (`?`) icon**) at any time on the live operational console (`:443`) to open the side-by-side **Read-Only Refresher Mode** — browsing all **13 role-based labs** (**Operator**, **Supervisor & Analyst**, and **System Administrator**), watching all **29 bundled offline `1080p` `30 fps` video guides** (with native English `en`, Spanish `es`, French `fr`, and Greek `el` subtitle tracks that switch automatically with the selected UI language), reviewing annotated screenshots, and using 1-click **Highlight Icon** buttons to spotlight **Status of Health** (heart-pulse monitor icon) or any other console page/tool on screen without injecting fake alarms or altering operational records.
+Any signed-in user can click **Guided Walkthrough** (marked by the **graduation-cap icon** in the top bar, or inside **Help (`?`)**, marked by the **circled question-mark (`?`) icon**) at any time on the live operational console (`:443`) to open the side-by-side **Read-Only Refresher Mode** — browsing all **13 role-based labs** (**Operator**, **Supervisor & Analyst**, and **System Administrator**), watching all **31 bundled offline `1080p` `30 fps` video guides** (with native English `en`, Spanish `es`, French `fr`, and Greek `el` subtitle tracks that switch automatically with the selected UI language), reviewing annotated screenshots, and using 1-click **Highlight Icon** buttons to spotlight **Status of Health** (heart-pulse monitor icon) or any other console page/tool on screen without injecting fake alarms or altering operational records.
 
 To practice injecting simulated alarms, uploading sample files, or editing lanes safely before modifying live sensors, launch the isolated **Hands-On Training Sandbox (`oscar-sandbox`)** on HTTPS port `8444` (in 1 click from **Guided Walkthrough** / **Help (`?`)** when `sudo bash oscar.sh sandbox enable-ui-bridge` is enabled on Ubuntu, or via CLI; idempotent `start` is open to all signed-in users while early `stop`/`reset` requires **Administrator**):
 
@@ -1274,6 +1274,38 @@ The sandbox reuses the installed OSCAR images with disposable volumes (`oscar_sa
     <track kind="captions" src="/video-guides/captions/es/28-hands-on-training-sandbox.vtt" srclang="es" label="Español">
     <track kind="captions" src="/video-guides/captions/fr/28-hands-on-training-sandbox.vtt" srclang="fr" label="Français">
     <track kind="captions" src="/video-guides/captions/el/28-hands-on-training-sandbox.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+### 13.3 Zero-login GitHub & air-gapped system update and bare-metal Autoinstall USB Creator
+
+Administrators can update OSCAR directly from **OSCAR Viewer -> Users & Access (`/users?tab=update`) -> System Update** (or via `sudo bash oscar.sh update check|apply` on Ubuntu 24.04 and `.\oscar.bat update check|apply` on Windows 11) **without any GitHub login, OAuth account, or Personal Access Token**. OSCAR resolves official `ORNL/oscar` releases anonymously, verifies the expected SHA-256 digest before unpacking into a clean sibling directory, preserves `.env`, `secrets/`, `tls/`, and Docker volumes, and automatically rolls back if container startup or HTTPS `/healthz` checks fail. On air-gapped portals without internet access, administrators can upload `oscar-<version>.zip` directly in the same panel.
+
+![Zero-Login GitHub & Offline System Update](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/54-zero-login-github-system-update.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#30): Update OSCAR From the GUI Without a GitHub Login (GitHub &amp; Offline .zip)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/30-zero-login-github-system-update.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/30-zero-login-github-system-update.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/30-zero-login-github-system-update.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/30-zero-login-github-system-update.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/30-zero-login-github-system-update.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+For new bare-metal Ubuntu Server 24.04 LTS appliances, download the compact standalone **`oscar-3.11.9-autoinstall-usb-creator.zip`** (`~49 KiB`) alongside `ubuntu-24.04.x-live-server-amd64.iso` and `oscar-3.11.9-ubuntu-x86_64-offline-full.zip` without unpacking the offline bundle first. Launch the **Desktop GUI** (`create-autoinstall-usb.bat` on Windows 11 or `sudo bash create-autoinstall-usb.sh --gui` on Ubuntu), **Interactive Terminal TUI** (`-Tui` / `--tui`), or **Scriptable CLI** to build a UEFI Secure-Boot installer USB with native `$6$` SHA-512 password hashing, optional 12+ character LUKS2 full-disk encryption, `--require-sudo-password`, and `--ssh-keys-only` while keeping internal OS and `OSCAR_BACKUP` disks strictly protected.
+
+![Bare-Metal Ubuntu 24.04 Offline Autoinstall USB Creator](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/55-bare-metal-autoinstall-usb-creator.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#31): Build an Air-Gapped Ubuntu 24.04 Autoinstall USB Drive (GUI, TUI &amp; CLI)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/31-bare-metal-autoinstall-usb-creator.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/31-bare-metal-autoinstall-usb-creator.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/31-bare-metal-autoinstall-usb-creator.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/31-bare-metal-autoinstall-usb-creator.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/31-bare-metal-autoinstall-usb-creator.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
