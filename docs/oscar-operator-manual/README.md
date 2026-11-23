@@ -7,7 +7,7 @@ The localized OSCAR 3.11.9 administrator and operator manuals are loaded directl
 - [Français](../../services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_fr.md)
 - [Ελληνικά](../../services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_el.md)
 
-The `images` directory contains the shared, ordered training screenshots. Keep image names stable because all localized manuals reference their upstream raw GitHub URLs so the pictures also render inside the administration README panel. Companion bite-sized `1080p` `30 fps` workflow screen recordings are maintained in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides); all 29 bundled offline video guides ship with native English (`en`), Spanish (`es`), French (`fr`), and Greek (`el`) subtitle tracks that switch automatically with the operator's selected UI language.
+The `images` directory contains the shared, ordered training screenshots. Keep image names stable because all localized manuals reference their upstream raw GitHub URLs so the pictures also render inside the administration README panel. Companion bite-sized `1080p` `30 fps` workflow screen recordings are maintained in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides); all 31 bundled offline video guides ship with native English (`en`), Spanish (`es`), French (`fr`), and Greek (`el`) subtitle tracks that switch automatically with the operator's selected UI language.
 
 ## Console navigation and toolbar icon symbols
 
