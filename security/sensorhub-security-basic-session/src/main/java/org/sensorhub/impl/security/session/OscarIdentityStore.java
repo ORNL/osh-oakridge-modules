@@ -729,8 +729,8 @@ public final class OscarIdentityStore {
     }
 
     public static void validateNewPassword(String password) {
-        if (password == null || password.length() < 12)
-            throw new IllegalArgumentException("Password must be at least 12 characters long");
+        if (password == null || password.length() < 14)
+            throw new IllegalArgumentException("Password must be at least 14 characters long");
         if (password.length() > 512)
             throw new IllegalArgumentException("Password must not exceed 512 characters");
     }
