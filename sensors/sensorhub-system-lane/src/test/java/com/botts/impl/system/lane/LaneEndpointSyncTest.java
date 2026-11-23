@@ -2,16 +2,20 @@ package com.botts.impl.system.lane;
 
 import com.botts.impl.sensor.aspect.AspectConfig;
 import com.botts.impl.sensor.rapiscan.RapiscanConfig;
+import com.botts.impl.sensor.kromek.d5.D5Config;
+import com.botts.impl.sensor.kromek.d5.D5Sensor;
 import com.botts.impl.sensor.rs350.RS350Config;
 import com.botts.impl.system.lane.config.AspectRPMConfig;
 import com.botts.impl.system.lane.config.AxisCameraConfig;
 import com.botts.impl.system.lane.config.ConnectionConfig;
 import com.botts.impl.system.lane.config.CustomCameraConfig;
+import com.botts.impl.system.lane.config.D5RPMConfig;
 import com.botts.impl.system.lane.config.LaneConfig;
 import com.botts.impl.system.lane.config.LaneOptionsConfig;
 import com.botts.impl.system.lane.config.RS350RPMConfig;
 import com.botts.impl.system.lane.config.RapiscanRPMConfig;
 import org.junit.Test;
+import org.sensorhub.impl.comm.TCPCommProviderConfig;
 import org.sensorhub.impl.module.ModuleConfigJsonFile;
 import org.sensorhub.impl.sensor.SensorSystemConfig;
 import org.sensorhub.impl.sensor.ffmpeg.config.FFMPEGConfig;
@@ -200,5 +204,42 @@ public class LaneEndpointSyncTest {
         assertEquals(LaneEndpointSync.SyncAction.UPDATE_CHILD, rs350Sync.action());
         assertEquals("10.3.3.30", rs350Child.commSettings.protocol.remoteHost);
         assertTrue(Modifier.isPublic(LaneEndpointSync.class.getModifiers()));
+    }
+
+    @Test
+    public void reconcilesD5MobileDetectorEndpointBothWays() {
+        LaneConfig lane = new LaneConfig();
+        lane.uniqueID = "patrol-2";
+        lane.name = "Patrol 2";
+
+        D5RPMConfig d5 = new D5RPMConfig();
+        d5.remoteHost = "10.4.4.10";
+        d5.remotePort = 10111;
+
+        var init = LaneEndpointSync.reconcileRpm(lane, d5, null);
+        assertEquals(LaneEndpointSync.SyncAction.REGISTER_NEW_CHILD, init.action());
+        D5Config child = (D5Config) init.childConfig();
+        assertEquals(D5Sensor.class.getCanonicalName(), child.moduleClass);
+        assertEquals("patrol-2", child.serialNumber);
+        assertEquals("Patrol 2 - RPM", child.name);
+        TCPCommProviderConfig comm = (TCPCommProviderConfig) child.commSettings;
+        assertEquals("10.4.4.10", comm.protocol.remoteHost);
+        assertEquals(10111, comm.protocol.remotePort);
+        assertEquals(10, comm.connection.reconnectAttempts);
+
+        var unchanged = LaneEndpointSync.reconcileRpm(lane, d5, child);
+        assertEquals("matching endpoints are not a type change", LaneEndpointSync.SyncAction.NO_OP, unchanged.action());
+
+        d5.remoteHost = "10.4.4.20:10112";
+        var parentEdit = LaneEndpointSync.reconcileRpm(lane, d5, child);
+        assertEquals(LaneEndpointSync.SyncAction.UPDATE_CHILD, parentEdit.action());
+        assertEquals("10.4.4.20", comm.protocol.remoteHost);
+        assertEquals(10112, comm.protocol.remotePort);
+
+        comm.protocol.remoteHost = "10.4.4.30";
+        var childEdit = LaneEndpointSync.reconcileRpm(lane, d5, child);
+        assertEquals(LaneEndpointSync.SyncAction.UPDATE_PARENT, childEdit.action());
+        assertTrue(childEdit.simpleConfig() instanceof D5RPMConfig);
+        assertEquals("10.4.4.30", childEdit.simpleConfig().remoteHost);
     }
 }
