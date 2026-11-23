@@ -352,9 +352,28 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
             return Authentication.SEND_CONTINUE;
         } catch (IOException e) {
-            log.error("Cannot complete authentication response", e);
+            if (isClientDisconnect(e)) {
+                log.debug("Client closed connection before authentication response completed: {}", e.getMessage());
+            } else {
+                log.error("Cannot complete authentication response", e);
+            }
             return Authentication.SEND_FAILURE;
         }
+    }
+
+    private static boolean isClientDisconnect(Throwable err) {
+        for (Throwable cur = err; cur != null; cur = cur.getCause()) {
+            String cls = cur.getClass().getName();
+            String msg = cur.getMessage();
+            if (cls.endsWith("EofException")
+                    || cur instanceof java.nio.channels.ClosedChannelException
+                    || (msg != null && ("Closed".equalsIgnoreCase(msg.trim())
+                            || msg.contains("Broken pipe")
+                            || msg.contains("Connection reset")))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private PersistedSession resolveActiveSession(HttpServletRequest request, HttpServletResponse response) {
