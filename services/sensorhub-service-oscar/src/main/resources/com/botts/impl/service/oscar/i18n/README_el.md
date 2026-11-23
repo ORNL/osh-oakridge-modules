@@ -1,4 +1,4 @@
-# Εγχειρίδιο διαχείρισης και λειτουργίας OSCAR 3.11.6
+# Εγχειρίδιο διαχείρισης και λειτουργίας OSCAR 3.11.7
 
 Το εγχειρίδιο καλύπτει αρχική χρήση και πλήρη λειτουργία: πιστοποιητικό, σύνδεση, γεωαναφερμένο διάγραμμα, εισαγωγή/δημιουργία λωρίδων, κρίση και αποδεικτικά στοιχεία, συμβάντα, εθνικά στατιστικά, αναφορές και ομοσπονδία κόμβων.
 
@@ -32,7 +32,7 @@
 
 Χρειάζεστε:
 
-- εγκατεστημένη και ενεργή έκδοση OSCAR 3.11.6,
+- εγκατεστημένη και ενεργή έκδοση OSCAR 3.11.7,
 - τη διεύθυνση OSCAR, συνήθως `https://oscar.local/`, εκτός αν επιλέχθηκε άλλο όνομα,
 - λογαριασμό διαχειριστή για το `/sensorhub/admin`,
 - την εγκεκριμένη εικόνα της εγκατάστασης και τις συντεταγμένες της κάτω αριστερής και άνω δεξιάς γωνίας,
@@ -63,7 +63,7 @@
 | **Ημερήσιο αρχείο & κωδικοί (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | Το ημερήσιο αρχείο CSV ανά λωρίδα με ακατέργαστα μηνύματα RPM: `GB`/`NB` = υπόβαθρο γάμμα/νετρονίων, `GS` = έναρξη διέλευσης, `GC`/`NC` = προφίλ μετρήσεων, `GA`/`NA`/`NS` = συναγερμός γάμμα/νετρονίων, `GX` = λήξη διέλευσης, `TT`/`TC` = βλάβη/αποκατάσταση παραβίασης, και `SG1`–`SG3`/`SN1`–`SN2` = ημερήσιες παράμετροι διαμόρφωσης γάμμα/νετρονίων (που ενημερώνουν αυτόματα τις παραμέτρους του οδηγού Rapiscan στη μνήμη και συγχωνεύουν τις αλλαγές στο `config.json`). |
 | **UUID συμβάντος (`Event UUID`)** | Παγκοσμίως μοναδικό αναγνωριστικό για κάθε συμβάν διέλευσης ώστε να αναζητείται, να εξάγεται σε QR και να εντοπίζεται σε αναφορές και ομοσπονδιακούς κόμβους. |
 | **Λειτουργική προβολή (`Operational View`)** | Επώνυμο φίλτρο επιλέξιμο από το αναπτυσσόμενο μενού **Λειτουργική προβολή** της επάνω γραμμής (ή μέσω URL `?view=<κλειδί>` / `/view/<κλειδί>`) που περιορίζει τον Πίνακα, τα Συμβάντα, την Κατάσταση υγείας, τον Χάρτη και τις Αναφορές σε συγκεκριμένη ομάδα λωρίδων βάσει των δικαιωμάτων `allowedViews`. |
-| **Ψυχρό επίπεδο Parquet (`PARQUET_PRIMARY`)** | Η προεπιλεγμένη λειτουργία αποθήκευσης του OSCAR 3.11.6 όπου η PostgreSQL διατηρεί παράθυρο 30 λεπτών και τα ολοκληρωμένα τμήματα εξάγονται σε αρχεία Apache Parquet συμπιεσμένα με ZSTD (`archive/parquet/`). |
+| **Ψυχρό επίπεδο Parquet (`PARQUET_PRIMARY`)** | Η προεπιλεγμένη λειτουργία αποθήκευσης του OSCAR 3.11.7 όπου η PostgreSQL διατηρεί παράθυρο 30 λεπτών και τα ολοκληρωμένα τμήματα εξάγονται σε αρχεία Apache Parquet συμπιεσμένα με ZSTD (`archive/parquet/`). |
 | **Διατηρούμενα πολυμέσα 5 καρέ** | Για κάθε διέλευση με συναγερμό, το OSCAR εξάγει 5 στιγμιότυπα JPEG (`frame-01.jpg` έως `frame-05.jpg`). Μετά από 30 ημέρες, τα δευτερεύοντα καρέ (`01`, `02`, `04`, `05`) διαγράφονται και διατηρείται το κεντρικό καρέ (`frame-03.jpg`). |
 | **OCR οχημάτων (`ocrConfig`)** | Προαιρετική ασύγχρονη οπτική αναγνώριση ανά λωρίδα (`Ενεργοποίηση OCR οχημάτων = false` από προεπιλογή) που διαβάζει κωδικούς εμπορευματοκιβωτίων ISO 6346 (με ψηφίο ελέγχου) και πινακίδες ανάλογα με τους διαθέσιμους πόρους CPU/μνήμης (`OcrResourceGovernor`), δημοσιεύοντας προτάσεις `vehicleOcr` (`PARQUET_PRIMARY`), αποκόμματα JPEG ανά ημερομηνία (`/sensorhub/buckets/ocr/crops/<YYYY-MM-DD>/`, ευθυγραμμισμένα με το `frame-03.jpg` και `ocrCropRetentionDays = 365`) και αυτόματη συμπλήρωση του **ID οχήματος** για έγκυρα εμπορευματοκιβώτια ISO ή πινακίδες `>= 85%`. Όταν απενεργοποιηθεί η επιλογή `Μόνο συναγερμοί`, οι καταγραφές χωρίς συναγερμό σαρώνονται προσωρινά και διαγράφονται αμέσως μετά το OCR διατηρώντας το `occupancy.videoPaths` κενό (`[]`). |
 | **SAN (Εναλλακτικό όνομα υποκειμένου)** | Η λίστα ονομάτων κεντρικών υπολογιστών και διευθύνσεων IP (όπως `oscar.local` και `192.0.2.10`) εντός του πιστοποιητικού HTTPS που ελέγχει ο browser πριν εμπιστευτεί τη σύνδεση. |
@@ -127,7 +127,7 @@
 
 ### 3.1 Γλώσσα
 
-Χρησιμοποιήστε τον επιλογέα γλώσσας στην κορυφή της διαχείρισης ή του OSCAR Viewer. Υποστηρίζονται αγγλικά, ισπανικά, γαλλικά και ελληνικά. Η επιλογή είναι κοινή στις δύο διεπαφές και εφαρμόζεται κατά τη φόρτωση ή ανανέωση. Η καρτέλα README ανοίγει αυτόματα το αντίστοιχο εγχειρίδιο.
+Χρησιμοποιήστε τον επιλογέα γλώσσας (ή τις **Ρυθμίσεις**, που επισημαίνονται με το **εικονίδιο γραναζιού**) στην κορυφή της διαχείρισης ή του OSCAR Viewer. Υποστηρίζονται αγγλικά, ισπανικά, γαλλικά και ελληνικά. Η επιλογή είναι κοινή στις δύο διεπαφές και εφαρμόζεται κατά τη φόρτωση ή ανανέωση. Η καρτέλα README ανοίγει αυτόματα το αντίστοιχο εγχειρίδιο, ενώ και οι 29 ενσωματωμένοι βιντεοοδηγοί εκτός σύνδεσης `1080p` στα `30 fps` διαθέτουν εγγενείς υπότιτλους στα αγγλικά (`en`), ισπανικά (`es`), γαλλικά (`fr`) και ελληνικά (`el`) που εναλλάσσονται αυτόματα ανάλογα με την επιλεγμένη γλώσσα.
 
 ### 3.2 Τρεις διαφορετικές ενέργειες
 
@@ -139,14 +139,14 @@
 
 ### 3.3 Χρήστες & πρόσβαση (`/users`), κλειδιά Passkey εκτός σύνδεσης, μόνιμες συνεδρίες & μαζική εγγραφή με QR
 
-Ανοίξτε τη σελίδα **Χρήστες & πρόσβαση** (`/users`) από το μενού του OSCAR Viewer (ή πατήστε το όνομα χρήστη στην επάνω γραμμή) για διαχείριση λογαριασμών χωρίς γραμμή εντολών:
+Ανοίξτε τη σελίδα **Χρήστες & πρόσβαση** (`/users`, που επισημαίνεται με το **εικονίδιο ατόμου και γραναζιού**) από το μενού του OSCAR Viewer (ή πατήστε το όνομα χρήστη στην επάνω γραμμή) για διαχείριση λογαριασμών χωρίς γραμμή εντολών:
 
 ![Χρήστες, Passkeys & έλεγχος πρόσβασης OSCAR](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/36-users-and-passkeys.png)
 
 - **Διατήρηση σύνδεσης έως την Αποσύνδεση:** Από προεπιλογή (`idleTimeoutSeconds = 0`, `absoluteTimeoutSeconds = 0`), η επιλογή **Διατήρηση σύνδεσης έως την αποσύνδεση** στο `/login` αποθηκεύει σύνοψη SHA-256 στο `/var/lib/oscar/.moduledata/oscar-identity.json` ώστε οι σταθμοί πυλών να παραμένουν συνδεδεμένοι μετά από επανεκκίνηση browser, διακομιστή και `oscar upgrade`.
 - **Passkeys εκτός δικτύου, ονόματα τομέα LAN, κωδικοί χωρίς κινητά & ανεξαρτησία από το Octelium (`Ο λογαριασμός μου & Passkeys`):** Κάθε χρήστης μπορεί να καταχωρίσει Windows Hello, Touch ID, Face ID ή YubiKey USB/NFC, ή να αλλάξει τον τοπικό κωδικό PBKDF2 (`>= 12` χαρακτήρες). **Η αλλαγή του κωδικού OSCAR δεν απαιτεί αλλαγή του κωδικού του τούνελ Zero-Trust Octelium** (το `oscar-tunnel` αυθεντικοποιείται με το δικό του διακριτικό υπηρεσίας και τα δύο επίπεδα είναι ανεξάρτητα). Ενώ η σύνδεση με κωδικό λειτουργεί και με διεύθυνση IP, οι περιηγητές απαιτούν δύο εφάπαξ βήματα για Passkeys στο τοπικό δίκτυο: **(1)** άνοιγμα του OSCAR μέσω ονόματος τομέα (`https://oscar.local`, ή ξεχωριστών ονομάτων ανά κόμβο όπως `https://oscar.ubuntu` και `https://oscar.win`, μέσω τοπικού DNS δρομολογητή ή αρχείου `hosts`) και **(2)** εγκατάσταση εμπιστοσύνης του `tls/server.crt` (ή τοπικής αρχής CA με πιστοποιητικά `<= 825` ημερών για macOS/iOS· βλ. `DEPLOYMENT.md`). Τα Passkeys συνδέονται με το όνομα τομέα (`rpId`), επομένως για πρόσβαση και μέσω δημόσιου τούνελ Zero-Trust προσθέστε ένα επιπλέον Passkey σε εκείνη τη διεύθυνση URL.
 - **Ατομική & μαζική εγγραφή (`Μαζική εγγραφή CSV`) με μήνυμα εκκίνησης και κωδικό QR:** Οι διαχειριστές αναθέτουν ρόλους (`Διαχειριστής`, `Χειριστής`, `Θεατής`), περιορίζουν προαιρετικά την πρόσβαση σε συγκεκριμένες **Λειτουργικές προβολές** και μπορούν να μεταφορτώσουν ή να επικολλήσουν λίστα CSV/Excel (`username, role, display_name, views`). Το OSCAR δημιουργεί τους λογαριασμούς και παράγει έτοιμο μήνυμα εκκίνησης, εκτυπώσιμες κάρτες, μοναδικό κωδικό QR (`/login/enroll?token=oscar_inv_...`) για άμεση ρύθμιση Passkey ή κωδικού, καθώς και προσωρινό κωδικό για σταθμούς χωρίς κινητό.
-- **Διακριτικά υπηρεσίας ομοσπονδίας και πού χρησιμοποιούνται (`Διακριτικά ομοσπονδίας` -> `Διακομιστές`):** Στην καρτέλα **Χρήστες & πρόσβαση -> Διακριτικά ομοσπονδίας**, εκδώστε ένα ανακλητό διακριτικό `oscar_fed_...` στον επιτηρούμενο κόμβο και πατήστε **Άνοιγμα σελίδας διακομιστών (Λειτουργία διακριτικού ομοσπονδίας)** (`/servers?auth=bearer`) στον κεντρικό σταθμό παρακολούθησης για να επικολλήσετε το διακριτικό στη **Μέθοδο ταυτοποίησης: Διακριτικό υπηρεσίας ομοσπονδίας** (`HTTPS`, θύρα `443`).
+- **Διακριτικά υπηρεσίας ομοσπονδίας και πού χρησιμοποιούνται (`Διακριτικά ομοσπονδίας` -> `Διακομιστές`):** Στην καρτέλα **Χρήστες & πρόσβαση -> Διακριτικά ομοσπονδίας**, εκδώστε ένα ανακλητό διακριτικό `oscar_fed_...` στον επιτηρούμενο κόμβο και πατήστε **Άνοιγμα σελίδας διακομιστών (Λειτουργία διακριτικού ομοσπονδίας)** (`/servers?auth=bearer`, σελίδα με το **εικονίδιο σύννεφου**) στον κεντρικό σταθμό παρακολούθησης για να επικολλήσετε το διακριτικό στη **Μέθοδο ταυτοποίησης: Διακριτικό υπηρεσίας ομοσπονδίας** (`HTTPS`, θύρα `443`).
 - **Αυτοφιλοξενούμενος κόμβος ομοσπονδίας & κεντρικό SSO (`Πολιτική σύνδεσης & SSO` + `ORNL/oscar-federation-hub`):** Για απομακρυσμένη πρόσβαση HTTPS χωρίς εισερχόμενες θύρες firewall και ενιαία διαχείριση χρηστών σε πολλαπλούς σταθμούς, εγκαταστήστε το [`ORNL/oscar-federation-hub`](https://github.com/ORNL/oscar-federation-hub) (`./oscar-hub.sh init --domain hub.example.org --with-authentik` και `./oscar-hub.sh add-site <slug> --with-trusted-headers`), συνδέστε κάθε κόμβο OSCAR μέσω `oscar-remote-access.sh` / `oscar-remote-access.ps1 configure` και καταχωρίστε τις ρυθμίσεις OIDC / έμπιστης σήραγγας (`X-Octelium-User` + `X-Octelium-Groups`, προαιρετικό πιστοποιητικό CA PEM και **URL εξωτερικής κονσόλας SSO** για άνοιγμα με 1 κλικ από το `/users`), διατηρώντας ενεργά τα τοπικά Passkeys και τους κωδικούς στο LAN.
 
 ![Μαζική εγγραφή χρηστών & προσκλήσεις QR](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/37-bulk-enroll-qr-invites.png)
@@ -159,7 +159,10 @@
   <summary>Βιντεοοδηγός (#19, 24.4s): Διαχείριση χρηστών, μαζικών προσκλήσεων QR, Passkeys εκτός σύνδεσης &amp; διακριτικών ομοσπονδίας</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/19-viewer-users-passkeys-and-access.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/19-viewer-users-passkeys-and-access.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/19-viewer-users-passkeys-and-access.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/19-viewer-users-passkeys-and-access.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/19-viewer-users-passkeys-and-access.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/19-viewer-users-passkeys-and-access.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -254,10 +257,10 @@ checksum ανά ώρα UTC του συμβάντος. Μια πλήρης ώρα
 tombstone ανά κάμερα. Δημιουργείτε και επαναφέρετε ως μία μονάδα ολόκληρο το
 `videos/retained-media/v1`, μαζί με ευρετήρια, checkpoints, ουρές, manifests και ledgers.
 
-Η συμπαγής μορφή εμφανίζεται πρώτη φορά στην 3.11.6 και δεν μεταφέρει πρωτότυπα `.deleted.json` ή
+Η συμπαγής μορφή εμφανίζεται πρώτη φορά στην 3.11.7 και δεν μεταφέρει πρωτότυπα `.deleted.json` ή
 δέντρα δεικτών ανά παρατήρηση. Τα δοκιμαστικά συστήματα πρέπει να ξεκινήσουν με νέα βάση και νέο
-πρόθεμα πολυμέσων 3.11.6. Για υποβάθμιση επαναφέρετε και τα δύο από το ίδιο συντονισμένο αντίγραφο
-πριν την 3.11.6· μην εκτελείτε παλαιότερο binary σε αυτόν τον χώρο αποθήκευσης.
+πρόθεμα πολυμέσων 3.11.7. Για υποβάθμιση επαναφέρετε και τα δύο από το ίδιο συντονισμένο αντίγραφο
+πριν την 3.11.7· μην εκτελείτε παλαιότερο binary σε αυτόν τον χώρο αποθήκευσης.
 
 ### Προσαρμοσμένοι κωδικοί διάθεσης
 
@@ -273,7 +276,10 @@ tombstone ανά κάμερα. Δημιουργείτε και επαναφέρ�
   <summary>Βιντεοοδηγός (#04, 12.3s): Ρύθμιση διατήρησης Υπηρεσίας OSCAR &amp; προσαρμοσμένων κωδικών διάθεσης</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/04-admin-oscar-service-and-custom-codes.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/04-admin-oscar-service-and-custom-codes.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/04-admin-oscar-service-and-custom-codes.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/04-admin-oscar-service-and-custom-codes.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/04-admin-oscar-service-and-custom-codes.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/04-admin-oscar-service-and-custom-codes.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -281,7 +287,10 @@ tombstone ανά κάμερα. Δημιουργείτε και επαναφέρ�
   <summary>Βιντεοοδηγός (#07, 11.8s): Μεταφόρτωση εξωτερικού προσθέτου EML VM-250 &amp; ενεργοποίηση EML ανά λωρίδα</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/07-admin-eml-plugin-setup.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/07-admin-eml-plugin-setup.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/07-admin-eml-plugin-setup.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/07-admin-eml-plugin-setup.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/07-admin-eml-plugin-setup.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/07-admin-eml-plugin-setup.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -351,7 +360,10 @@ tombstone ανά κάμερα. Δημιουργείτε και επαναφέρ�
   <summary>Βιντεοοδηγός (#06, 14.9s): Ρύθμιση συστήματος λωρίδας &amp; γεωαναφερθέντος διαγράμματος εγκατάστασης</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/06-admin-manual-lane-and-site-diagram.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/06-admin-manual-lane-and-site-diagram.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/06-admin-manual-lane-and-site-diagram.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/06-admin-manual-lane-and-site-diagram.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/06-admin-manual-lane-and-site-diagram.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/06-admin-manual-lane-and-site-diagram.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -382,7 +394,10 @@ tombstone ανά κάμερα. Δημιουργείτε και επαναφέρ�
   <summary>Βιντεοοδηγός (#05, 10.6s): Συγχρονισμός υπολογιστικού φύλλου πολλαπλών λωρίδων (config.csv)</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/05-admin-lane-spreadsheet-sync.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/05-admin-lane-spreadsheet-sync.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/05-admin-lane-spreadsheet-sync.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/05-admin-lane-spreadsheet-sync.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/05-admin-lane-spreadsheet-sync.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/05-admin-lane-spreadsheet-sync.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -452,6 +467,15 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 Αντικαταστήστε όλες τις διευθύνσεις και τα διαπιστευτήρια. Αποτρέψτε το λογιστικό φύλλο από αυτόματη αναδιαμόρφωση ID, boolean ή συντεταγμένων.
 
+### 6.6 Προαιρετικός διαμεσολαβητής άκρου Rapiscan RPM παράλληλα με CAS (`oscar-rpm-proxy`)
+
+Οι πύλες που λειτουργούν το OSCAR παράλληλα με υπάρχοντα Κεντρικό Σταθμό Συναγερμών (CAS) μπορούν να διανέμουν σε πραγματικό χρόνο από `1` έως `50` ροές TCP Rapiscan RPM (`< 1 ms` καθυστέρηση προώθησης) μέσα σε απομονωμένο κοντέινερ `oscar-rpm-proxy` (`sudo bash oscar.sh rpm-proxy` σε Ubuntu Server 24.04 ή `.\oscar.bat rpm-proxy` σε Windows 11 + WSL 2) ώστε οι επανεκκινήσεις ή αναβαθμίσεις του OSCAR να μη διακόπτουν ποτέ τον υπάρχοντα CAS. Ο διαμεσολαβητής υποστηρίζει τόσο **λειτουργία αντιστοιχισμένων θυρών** (`11601..11650`) όσο και **διαφανή λειτουργία εικονικών IP `:1600` σε Ubuntu 24.04**, αυτόματη αναπαραγωγή ρυθμίσεων `SG1..SG3` / `SN1..SN2`, ευθυγράμμιση μηνυμάτων ανά γραμμή και ανίχνευση αποσύνδεσης σε `<= 4 s`:
+
+- **Ubuntu Server 24.04:** `sudo bash oscar.sh rpm-proxy configure --from-csv config.csv --emit-oscar-csv oscar-proxied-lanes.csv && sudo bash oscar.sh rpm-proxy start`
+- **Windows 11 + WSL 2:** `.\oscar.bat rpm-proxy configure --from-csv config.csv --emit-oscar-csv oscar-proxied-lanes.csv` και έπειτα `.\oscar.bat rpm-proxy start`
+
+Μεταφορτώστε το παραγόμενο αρχείο `oscar-proxied-lanes.csv` στο OSCAR (**Μεταφόρτωση φύλλου λωρίδων (CSV)** -> **Εφαρμογή αλλαγών** -> καθολική **Αποθήκευση**) ώστε το OSCAR να συνδέεται στις τοπικές θύρες του `oscar-rpm-proxy` χωρίς καμία διακοπή του υπάρχοντος CAS.
+
 ## 7. Μη αυτόματη δημιουργία Συστήματος λωρίδας
 
 Η χειροκίνητη δημιουργία είναι χρήσιμη για μία λωρίδα, ασυνήθιστο υλικό ή διάγνωση. Σε μεγάλη εγκατάσταση, εισαγάγετε CSV και ελέγξτε κάθε λωρίδα.
@@ -505,7 +529,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 | Κλειδιά λειτουργικής προβολής | Προαιρετική λίστα κλειδιών σταθμού εργασίας που επιτρέπεται να εμφανίζουν τη λωρίδα. Προσθέστε κάθε κλειδί χωριστά· χρησιμοποιήστε 1–63 πεζά γράμματα ASCII (`a`–`z`), αριθμούς ή παύλες, χωρίς αρχική ή τελική παύλα. Αφήστε κενό αν η λωρίδα δεν πρέπει να ανήκει σε οριοθετημένη προβολή. |
 | Όριο παρατεταμένης διέλευσης (λεπτά) | Διάρκεια σε λεπτά (`1`–`1440`, προεπιλογή `1`) πριν μια ενεργή διέλευση δημοσιεύσει `Fault - Extended Occupancy` και αυξήσει τον μετρητή βλαβών `Ext-Occ`. Όταν μια παρατεταμένη διέλευση ολοκληρωθεί με συναγερμό μόνο γάμμα (χωρίς συναγερμό νετρονίων), το OSCAR τον αποκρύπτει από τον ενεργό πίνακα και τον κρίνει αυτόματα ως **Κωδικός 9998: Συναγερμός γάμμα παρατεταμένης διέλευσης**. |
 | OCR οχημάτων | Προαιρετικές ρυθμίσεις ανά λωρίδα (`Ενεργοποίηση OCR οχημάτων`, `Μόνο συναγερμοί`, `Κατάλογος μοντέλων`, `Ανάγνωση αριθμών εμπορευματοκιβωτίων`, `Ανάγνωση πινακίδων κυκλοφορίας`, `UID καμερών`, `Καρέ ανά κλιπ`, `Ελάχιστη βεβαιότητα εμπορευματοκιβωτίου`, `Ελάχιστη βεβαιότητα πινακίδας`, `Παράβλεψη άνω ζώνης`, `Παράβλεψη κάτω ζώνης`, `enabled = false` από προεπιλογή). Όταν ενεργοποιείται σε μια λωρίδα, το OSCAR εκτελεί ασύγχρονη αναγνώριση PP-OCRv3 ONNX ανάλογα με τους διαθέσιμους πόρους, δημοσιεύει προτάσεις `vehicleOcr` (`PARQUET_PRIMARY`) και αποκόμματα ανά ημερομηνία (`ocrCropRetentionDays = 365`, διατηρούμενα μαζί με το `frame-03.jpg`, τις δεσμεύσεις και τις κρίσεις χειριστή), διαγράφει αμέσως τα προσωρινά κλιπ χωρίς συναγερμό όταν `Μόνο συναγερμοί = false` και συμπληρώνει αυτόματα το **ID οχήματος** κατά την κρίση· οι ανενεργές λωρίδες δεν επιβαρύνουν το σύστημα. |
-| Φώτα και ήχος RPM (`webRelayConfig`) | Προαιρετικές ρυθμίσεις ανά λωρίδα για ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`, `enabled = false` από προεπιλογή), με λειτουργίες `AUTO`, `PASS_THROUGH` και `MUTED`, προαιρετική καταστολή `Code 9998`, κύριο host/θύρα/διαπιστευτήρια HTTP, διάρκειες παλμών γάμμα/νετρονίων, προαιρετική βοηθητική μονάδα, κουμπιά ζωντανού ελέγχου για διαχειριστές και διατήρηση `#WEBRELAY` στο `config.csv`. |
+| Φώτα και ήχος RPM (`webRelayConfig`) | Προαιρετικές ρυθμίσεις ανά λωρίδα για ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`, `enabled = false` από προεπιλογή), με λειτουργίες `AUTO`, `PASS_THROUGH` και `MUTED`, προαιρετική καταστολή `Code 9998`, κύριο host/θύρα/διαπιστευτήρια HTTP, διάρκειες παλμών γάμμα/νετρονίων, προαιρετική βοηθητική μονάδα, κουμπιά ζωντανού ελέγχου για διαχειριστές (**Φώτα και ήχος**, με το **εικονίδιο τηλεβόα**) στην `Κατάσταση υγείας` και την `Προβολή λωρίδας`, και διατήρηση `#WEBRELAY` στο `config.csv`. |
 | Διαγραφή δεδομένων κατά την αφαίρεση λωρίδας | Ενεργή από προεπιλογή. Η αφαίρεση διαγράφει τα δεδομένα. Απενεργοποιήστε αν πρέπει να διατηρηθεί ιστορικό. |
 | Πληροφορίες προέλευσης δεδομένων | Προαιρετικά κληρονομημένα μεταδεδομένα, μόνο αν τα απαιτεί το SensorML της εγκατάστασης. |
 
@@ -515,7 +539,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#29): Ρύθμιση &amp; έλεγχος φυσικών φώτων και ήχου RPM ανά λωρίδα (WebRelay-Quad)</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/29-lane-webrelay-lights-and-sound.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/29-lane-webrelay-lights-and-sound.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/29-lane-webrelay-lights-and-sound.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/29-lane-webrelay-lights-and-sound.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/29-lane-webrelay-lights-and-sound.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/29-lane-webrelay-lights-and-sound.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -590,13 +617,36 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#17, 32.4s): Ρύθμιση OCR οχημάτων, σύγκριση πολλαπλών διελεύσεων &amp; αξιολόγηση</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/17-vehicle-ocr-and-adjudication.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/17-vehicle-ocr-and-adjudication.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/17-vehicle-ocr-and-adjudication.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/17-vehicle-ocr-and-adjudication.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/17-vehicle-ocr-and-adjudication.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/17-vehicle-ocr-and-adjudication.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
 ## 8. Λειτουργία του OSCAR Viewer
 
-Ανοίξτε `https://<oscar-host>/`. Ο πίνακας πρέπει να εμφανίζει κατάσταση λωρίδων, πίνακα συμβάντων και χάρτη. Με διαμορφωμένο διάγραμμα, αυτό είναι η ανώτερη εικόνα και η αρχική έκταση ταιριάζει στα όριά του. Οι δείκτες OSCAR παραμένουν διαδραστικοί από πάνω· καρφίτσα που είναι ζωγραφισμένη στην εικόνα είναι μόνο εικονοστοιχεία.
+Ανοίξτε `https://<oscar-host>/`. Ο **Πίνακας ελέγχου** (`/`, με το **εικονίδιο πλέγματος τεσσάρων πλακιδίων**) εμφανίζει την κατάσταση λωρίδων, τον πίνακα συμβάντων και τον **Χάρτη** (`/map` ή ενσωματωμένη κάρτα, με το **εικονίδιο πινέζας χάρτη**). Με διαμορφωμένο διάγραμμα, αυτό είναι η ανώτερη εικόνα και η αρχική έκταση ταιριάζει στα όριά του. Οι δείκτες OSCAR παραμένουν διαδραστικοί από πάνω· καρφίτσα που είναι ζωγραφισμένη στην εικόνα είναι μόνο εικονοστοιχεία.
+
+Κάθε σελίδα και εργαλείο του OSCAR Viewer αντιστοιχεί σε ένα διακριτό οπτικό σύμβολο στην πλοήγηση ή στην επάνω γραμμή (και τόσο η **Καθοδηγούμενη περιήγηση**, με το **εικονίδιο καπέλου αποφοίτησης**, όσο και η **Βοήθεια (`?`)**, με το **εικονίδιο ερωτηματικού σε κύκλο (`?`)**, διαθέτουν κουμπιά 1 κλικ **Επισήμανση εικονιδίου** για την **Κατάσταση υγείας** και για κάθε άλλη σελίδα ή εργαλείο):
+
+| Σελίδα ή έλεγχος | Διαδρομή / θέση | Σύμβολο οπτικού εικονιδίου |
+| --- | --- | --- |
+| **Πίνακας ελέγχου** | `/` | Εικονίδιο πλέγματος τεσσάρων πλακιδίων |
+| **Συμβάντα** | `/event-log` | Εικονίδιο προειδοποιητικού τριγώνου (`!`) |
+| **Κατάσταση υγείας** | `/health` | Εικονίδιο καρδιογράφου παλμών |
+| **Χάρτης** | `/map` | Εικονίδιο πινέζας χάρτη |
+| **Εθνικά** | `/national-view` | Εικονίδιο δικτύου συνδεδεμένων κόμβων |
+| **Δημιουργία αναφορών** | `/report` | Εικονίδιο ραβδογράμματος |
+| **Μεταφορά συναγερμού** | `/alarm-transfer` | Εικονίδιο σαρωτή QR |
+| **Χρήστες & πρόσβαση** | `/users` | Εικονίδιο ατόμου και γραναζιού |
+| **Αντίγραφα USB** | `/usb-backups` | Εικονίδιο τρίαινας USB |
+| **Επεκτάσεις εκτέλεσης** | `/extensions` | Εικονίδιο κομματιού παζλ |
+| **Διακομιστές** | `/servers` | Εικονίδιο σύννεφου |
+| **Καθοδηγούμενη περιήγηση / Εκπαιδευτής** | Επάνω γραμμή & Βοήθεια (`?`) | Εικονίδιο καπέλου αποφοίτησης |
+| **Βοήθεια χειριστή (`?`)** | Επάνω γραμμή | Εικονίδιο ερωτηματικού σε κύκλο (`?`) |
+| **Ρυθμίσεις** | Επάνω γραμμή / πλοήγηση | Εικονίδιο γραναζιού |
+| **Φώτα και ήχος (`WebRelay-Quad`)** | `/health` & `/lane-view` | Εικονίδιο τηλεβόα |
 
 ![Πίνακας OSCAR Viewer](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/18-viewer-dashboard.png)
 
@@ -609,7 +659,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 5. Ο πίνακας συναγερμών περιέχει διελεύσεις με συναγερμό που δεν έχουν ακόμη κριθεί. Δύο κατηγορίες αυτόματης κρίσης αποκρύπτονται από την ενεργή ουρά του πίνακα και τις ειδοποιήσεις browser:
    - **Συναγερμός γάμμα παρατεταμένης διέλευσης (`Κωδικός 9998`)**: Όταν ένα όχημα παραμένει σε λωρίδα τουλάχιστον για το `extendedOccupancyThresholdMinutes` (`1`–`1440` λεπτά, προεπιλογή `1` λεπτό), το OSCAR δημοσιεύει `Fault - Extended Occupancy` στο `occupancyStatus`. Αν η παρατεταμένη διέλευση ολοκληρωθεί με **συναγερμό μόνο γάμμα** (`gammaAlarm = true`, `neutronAlarm = false`), το OSCAR τον αποκρύπτει από την ενεργή ουρά του πίνακα και τον κρίνει αυτόματα ως **Συναγερμός γάμμα παρατεταμένης διέλευσης** (κωδικός `9998`, `username = "AUTO"`). Κάθε παρατεταμένη διέλευση με συναγερμό νετρονίων δεν κρίνεται ποτέ αυτόματα και παραμένει στην ενεργή ουρά.
    - **Μη απειλή EML (`Κωδικός 9999`)**: Σε λωρίδες Rapiscan VM250 με ενεργή **Ανάλυση EML** και φορτωμένο πρόσθετο EML, οι συναγερμοί που ταξινομούνται από το EML ως μη απειλή (`RELEASE`) αποκρύπτονται από τον πίνακα και τις ειδοποιήσεις browser και κρίνονται αυτόματα ως **Μη απειλή EML** (κωδικός `9999`) με αναζητήσιμα μεταδεδομένα EML· οι συναγερμοί `INVESTIGATE` εμφανίζονται κανονικά.
-   Επιλέξτε γραμμή για άνοιγμα/κλείσιμο προεπισκόπησης· η κατάσταση χρωματίζει Gamma, Νετρόνιο ή Gamma και Νετρόνιο. Οι μη αναγνωσμένοι συναγερμοί του Πίνακα ελέγχου εμφανίζονται με έντονη γραφή και κουκκίδα ένδειξης, ενώ η κατάσταση ανάγνωσης συγχρονίζεται ανά λωρίδα μεταξύ σταθμών εργασίας (μόνο στον Πίνακα ελέγχου, χωρίς αλλαγή στα **Συμβάντα**). Οι χειριστές μπορούν να ενεργοποιήσουν το προσωρινό φίλτρο **Μόνο μη αναγνωσμένοι** (από την ειδοποίηση ή τη γραμμή εργαλείων) ή να περιορίσουν το ενεργό χρονικό παράθυρο μέσω των γρήγορων επιλογών (`15λ`, `1ώ`, `24ώ`, `15η` προεπιλογή). Το άνοιγμα προεπισκόπησης/λεπτομερειών, η κρίση ή η χρήση **Επιβεβαίωση επιλεγμένων** / **Επιβεβαίωση όλων** (εντός της ενεργής Λειτουργικής προβολής, του χρονικού παραθύρου και των φίλτρων) τους επισημαίνει ως αναγνωσμένους· στις **Ρυθμίσεις** διατίθενται προαιρετικά η **Ειδοποίηση μη αναγνωσμένων συναγερμών** (με πλήρη καταμέτρηση πέραν της πρώτης σελίδας και όριο `100+` άνω των `150` με μεμονωμένα κλειδιά) και ο **Συνεχής ήχος συναγερμού** (διακόπτεται αμέσως μετά την επιβεβαίωση).
+   Επιλέξτε γραμμή για άνοιγμα/κλείσιμο προεπισκόπησης· η κατάσταση χρωματίζει Gamma, Νετρόνιο ή Gamma και Νετρόνιο. Οι μη αναγνωσμένοι συναγερμοί του Πίνακα ελέγχου εμφανίζονται με έντονη γραφή και κουκκίδα ένδειξης, ενώ η κατάσταση ανάγνωσης συγχρονίζεται ανά λωρίδα μεταξύ σταθμών εργασίας (μόνο στον Πίνακα ελέγχου, χωρίς αλλαγή στα **Συμβάντα**). Οι χειριστές μπορούν να ενεργοποιήσουν το προσωρινό φίλτρο **Μόνο μη αναγνωσμένοι** (από την ειδοποίηση ή τη γραμμή εργαλείων) ή να περιορίσουν το ενεργό χρονικό παράθυρο μέσω των γρήγορων επιλογών (`15λ`, `1ώ`, `24ώ`, `15η` προεπιλογή). Το άνοιγμα προεπισκόπησης/λεπτομερειών, η κρίση ή η χρήση **Επιβεβαίωση επιλεγμένων** / **Επιβεβαίωση όλων** (εντός της ενεργής Λειτουργικής προβολής, του χρονικού παραθύρου και των φίλτρων) τους επισημαίνει ως αναγνωσμένους· στις **Ρυθμίσεις** (με το **εικονίδιο γραναζιού**) διατίθενται προαιρετικά η **Ειδοποίηση μη αναγνωσμένων συναγερμών** (με πλήρη καταμέτρηση πέραν της πρώτης σελίδας και όριο `100+` άνω των `150` με μεμονωμένα κλειδιά) και ο **Συνεχής ήχος συναγερμού** (διακόπτεται αμέσως μετά την επιβεβαίωση).
 6. Ελέγξτε τις καρτέλες CPS/NSIGMA, τη διαδραστική ταινία 5 στιγμιοτύπων JPEG (`FIRST`, `QUARTER`, `MIDDLE`, `THREE_QUARTERS`, `LAST`) και κάθε βίντεο· τα βέλη αλλάζουν πολυμέσο.
 7. Αναπτύξτε ή κάντε διπλό κλικ για **Λεπτομέρειες συμβάντος**.
 
@@ -617,7 +667,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#09, 12.9s): Παρακολούθηση ζωντανού πίνακα 50 λωρίδων &amp; επιθεώρηση συναγερμών</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/09-dashboard-monitoring-and-quick-adjudication.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/09-dashboard-monitoring-and-quick-adjudication.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/09-dashboard-monitoring-and-quick-adjudication.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/09-dashboard-monitoring-and-quick-adjudication.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/09-dashboard-monitoring-and-quick-adjudication.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/09-dashboard-monitoring-and-quick-adjudication.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -639,7 +692,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ![Λίστα συμβάντων](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/27-event-list.png)
 
-Τα **Συμβάντα** είναι το ιστορικό όλων των διαμορφωμένων τοπικών και ομοσπονδιακών κόμβων, όχι μόνο εκκρεμών συναγερμών. Εμφανίζουν λωρίδα/κόμβο, ID διέλευσης, έναρξη/λήξη, μέγιστα gamma/νετρονίων, κατάσταση και ύπαρξη κρίσης. Τα φίλτρα, οι μετρήσεις, οι σελίδες και η μαζική επιλογή εφαρμόζονται σε ολόκληρο το αντίστοιχο σύνολο αποτελεσμάτων του διακομιστή και όχι μόνο στην ορατή σελίδα.
+Τα **Συμβάντα** (`/event-log`, με το **εικονίδιο προειδοποιητικού τριγώνου (`!`)** στην πλοήγηση) είναι το ιστορικό όλων των διαμορφωμένων τοπικών και ομοσπονδιακών κόμβων, όχι μόνο εκκρεμών συναγερμών. Εμφανίζουν λωρίδα/κόμβο, ID διέλευσης, έναρξη/λήξη, μέγιστα gamma/νετρονίων, κατάσταση και ύπαρξη κρίσης. Τα φίλτρα, οι μετρήσεις, οι σελίδες και η μαζική επιλογή εφαρμόζονται σε ολόκληρο το αντίστοιχο σύνολο αποτελεσμάτων του διακομιστή και όχι μόνο στην ορατή σελίδα.
 
 - Χρησιμοποιήστε τη γραμμή `<search>` **ID οχήματος** (`Ισούται με`, `Περιέχει` ή `Ξεκινά με`) για αναζήτηση κανονικοποιημένων κωδικών εμπορευματοκιβωτίων ISO 6346 και πινακίδων σε κρίσεις και αναγνώσεις `vehicleOcr` τοπικών και ομοσπονδιακών κόμβων (αγνοώντας πεζά/κεφαλαία, κενά και παύλες) και επιλέξτε **Σύγκριση διελεύσεων (`N`)** για άνοιγμα της **Σύγκρισης διελεύσεων οχήματος**, συνδεδεμένη κρίση και εξαγωγή `VEHICLE_INCIDENT`.
 - Αναπτύξτε τη **Συνύπαρξη κατηγοριών συναγερμού (UpSet)** για εμφάνιση πρώτα των βασικών κατηγοριών με διελεύσεις (`Unknown`, `SNM`, `NORM`, `Medical`, `Industrial`, `Gamma`, `Neutron`), φιλτράρισμα με κλικ σε οποιαδήποτε κατηγορία ή συνδυασμό, και ομαδοποίηση των σπάνιων τομών `SNM` σε επιλέξιμη πορφυρή στήλη **`Άλλο SNM`** ώστε οι κατακόρυφες μπάρες `SNM` να αθροίζουν πάντα ακριβώς στο σύνολο `SNM` αριστερά.
@@ -658,7 +711,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#12, 27.0s): Φιλτράρισμα ιστορικού συμβάντων ανά κατηγορίες UpSet, όχημα, κωδικό αξιολόγησης &amp; UUID</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/12-event-log-filtering-and-adjudication-codes.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/12-event-log-filtering-and-adjudication-codes.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/12-event-log-filtering-and-adjudication-codes.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/12-event-log-filtering-and-adjudication-codes.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/12-event-log-filtering-and-adjudication-codes.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/12-event-log-filtering-and-adjudication-codes.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -687,7 +743,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#13, 19.4s): Έλεγχος διατηρούμενων 5 καρέ, ημερήσιου αρχείου &amp; υποβολή αξιολόγησης</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/13-event-details-adjudication-and-daily-file.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/13-event-details-adjudication-and-daily-file.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/13-event-details-adjudication-and-daily-file.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/13-event-details-adjudication-and-daily-file.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/13-event-details-adjudication-and-daily-file.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/13-event-details-adjudication-and-daily-file.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -748,7 +807,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 Για λήψη:
 
-1. Ανοίξτε τη **Μεταφορά συναγερμού** από την πλοήγηση του Viewer.
+1. Ανοίξτε τη **Μεταφορά συναγερμού** (`/alarm-transfer`, με το **εικονίδιο σαρωτή QR**) από την πλοήγηση του Viewer.
 2. Χρησιμοποιήστε **Έναρξη σάρωσης κάμερας**, **Σάρωση εικόνας QR**, **Εισαγωγή αρχείου συναγερμού** ή επικολλήστε το κείμενο `OSCAR-ALARM:1:`. Η κάμερα απαιτεί άδεια και ασφαλές HTTPS· η εισαγωγή εικόνας/αρχείου παραμένει διαθέσιμη όταν η κάμερα απαγορεύεται.
 3. Το OSCAR αποσυμπιέζει, εφαρμόζει όρια μεγέθους και δεδομένων, επαληθεύει τη σύνοψη μεταφοράς SHA-256 και επανασχεδιάζει τα υποδειγματοληπτημένα γραφήματα.
 4. Επιβεβαιώστε κόμβο, λωρίδα, UUID συμβάντος, διέλευση, χρόνους, κατάσταση και γραφήματα και έπειτα κάντε λήψη ή κοινοποίηση μόνο εφόσον επιτρέπεται. Το UUID εντοπίζει το αρχικό μόνο σε σύστημα OSCAR που εξακολουθεί να διατηρεί και να επιτρέπει αυτή την παρατήρηση· η εισαγωγή του πακέτου δεν δημιουργεί νέο συμβάν στον διακομιστή.
@@ -759,13 +818,16 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#14, 25.2s): Εξαγωγή υπογεγραμμένου QR συναγερμού &amp; επαλήθευση εκτός δικτύου</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/14-airgapped-alarm-qr-transfer.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/14-airgapped-alarm-qr-transfer.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/14-airgapped-alarm-qr-transfer.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/14-airgapped-alarm-qr-transfer.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/14-airgapped-alarm-qr-transfer.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/14-airgapped-alarm-qr-transfer.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
 ### 8.7 Παρακολούθηση Κατάστασης υγείας
 
-Ανοίξτε την **Κατάσταση υγείας** με το εικονίδιο καρδιακού παλμού στην πλοήγηση ή μεταβείτε απευθείας στο `/health`. Η σελίδα εμφανίζει μία γραμμή για κάθε λωρίδα που είναι ορατή στο τρέχον πεδίο· το `/health?view=<κλειδί>` την περιορίζει στην αντιστοιχισμένη λειτουργική προβολή.
+Ανοίξτε την **Κατάσταση υγείας** (`/health`) με το **εικονίδιο καρδιογράφου παλμών** στην πλοήγηση (ή χρησιμοποιήστε το κουμπί **Επισήμανση εικονιδίου** μέσα από την **Καθοδηγούμενη περιήγηση** ή τη **Βοήθεια (`?`)** για να το εντοπίσετε αμέσως στην οθόνη). Η σελίδα εμφανίζει μία γραμμή για κάθε λωρίδα που είναι ορατή στο τρέχον πεδίο· το `/health?view=<κλειδί>` την περιορίζει στην αντιστοιχισμένη λειτουργική προβολή, ενώ οι λωρίδες με WebRelay εμφανίζουν επίσης την ενέργεια **Φώτα και ήχος** (**εικονίδιο τηλεβόα**).
 
 - Οι **Συνδέσεις** εμφανίζουν το RPM και κάθε διαμορφωμένη κάμερα ως **Σε σύνδεση**, **Εκτός σύνδεσης** ή **Αναμονή**. Η Αναμονή σημαίνει ότι δεν έχει ληφθεί ακόμη χρησιμοποιήσιμη τιμή σύνδεσης και δεν θεωρείται υγιής κατάσταση.
 - Η **Κατάσταση βλαβών** εμφανίζει υψηλή γάμμα, χαμηλή γάμμα, υψηλά νετρόνια, παραβίαση και παρατεταμένη διέλευση ως **Βλάβη**, **Κανονικό** ή **Άγνωστο**. Όταν η τηλεμετρία λείπει ή αποτυγχάνει, η ένδειξη παραμένει **Άγνωστο**· δεν θεωρείται ποτέ υγιής ούτε εμφανίζεται ως κανονική.
@@ -782,7 +844,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#15, 10.2s): Παρακολούθηση Κατάστασης υγείας RPM/καμερών &amp; Χάρτη εγκατάστασης</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/15-status-of-health-and-site-map.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/15-status-of-health-and-site-map.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/15-status-of-health-and-site-map.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/15-status-of-health-and-site-map.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/15-status-of-health-and-site-map.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/15-status-of-health-and-site-map.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -796,7 +861,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#10, 11.4s): Περιορισμός λωρίδων σταθμού εργασίας με ασφαλείς Λειτουργικές Προβολές</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/10-operational-views-scoping.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/10-operational-views-scoping.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/10-operational-views-scoping.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/10-operational-views-scoping.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/10-operational-views-scoping.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/10-operational-views-scoping.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -814,7 +882,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#11, 12.0s): Επιθεώρηση ζωντανού βίντεο λωρίδας &amp; καμπυλών γάμμα/νετρονίων</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/11-live-lane-video-and-charts.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/11-live-lane-video-and-charts.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/11-live-lane-video-and-charts.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/11-live-lane-video-and-charts.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/11-live-lane-video-and-charts.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/11-live-lane-video-and-charts.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -822,7 +893,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ![Εθνικά στατιστικά](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/30-national-statistics.png)
 
-Μία γραμμή ανά κόμβο δείχνει **ID κόμβου**, συναγερμούς Gamma, Νετρονίων και συνδυασμένους, διελεύσεις, παραβίαση, βλάβες Gamma, Νετρονίων και συνολικές. Στήλες/Φίλτρα/Πυκνότητα προσαρμόζουν τον πίνακα.
+Στη σελίδα **Εθνικά** (`/national-view`, με το **εικονίδιο δικτύου συνδεδεμένων κόμβων**), μία γραμμή ανά κόμβο δείχνει **ID κόμβου**, συναγερμούς Gamma, Νετρονίων και συνδυασμένους, διελεύσεις, παραβίαση, βλάβες Gamma, Νετρονίων και συνολικές. Στήλες/Φίλτρα/Πυκνότητα προσαρμόζουν τον πίνακα.
 
 1. Επιλέξτε **Όλο το διάστημα**, **Τελευταίες 30 ημέρες**, **7 ημέρες**, **24 ώρες** ή **Προσαρμοσμένο εύρος**.
 2. Για προσαρμοσμένο ορίστε αρχή/τέλος· το τέλος δεν προηγείται της αρχής.
@@ -835,7 +906,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ![Δημιουργία αναφορών](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
 
-Η γεννήτρια αναφορών ζητά από την Υπηρεσία OSCAR του επιλεγμένου κόμβου να δημιουργήσει μια ενημερωμένη αναφορά στον κάδο `reports` (`PDF`, `CSV`, `JSON` ή `Excel (.xlsx)`) και εμφανίζει δεξιά είτε το ενσωματωμένο PDF είτε μια διαδραστική προεπισκόπηση πίνακα με άμεση λήψη.
+Η σελίδα **Δημιουργία αναφορών** (`/report`, με το **εικονίδιο ραβδογράμματος**) ζητά από την Υπηρεσία OSCAR του επιλεγμένου κόμβου να δημιουργήσει μια ενημερωμένη αναφορά στον κάδο `reports` (`PDF`, `CSV`, `JSON` ή `Excel (.xlsx)`) και εμφανίζει δεξιά είτε το ενσωματωμένο PDF είτε μια διαδραστική προεπισκόπηση πίνακα με άμεση λήψη.
 
 1. Επιλέξτε **Κόμβο** και **Εύρος αναφοράς** (**Ολόκληρος κόμβος**, **Λειτουργική προβολή** ή **Συγκεκριμένες λωρίδες**).
 2. Επιλέξτε **Τύπο αναφοράς**:
@@ -855,7 +926,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#16, 19.6s): Ανάλυση εθνικών στατιστικών &amp; δημιουργία αναφορών πολλαπλών μορφών</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/16-national-statistics-and-reports.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/16-national-statistics-and-reports.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/16-national-statistics-and-reports.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/16-national-statistics-and-reports.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/16-national-statistics-and-reports.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/16-national-statistics-and-reports.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -863,7 +937,7 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 ![Ομοσπονδία κόμβων](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/32-node-federation.png)
 
-Οι **Κόμβοι** επιτρέπουν ερωτήματα σε πολλούς διακομιστές. Ο τοπικός κόμβος από τον browser είναι προεπιλεγμένος και δεν διαγράφεται· οι απομακρυσμένοι προστίθενται, τροποποιούνται ή αφαιρούνται.
+Η σελίδα **Διακομιστές / Κόμβοι** (`/servers`, με το **εικονίδιο σύννεφου**) επιτρέπει ερωτήματα σε πολλούς διακομιστές. Ο τοπικός κόμβος από τον browser είναι προεπιλεγμένος και δεν διαγράφεται· οι απομακρυσμένοι προστίθενται, τροποποιούνται ή αφαιρούνται.
 
 1. Εισαγάγετε μοναδικό **Όνομα** και **Διεύθυνση** χωρίς σχήμα.
 2. Ορίστε **Θύρα** (αρχικά `8282`) και **Τελικό σημείο Connected Systems API** (προεπιλογή `/api`, προσαρτάται στο `/sensorhub`).
@@ -880,7 +954,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#08, 16.9s): Σύνδεση στο OSCAR Viewer, αλλαγή γλώσσας &amp; διαχείριση κόμβων</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/08-viewer-signin-language-and-nodes.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/08-viewer-signin-language-and-nodes.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/08-viewer-signin-language-and-nodes.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/08-viewer-signin-language-and-nodes.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/08-viewer-signin-language-and-nodes.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/08-viewer-signin-language-and-nodes.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -898,7 +975,10 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#20, 28.4s): Ομοσπονδοποίηση κόμβων, αναζήτηση οχημάτων σε πολλαπλές πύλες &amp; ενιαίες αναφορές</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/20-multi-node-federation-vehicle-search-and-report.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/20-multi-node-federation-vehicle-search-and-report.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/20-multi-node-federation-vehicle-search-and-report.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/20-multi-node-federation-vehicle-search-and-report.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/20-multi-node-federation-vehicle-search-and-report.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/20-multi-node-federation-vehicle-search-and-report.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -906,13 +986,16 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
   <summary>Βιντεοοδηγός (#21, 24.0s): Εγγραφή χρηστών SSO Passkey στο Authentik &amp; πλήρης ανάκληση πρόσβασης</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/21-federated-sso-passkey-onboarding-and-revocation.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/21-federated-sso-passkey-onboarding-and-revocation.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/21-federated-sso-passkey-onboarding-and-revocation.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/21-federated-sso-passkey-onboarding-and-revocation.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/21-federated-sso-passkey-onboarding-and-revocation.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/21-federated-sso-passkey-onboarding-and-revocation.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
 ## 12. Διατήρηση δεδομένων και αποθήκευση
 
-Το τυπικό προφίλ 3.11.6 χρησιμοποιεί την κλιμακωτή αρχιτεκτονική PostgreSQL + Apache Parquet σε λειτουργία
+Το τυπικό προφίλ 3.11.7 χρησιμοποιεί την κλιμακωτή αρχιτεκτονική PostgreSQL + Apache Parquet σε λειτουργία
 `PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Οι στατικές ροές διαμόρφωσης
 (`sensorLocation`, `adjudicationCodes`, `siteInfo`) παραμένουν στην PostgreSQL `ONLY oscar.obs`, ενώ και οι
 22 επιτρεπόμενες λειτουργικές και αποδεικτικές εκροές (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
@@ -980,9 +1063,9 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 διαγραφής με προεπισκόπηση/διακριτικό του εκκινητή, καθώς και `backup` και `backup-verify` μόνο σε
 λειτουργία `single`. Προστατεύστε χωριστά το κλειδί κρυπτογράφησης και διατηρήστε αντίγραφο εκτός
 υπολογιστή αν η πολιτική της εγκατάστασης απαιτεί άλλο τομέα αστοχίας. Μην διαγράφετε
-καταλογογραφημένα αρχεία χειροκίνητα. Αναβάθμιση πριν από την 3.11.6 διατηρεί την παλαιά βάση και
+καταλογογραφημένα αρχεία χειροκίνητα. Αναβάθμιση πριν από την 3.11.7 διατηρεί την παλαιά βάση και
 διαμόρφωση: δεν δημιουργεί ολόκληρο το προφίλ ούτε ενεργοποιεί αθροίσματα ελέγχου PostgreSQL.
-Αρχικοποιήστε νέα εγκατάσταση 3.11.6 ή χρησιμοποιήστε χωριστά επικυρωμένη μετάπτωση παραγωγής. Οι
+Αρχικοποιήστε νέα εγκατάσταση 3.11.7 ή χρησιμοποιήστε χωριστά επικυρωμένη μετάπτωση παραγωγής. Οι
 οδηγοί αποθήκευσης στο `documentation/` είναι οι έγκυρες διαδικασίες.
 
 Χρησιμοποιείτε τον εκκινητή της έκδοσης για `stop` και `restart` ολόκληρης της εγκατάστασης.
@@ -1000,7 +1083,10 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   <summary>Βιντεοοδηγός (#01, 11.2s): Αρχικοποίηση εγκατάστασης OSCAR, διαπιστευτηρίων διαχειριστή &amp; TLS</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/01-deployment-init-and-credentials.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/01-deployment-init-and-credentials.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/01-deployment-init-and-credentials.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/01-deployment-init-and-credentials.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/01-deployment-init-and-credentials.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/01-deployment-init-and-credentials.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -1008,7 +1094,10 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   <summary>Βιντεοοδηγός (#02, 12.8s): Αναβάθμιση του OSCAR σε καθαρό κατάλογο έκδοσης</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/02-clean-directory-upgrade.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/02-clean-directory-upgrade.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/02-clean-directory-upgrade.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/02-clean-directory-upgrade.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/02-clean-directory-upgrade.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/02-clean-directory-upgrade.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -1016,9 +1105,14 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   <summary>Βιντεοοδηγός (#03, 11.4s): Επαλήθευση ψυχρών αρχείων Parquet &amp; αντιγράφου ασφαλείας στιγμιοτύπου</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/03-archive-and-snapshot-backup.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/03-archive-and-snapshot-backup.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/03-archive-and-snapshot-backup.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/03-archive-and-snapshot-backup.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/03-archive-and-snapshot-backup.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/03-archive-and-snapshot-backup.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
+
+Ανοίξτε τα **Αντίγραφα USB** (`/usb-backups`, με το **εικονίδιο τρίαινας USB**) για έλεγχο των συνεχών και περιστασιακών μονάδων USB NVMe και ασφαλή εξαγωγή, και ανοίξτε τις **Επεκτάσεις εκτέλεσης** (`/extensions`, με το **εικονίδιο κομματιού παζλ**) για δυναμική εναλλαγή πακέτων OCR και τοπικών χαρτών `.pmtiles` εκτός σύνδεσης που προβάλλονται στον **Χάρτη** (`/map`, με το **εικονίδιο πινέζας χάρτη**).
 
 ![Διαχείριση συνεχών &amp; περιστασιακών αντιγράφων ασφαλείας USB NVMe](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/45-usb-backups-manager.png)
 
@@ -1026,7 +1120,10 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   <summary>Βιντεοοδηγός (#24, 16.7s): Διαχείριση συνεχών &amp; περιστασιακών αντιγράφων USB NVMe &amp; ασφαλής εξαγωγή</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/24-continual-and-occasional-usb-backups.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/24-continual-and-occasional-usb-backups.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/24-continual-and-occasional-usb-backups.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/24-continual-and-occasional-usb-backups.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/24-continual-and-occasional-usb-backups.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/24-continual-and-occasional-usb-backups.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -1038,7 +1135,10 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   <summary>Βιντεοοδηγός (#25, 20.7s): Εναλλαγή πακέτων OCR &amp; τοπικών χαρτών .pmtiles εκτός δικτύου</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/25-pluggable-runtime-extensions-and-pmtiles.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -1046,7 +1146,10 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   <summary>Βιντεοοδηγός (#26, 15.6s): Προετοιμασία Ubuntu 24.04 εκτός σταθμού &amp; μετάβαση σε απομονωμένο υποδίκτυο πύλης</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/26-ubuntu-hotel-staging-and-airgapped-cutover.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -1054,7 +1157,7 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 
 Η ενοποίηση κοινόχρηστου πόρου UFF φορτίου παραδίδεται **απενεργοποιημένη από προεπιλογή** (`enabled = false`), ώστε οι αυτόνομες πύλες RPM να έχουν μηδενική οπτική επιβάρυνση, μηδενικά νήματα παρασκηνίου και μηδενικές κλήσεις δικτύου. Οι χειριστές μπορούν ανά πάσα στιγμή να επιθεωρούν τοπικά αρχεία `.uff` (`έως 200 MB`) μέσω της **Μεταφόρτωσης αρχείων** στη **Δευτερεύουσα επιθεώρηση** (με αυτόματη εξαγωγή φασμάτων `.n42` στο WebID).
 
-Σε εγκαταστάσεις με σαρωτές ακτίνων X φορτίου (`UFF 2.0` ή `UFF 3.0.0`), ο διαχειριστής μπορεί να ανοίξει τις **Επεκτάσεις εκτέλεσης (`/extensions`) -> Φορτίο NII (WCO UFF)**, να συνδέσει κοινόχρηστο πόρο SMBv2/SMBv3 μόνο ανάγνωσης (κρυπτογραφημένο με AES-256-GCM και αποκαθαρμένο στα πακέτα υποστήριξης), να εκτελέσει δοκιμή σύνδεσης και αποθήκευση. Οι χειριστές μπορούν τότε να συσχετίζουν εμπορευματοκιβώτια αυτόματα (με ασαφή αντιστοίχιση OCR 1 χαρακτήρα `OCR ±1`), να περιηγούνται ανά σαρωτή και χρονικό παράθυρο (`Αναζήτηση UFF φορτίου`), να αναζητούν μη επισημασμένες σαρώσεις μέσω UUID ή διαδρομής `.uff` στα **Συμβάντα (`/event-log`)**, να επιθεωρούν ακτινογραφίες TIFF 16-bit με ατομικές ζώνες **HEMD** (`Z_eff`) ευθυγραμμισμένες στο προφίλ RPM και να συνδέουν τη σάρωση χωρίς πλήρη μεταφόρτωση από το NAS.
+Σε εγκαταστάσεις με σαρωτές ακτίνων X φορτίου (`UFF 2.0` ή `UFF 3.0.0`), ο διαχειριστής μπορεί να ανοίξει τις **Επεκτάσεις εκτέλεσης** (`/extensions`, **εικονίδιο κομματιού παζλ**) **-> Φορτίο NII (WCO UFF)**, να συνδέσει κοινόχρηστο πόρο SMBv2/SMBv3 μόνο ανάγνωσης (κρυπτογραφημένο με AES-256-GCM και αποκαθαρμένο στα πακέτα υποστήριξης), να εκτελέσει δοκιμή σύνδεσης και αποθήκευση. Οι χειριστές μπορούν τότε να συσχετίζουν εμπορευματοκιβώτια αυτόματα (με ασαφή αντιστοίχιση OCR 1 χαρακτήρα `OCR ±1`), να περιηγούνται ανά σαρωτή και χρονικό παράθυρο (`Αναζήτηση UFF φορτίου`), να αναζητούν μη επισημασμένες σαρώσεις μέσω UUID ή διαδρομής `.uff` στα **Συμβάντα** (`/event-log`, **εικονίδιο προειδοποιητικού τριγώνου (`!`)**), να επιθεωρούν ακτινογραφίες TIFF 16-bit με ατομικές ζώνες **HEMD** (`Z_eff`) ευθυγραμμισμένες στο προφίλ RPM και να συνδέουν τη σάρωση χωρίς πλήρη μεταφόρτωση από το NAS.
 
 ![Ρύθμιση κοινόχρηστου πόρου SMB μόνο ανάγνωσης Φορτίου NII στις Επεκτάσεις εκτέλεσης](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/48-cargo-uff-smb-share-extension.png)
 
@@ -1066,7 +1169,10 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   <summary>Βιντεοοδηγός (#27, 24.5s): Σύνδεση SMB UFF φορτίου, αναζήτηση μέσω UUID &amp; επιθεώρηση ακτινογραφιών 16-bit</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/27-cargo-uff-smb-and-xray-inspection.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -1082,7 +1188,7 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 
 - [ ] Μοναδικό ID κόμβου· βάση, Web ID, στατιστικά και αυτόματη εκκίνηση ελέγχθηκαν.
 - [ ] Η διατήρηση βίντεο και πίεσης ελέγχθηκε πριν την εκκαθάριση.
-- [ ] Χρησιμοποιήθηκε νέα βάση/διαμόρφωση 3.11.6 ή εγκεκριμένη μετάπτωση· η κατάσταση και η ακεραιότητα του αρχείου είναι έγκυρες.
+- [ ] Χρησιμοποιήθηκε νέα βάση/διαμόρφωση 3.11.7 ή εγκεκριμένη μετάπτωση· η κατάσταση και η ακεραιότητα του αρχείου είναι έγκυρες.
 - [ ] Η λειτουργία αντιγράφων ασφαλείας έχει καταγραφεί. Η απενεργοποιημένη λειτουργία δεν δημιουργεί αντίγραφο διαχειριζόμενο από το OSCAR· αν είναι ενεργό το `single`, επαληθεύεται το τρέχον στιγμιότυπο, το εξωτερικό κλειδί φυλάσσεται χωριστά και έχει ολοκληρωθεί απομονωμένη δοκιμή επαναφοράς.
 - [ ] Δοκιμαστική λωρίδα δημοσιεύει CSV/μανιφέστο από το ημερολόγιο· διατηρημένα συμβάντα δείχνουν πέντε JPEG και τα παλαιά συνεχίζουν να αναπαράγονται.
 - [ ] Οι Υπηρεσίες κάδου και OSCAR έχουν εκκινήσει.
@@ -1117,7 +1223,7 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 
 ### Καθοδηγούμενη περιήγηση επανάληψης (`:443`) και προσωρινό περιβάλλον πρακτικής εκπαίδευσης (`:8444`)
 
-Κάθε συνδεδεμένος χρήστης μπορεί να πατήσει **Καθοδηγούμενη περιήγηση** στην επάνω γραμμή (ή μέσα στη **Βοήθεια (`?`)**) ανά πάσα στιγμή στην επιχειρησιακή κονσόλα (`:443`) για να ανοίξει τη **Λειτουργία επανάληψης μόνο για ανάγνωση** — με πρόσβαση στις **13 ασκήσεις ανά ρόλο**, βιντεοοδηγούς 1080p με υπότιτλους, εικόνες αναφοράς και επισήμανση στοιχείων στην οθόνη χωρίς έγχυση εικονικών συναγερμών ή αλλοίωση πραγματικών δεδομένων.
+Κάθε συνδεδεμένος χρήστης μπορεί να πατήσει **Καθοδηγούμενη περιήγηση** (**εικονίδιο καπέλου αποφοίτησης** στην επάνω γραμμή, ή μέσα στη **Βοήθεια (`?`)**, **εικονίδιο ερωτηματικού σε κύκλο (`?`)**) ανά πάσα στιγμή στην επιχειρησιακή κονσόλα (`:443`) για να ανοίξει τη **Λειτουργία επανάληψης μόνο για ανάγνωση** — με πρόσβαση στις **13 ασκήσεις ανά ρόλο**, στους **29 ενσωματωμένους βιντεοοδηγούς εκτός σύνδεσης `1080p` στα `30 fps`** (με εγγενείς υπότιτλους στα αγγλικά `en`, ισπανικά `es`, γαλλικά `fr` και ελληνικά `el` που εναλλάσσονται αυτόματα ανάλογα με τη γλώσσα διεπαφής), στις εικόνες αναφοράς και στα κουμπιά 1 κλικ **Επισήμανση εικονιδίου** για την **Κατάσταση υγείας** (εικονίδιο καρδιογράφου παλμών) και κάθε άλλη σελίδα ή εργαλείο στην οθόνη χωρίς έγχυση εικονικών συναγερμών ή αλλοίωση πραγματικών δεδομένων.
 
 Για ασφαλή εξάσκηση με εικονικούς συναγερμούς, δείγματα αρχείων ή ρυθμίσεις λωρίδων πριν τροποποιήσετε ενεργούς αισθητήρες, εκκινήστε το απομονωμένο **Περιβάλλον πρακτικής εκπαίδευσης (`oscar-sandbox`)** στη θύρα HTTPS `8444` (με 1 κλικ από την **Καθοδηγούμενη περιήγηση** / **Βοήθεια (`?`)** όταν έχει ενεργοποιηθεί το `sudo bash oscar.sh sandbox enable-ui-bridge` σε Ubuntu, ή μέσω CLI· η ασφαλής εκκίνηση `start` επιτρέπεται σε κάθε συνδεδεμένο χρήστη, ενώ ο πρόωρος τερματισμός `stop`/`reset` απαιτεί ρόλο **Διαχειριστή**):
 
@@ -1134,7 +1240,10 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   <summary>Βιντεοοδηγός (#28): Ασφαλής εξάσκηση στο προσωρινό περιβάλλον εκπαίδευσης και καθοδηγούμενη ακαδημία (:8444)</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/28-hands-on-training-sandbox.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/28-hands-on-training-sandbox.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/28-hands-on-training-sandbox.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/28-hands-on-training-sandbox.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/28-hands-on-training-sandbox.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/28-hands-on-training-sandbox.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -1150,7 +1259,7 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 | OSM 403/αποκλεισμένο | Μην χρησιμοποιείτε εθελοντικούς διακομιστές αντίθετα με την πολιτική τους. Ρυθμίστε εγκεκριμένο πάροχο/proxy OSM ή χρησιμοποιήστε Esri μέχρι τη διόρθωση. |
 | Απόρριψη CSV | Ελέγξτε ακριβή κεφαλίδα/σειρά, ομάδες έξι, διαδοχικούς δείκτες, πλήθος κελιών, αριθμούς, κενά χωρίς εισαγωγικά και απουσία εσωτερικών κομμάτων. |
 | Λείπει λωρίδα μετά CSV | Ελέγξτε ήδη φορτωμένο UniqueID, όνομα πάνω από 12, σφάλματα παιδιών και ολοκλήρωση ασύγχρονης φόρτωσης. |
-| Οι **Αισθητήρες** είναι κενοί μετά από επανεκκίνηση που ακολούθησε μεταφόρτωση CSV | Η μεταφόρτωση δημιούργησε μονάδες στη μνήμη, αλλά η πλήρης διαμόρφωση δεν αποθηκεύτηκε μόνιμα. Μεταφορτώστε ξανά αν χρειάζεται, περιμένετε όλες τις λωρίδες και τα παιδιά, χρησιμοποιήστε την καθολική **Αποθήκευση**, επανεκκινήστε το OSCAR και ελέγξτε ξανά τους **Αισθητήρες**. Αν ένας κόμβος 3.11.6 εξακολουθεί να χάνει τις λωρίδες, ελέγξτε τα αρχεία καταγραφής OSCAR και επαληθεύστε ότι ο κτήτορας μπορεί να γράφει στο `/var/lib/oscar/config.json`. |
+| Οι **Αισθητήρες** είναι κενοί μετά από επανεκκίνηση που ακολούθησε μεταφόρτωση CSV | Η μεταφόρτωση δημιούργησε μονάδες στη μνήμη, αλλά η πλήρης διαμόρφωση δεν αποθηκεύτηκε μόνιμα. Μεταφορτώστε ξανά αν χρειάζεται, περιμένετε όλες τις λωρίδες και τα παιδιά, χρησιμοποιήστε την καθολική **Αποθήκευση**, επανεκκινήστε το OSCAR και ελέγξτε ξανά τους **Αισθητήρες**. Αν ένας κόμβος 3.11.7 εξακολουθεί να χάνει τις λωρίδες, ελέγξτε τα αρχεία καταγραφής OSCAR και επαληθεύστε ότι ο κτήτορας μπορεί να γράφει στο `/var/lib/oscar/config.json`. |
 | Η λειτουργική προβολή είναι κενή ή απορρίπτει το κλειδί | Επιβεβαιώστε ότι τα **Κλειδιά λειτουργικής προβολής** της λωρίδας περιέχουν ακριβώς το πεζό κλειδί, εφαρμόστε και αποθηκεύστε καθολικά, επανεκκινήστε τη λωρίδα αν χρειάζεται και χρησιμοποιήστε `?view=<κλειδί>` ή `/view/<κλειδί>`. Κενή αντιστοίχιση δεν ταιριάζει ποτέ σε οριοθετημένη προβολή. |
 | RPM δεν ξεκινά | Ελέγξτε προσβασιμότητα host, θύρα, firewall, εύρος Aspect και συσκευή· δείτε το σφάλμα του παιδιού. |
 | Κάμερα δεν ξεκινά | Ελέγξτε RTSP/διαπιστευτήρια, αφαιρέστε `rtsp://` από host, μην διπλασιάζετε θύρα, ελέγξτε codec Axis ή διαδρομή Custom από τον host OSCAR. |
@@ -1170,7 +1279,7 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 | Αλλαγές χάνονται στην επανεκκίνηση | Εφαρμόστε τη φόρμα, χρησιμοποιήστε την καθολική Αποθήκευση, επιβεβαιώστε με Ναι και περιμένετε το μήνυμα αποθήκευσης πριν από την επανεκκίνηση. |
 
 Για τεχνική υποστήριξη, εξαγάγετε ένα αποκαθαρμένο πακέτο υποστήριξης (`.zip`):
-- **Από το Πρόγραμμα προβολής OSCAR (όταν η διεπαφή είναι διαθέσιμη):** Επιλέξτε **Βοήθεια (`?`)** στην επάνω γραμμή πλοήγησης και πατήστε **Εξαγωγή πακέτου υποστήριξης** (διαθέσιμο επίσης στην ενότητα **Αντιμετώπιση προβλημάτων & Συχνές ερωτήσεις**). Το OSCAR συγκεντρώνει πρόσφατες προειδοποιήσεις/σφάλματα προγράμματος περιήγησης, αποτυχημένα ή αργά αιτήματα API, καταστάσεις μονάδων/λωρίδων, σύνοψη JVM και αποθήκευσης, αποκαθαρμένες ρυθμίσεις και κυλιόμενα αρχεία καταγραφής διακομιστή (`oscar-support-<UTC>.zip`), ή λαμβάνει πακέτο μόνο πελάτη (`oscar-client-support-<UTC>.zip`) εάν ο διακομιστής δεν αποκρίνεται.
+- **Από το Πρόγραμμα προβολής OSCAR (όταν η διεπαφή είναι διαθέσιμη):** Επιλέξτε **Βοήθεια (`?`)** (**εικονίδιο ερωτηματικού σε κύκλο (`?`)** στην επάνω γραμμή πλοήγησης, το οποίο περιλαμβάνει επίσης κουμπιά 1 κλικ **Επισήμανση εικονιδίου** για την **Κατάσταση υγείας** και για όλες τις σελίδες και τα εργαλεία) και πατήστε **Εξαγωγή πακέτου υποστήριξης** (διαθέσιμο επίσης στην ενότητα **Αντιμετώπιση προβλημάτων & Συχνές ερωτήσεις**). Το OSCAR συγκεντρώνει πρόσφατες προειδοποιήσεις/σφάλματα προγράμματος περιήγησης, αποτυχημένα ή αργά αιτήματα API, καταστάσεις μονάδων/λωρίδων, σύνοψη JVM και αποθήκευσης, αποκαθαρμένες ρυθμίσεις και κυλιόμενα αρχεία καταγραφής διακομιστή (`oscar-support-<UTC>.zip`), ή λαμβάνει πακέτο μόνο πελάτη (`oscar-client-support-<UTC>.zip`) εάν ο διακομιστής δεν αποκρίνεται.
 - **Από τη γραμμή εντολών του κεντρικού υπολογιστή (όταν το OSCAR δυσλειτουργεί ή δεν εκκινεί):** Εκτελέστε `sudo bash oscar.sh support-bundle` σε Ubuntu ή `.\oscar.bat support-bundle` σε Windows (επιλογές `--tail`/`-Tail` και `--output`/`-Destination`) για συλλογή κατάστασης συστήματος/Docker, αρχείων καταγραφής κοντέινερ, μεταδεδομένων πιστοποιητικού TLS και αρχείων καταγραφής/ρυθμίσεων μόνο για ανάγνωση από το `oscar_oscar_state` σε `oscar-host-support-<UTC>.zip`. Κωδικοί πρόσβασης, διακριτικά, cookies συνεδρίας, διευθύνσεις email, το `secrets/*` και τα ιδιωτικά κλειδιά TLS (`tls/server.key`) αποκρύπτονται ή εξαιρούνται αυτόματα· ελέγξτε την πολιτική της εγκατάστασης πριν από κάθε κοινοποίηση.
 
 ![Γρήγορος οδηγός χειριστή και εξαγωγή αποκαθαρμένου πακέτου υποστήριξης](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/34-viewer-help-support-bundle.png)
@@ -1179,7 +1288,10 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
   <summary>Βιντεοοδηγός (#18, 10.9s): Χρήση Γρήγορου οδηγού (?) &amp; εξαγωγή πακέτου υποστήριξης με απόκρυψη μυστικών</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/18-operator-help-and-support-bundle.mp4" type="video/mp4">
-    <track kind="captions" src="/video-guides/captions/18-operator-help-and-support-bundle.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/18-operator-help-and-support-bundle.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/18-operator-help-and-support-bundle.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/18-operator-help-and-support-bundle.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/18-operator-help-and-support-bundle.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
@@ -1200,4 +1312,4 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 
 ---
 
-Βάση εγγράφου: συμπεριφορά πηγαίου κώδικα OSCAR 3.11.6, έλεγχος 2026-10-18. Αν μεταγενέστερη έκδοση αλλάξει πεδία ή ροές, ενημερώστε μαζί το κανονικό αγγλικό εγχειρίδιο και τις τρεις μεταφράσεις.
+Βάση εγγράφου: συμπεριφορά πηγαίου κώδικα OSCAR 3.11.7, έλεγχος 2026-10-18. Αν μεταγενέστερη έκδοση αλλάξει πεδία ή ροές, ενημερώστε μαζί το κανονικό αγγλικό εγχειρίδιο και τις τρεις μεταφράσεις.

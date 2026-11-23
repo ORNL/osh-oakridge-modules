@@ -48,6 +48,8 @@ public class D3sOutput extends AbstractSensorOutput<D3sSensor> implements Runnab
 
     private Boolean stopProcessing = false;
     private final Object processingLock = new Object();
+    private static final long STOP_TIMEOUT_MILLIS = 2_000L;
+    volatile long pollIntervalMillis = 1_000L;
 
     private static final int MAX_NUM_TIMING_SAMPLES = 10;
     private int setCount = 0;
@@ -138,6 +140,15 @@ public class D3sOutput extends AbstractSensorOutput<D3sSensor> implements Runnab
         synchronized (processingLock) {
             stopProcessing = true;
         }
+        Thread current = worker;
+        if (current != null) {
+            current.interrupt();
+            try {
+                current.join(STOP_TIMEOUT_MILLIS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     /**
@@ -146,8 +157,8 @@ public class D3sOutput extends AbstractSensorOutput<D3sSensor> implements Runnab
      * @return true if worker thread is active, false otherwise
      */
     public boolean isAlive() {
-
-        return worker.isAlive();
+        Thread current = worker;
+        return current != null && current.isAlive();
     }
 
     @Override
@@ -240,12 +251,14 @@ public class D3sOutput extends AbstractSensorOutput<D3sSensor> implements Runnab
                                 boolean matchFound = matcher.find();
                                 if(matchFound) {
                                     Calendar cal = Calendar.getInstance();
-                                    cal.set(Calendar.MONTH, Integer.parseInt(matcher.group(1)));
-                                    cal.set(Calendar.DAY_OF_MONTH, Integer.parseInt(matcher.group(2)));
-                                    cal.set(Calendar.YEAR, Integer.parseInt(matcher.group(3)));
-                                    cal.set(Calendar.HOUR_OF_DAY, Integer.parseInt(matcher.group(4)));
-                                    cal.set(Calendar.MINUTE, Integer.parseInt(matcher.group(5)));
-                                    cal.set(Calendar.SECOND, Integer.parseInt(matcher.group(6)));
+                                    cal.clear();
+                                    cal.set(
+                                            Integer.parseInt(matcher.group(3)),
+                                            Integer.parseInt(matcher.group(1)) - 1,
+                                            Integer.parseInt(matcher.group(2)),
+                                            Integer.parseInt(matcher.group(4)),
+                                            Integer.parseInt(matcher.group(5)),
+                                            Integer.parseInt(matcher.group(6)));
 
                                     /* if newer than current spectra .csv filename date*/
                                     if (maxCalendar == null || !cal.before(maxCalendar)) {
@@ -266,7 +279,7 @@ public class D3sOutput extends AbstractSensorOutput<D3sSensor> implements Runnab
                                             /* set as the new latest file */
                                             maxCalendar = cal;
                                             latestSpectraFilename = filename;
-                                            deviceSerialNum = DEVICE_SERIAL_NUMBER_PREFIX + matcher.group(6);
+                                            deviceSerialNum = DEVICE_SERIAL_NUMBER_PREFIX + matcher.group(7);
                                         }
                                     }
                                 }
@@ -281,65 +294,73 @@ public class D3sOutput extends AbstractSensorOutput<D3sSensor> implements Runnab
                 if (latestSpectraFilename != null) {
                     String COMMA_DELIMITER = ",";
                     String fullDataPath = config.dataPath+File.separator+latestSpectraFilename;
+                    boolean rowParsed = false;
                     try (BufferedReader br = new BufferedReader(new FileReader(fullDataPath, StandardCharsets.UTF_8))) {
                         String binRow = br.readLine();
                         String energyRow = br.readLine();
-                        String initialDataRow = br.readLine();
                         String headerRow = br.readLine();
                         String line;
                         String lastLine = null;
                         while ((line = br.readLine()) != null) {
-                            lastLine = line;
-                        }
-                        if ((lastLine != null) && lastLine.length()>0) {
-                            String[] columns = lastLine.split(COMMA_DELIMITER);
-                            int i = 0;  // datablock index
-                            dataBlock.setStringValue(i++, latestSpectraFilename);
-
-                            latestRecordTime = System.currentTimeMillis();
-                            dataBlock.setLongValue(i++, latestRecordTime/1000); //samplingTime
-
-                            int c = 0;  // column index
-                            String timeString = columns[c++];
-                            String dateString = columns[c++];
-                            String dateTimeString = dateString + " " + timeString;
-                            SimpleDateFormat df = new SimpleDateFormat("MM/dd/yyyy HH:mm:ss.SSS");
-                            Date date = df.parse(dateTimeString);
-                            long epoch = date.getTime()/1000;
-
-                            epochIndex = i;
-                            dataBlock.setLongValue(i++, epoch);  //phenomenonTime
-
-                            dataBlock.setStringValue(i++, columns[c++]);  //detectionID
-                            dataBlock.setDoubleValue(i++, Double.parseDouble(columns[c++]));  //confidence
-                            c++; //UNUSED
-                            c++; //UNUSED
-                            dataBlock.setDoubleValue(i++, Double.parseDouble(columns[c++]));  //latitude
-                            dataBlock.setDoubleValue(i++, Double.parseDouble(columns[c++]));  //longitude
-                            dataBlock.setDoubleValue(i++, Double.parseDouble(columns[c++]));  //processingTime
-                            dataBlock.setDoubleValue(i++, Double.parseDouble(columns[c++]));  //sensorTemp
-                            dataBlock.setDoubleValue(i++, Double.parseDouble(columns[c++]));  //battery
-                            dataBlock.setDoubleValue(i++, Double.parseDouble(columns[c++]));  //liveTime
-                            dataBlock.setIntValue(i++, Integer.parseInt(columns[c++]));  //neutronCount
-
-                            //dose
-                            Double dose = Double.parseDouble(columns[c++]);
-                            String doseUnit = columns[c++];
-                            if (doseUnit.endsWith("Sv/h")) {
-                                dataBlock.setDoubleValue(i++, dose);  //dose
-                            } else {
-                                dataBlock.setDoubleValue(i++, -999);
-                                parentSensor.getLogger().trace("ERROR: unknown dose unit (please set to µSv/h)");
+                            if (!line.isBlank()) {
+                                lastLine = line;
                             }
+                        }
+                        if (binRow != null && energyRow != null && headerRow != null && lastLine != null) {
+                            String[] columns = lastLine.split(COMMA_DELIMITER);
+                            if (columns.length >= 15) {
+                                int c = 0;
+                                String timeString = columns[c++].trim();
+                                String dateString = columns[c++].trim();
+                                SimpleDateFormat df = new SimpleDateFormat("MM/dd/yyyy HH:mm:ss.SSS");
+                                Date date = df.parse(dateString + " " + timeString);
+                                long epoch = date.getTime() / 1000;
 
+                                String detectionId = columns[c++].trim();
+                                double confidence = Double.parseDouble(columns[c++].trim());
+                                c++; // UNUSED
+                                c++; // UNUSED
+                                double latitude = parseCoordinateOrNaN(columns[c++]);
+                                double longitude = parseCoordinateOrNaN(columns[c++]);
+                                double processingTime = Double.parseDouble(columns[c++].trim());
+                                double sensorTemp = Double.parseDouble(columns[c++].trim());
+                                double battery = Double.parseDouble(columns[c++].trim());
+                                double liveTime = Double.parseDouble(columns[c++].trim());
+                                int neutronCount = Integer.parseInt(columns[c++].trim());
+                                double rawDose = Double.parseDouble(columns[c++].trim());
+                                String doseUnit = columns[c++].trim();
+
+                                int i = 0;
+                                dataBlock.setStringValue(i++, latestSpectraFilename);
+                                latestRecordTime = System.currentTimeMillis();
+                                dataBlock.setLongValue(i++, latestRecordTime / 1000); // samplingTime
+                                epochIndex = i;
+                                dataBlock.setLongValue(i++, epoch); // phenomenonTime
+                                dataBlock.setStringValue(i++, detectionId);
+                                dataBlock.setDoubleValue(i++, confidence);
+                                dataBlock.setDoubleValue(i++, latitude);
+                                dataBlock.setDoubleValue(i++, longitude);
+                                dataBlock.setDoubleValue(i++, processingTime);
+                                dataBlock.setDoubleValue(i++, sensorTemp);
+                                dataBlock.setDoubleValue(i++, battery);
+                                dataBlock.setDoubleValue(i++, liveTime);
+                                dataBlock.setIntValue(i++, neutronCount);
+                                if (doseUnit.endsWith("Sv/h")) {
+                                    dataBlock.setDoubleValue(i++, rawDose);
+                                } else {
+                                    dataBlock.setDoubleValue(i++, -999);
+                                    parentSensor.getLogger().trace("ERROR: unknown dose unit (please set to µSv/h)");
+                                }
+                                rowParsed = true;
+                            }
                         }
                     } catch (Exception e){
                         parentSensor.getLogger().trace(e.toString());
                     }
 
-                    ++setCount;
-                    latestRecord = dataBlock;
-                    if ((epochIndex >= 0) && (dataBlock != null)) {
+                    if (rowParsed && (epochIndex >= 0) && (dataBlock != null)) {
+                        ++setCount;
+                        latestRecord = dataBlock;
                         long measurementEpoch = dataBlock.getLongValue(epochIndex);
                         if (measurementEpoch != lastMeasurementEpoch) {
                             lastMeasurementEpoch = measurementEpoch;
@@ -348,7 +369,17 @@ public class D3sOutput extends AbstractSensorOutput<D3sSensor> implements Runnab
                     }
                 }
 
-                Thread.sleep(1000);
+                try {
+                    Thread.sleep(Math.max(1L, pollIntervalMillis));
+                } catch (InterruptedException e) {
+                    synchronized (processingLock) {
+                        if (stopProcessing) {
+                            break;
+                        }
+                    }
+                    Thread.currentThread().interrupt();
+                    break;
+                }
 
                 synchronized (processingLock) {
                     processSets = !stopProcessing;
@@ -365,5 +396,16 @@ public class D3sOutput extends AbstractSensorOutput<D3sSensor> implements Runnab
 
             logger.debug("Terminating worker thread: {}", this.name);
         }
+    }
+
+    static double parseCoordinateOrNaN(String raw) {
+        if (raw == null) {
+            return Double.NaN;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty() || "NA".equalsIgnoreCase(trimmed) || "N/A".equalsIgnoreCase(trimmed)) {
+            return Double.NaN;
+        }
+        return Double.parseDouble(trimmed);
     }
 }

@@ -149,9 +149,12 @@ public class AspectSensor extends AbstractSensorModule<AspectConfig> {
                 getLogger().info("Found device at address #" + i);
                 break;
             } catch (Exception e) {
-                if(primaryDeviceAddress != -1 || i == config.commSettings.protocol.addressRange.to)
+                if(primaryDeviceAddress != -1 || i == config.commSettings.protocol.addressRange.to - 1)
                     throw new ConnectException("No devices found");
             }
+        }
+        if (primaryDeviceAddress == -1) {
+            throw new ConnectException("No devices found");
         }
 
         try {
