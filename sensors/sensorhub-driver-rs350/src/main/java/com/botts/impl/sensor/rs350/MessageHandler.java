@@ -32,6 +32,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 
 public class MessageHandler {
@@ -41,7 +43,7 @@ public class MessageHandler {
     final LinkedList<String> messageQueue = new LinkedList<>();
     private final AbstractSensorModule<?> sensorModule;
     WebIdAnalyzer webIdAnalyzer;
-    boolean hasAlarm = false;
+    volatile boolean hasAlarm = false;
     String laneUID;
     IBucketStore bucketStore;
     private final DailyFileJournalConnection dailyFileJournal;
@@ -71,10 +73,10 @@ public class MessageHandler {
         void onNewMessage(RS350Message message);
     }
 
-    private final ArrayList<StatusListener> statusListeners = new ArrayList<>();
-    private final ArrayList<BackgroundListener> backgroundListeners = new ArrayList<>();
-    private final ArrayList<ForegroundListener> foregroundListeners = new ArrayList<>();
-    private final ArrayList<AlarmListener> alarmListeners = new ArrayList<>();
+    private final List<StatusListener> statusListeners = new CopyOnWriteArrayList<>();
+    private final List<BackgroundListener> backgroundListeners = new CopyOnWriteArrayList<>();
+    private final List<ForegroundListener> foregroundListeners = new CopyOnWriteArrayList<>();
+    private final List<AlarmListener> alarmListeners = new CopyOnWriteArrayList<>();
     //private final ArrayList<N42Output> n42Listeners = new ArrayList<>();
 
     private final AtomicBoolean isProcessing = new AtomicBoolean(true);
@@ -189,18 +191,22 @@ public class MessageHandler {
                         backgroundListeners.forEach(listener -> listener.onNewMessage(message));
                     }
 
-                    if (message.getRs350ForegroundMeasurement() != null) {
-                        foregroundListeners.forEach(listener -> listener.onNewMessage(message));
-                    }
-
-                    if (message.getRs350RadAlarm() != null && message.getRs350DerivedData() != null) {
+                    boolean alarmFrame = message.getRs350RadAlarm() != null && message.getRs350DerivedData() != null;
+                    if (alarmFrame) {
                         if (!hasAlarm) {
                             hasAlarm = true;
                             publishWebIdRequest(currentMessage);
                         }
-                        alarmListeners.forEach(listener -> listener.onNewMessage(message));
                     } else {
                         hasAlarm = false;
+                    }
+
+                    if (message.getRs350ForegroundMeasurement() != null) {
+                        foregroundListeners.forEach(listener -> listener.onNewMessage(message));
+                    }
+
+                    if (alarmFrame) {
+                        alarmListeners.forEach(listener -> listener.onNewMessage(message));
                     }
                 } catch (Exception e) {
                     if (isProcessing.get())

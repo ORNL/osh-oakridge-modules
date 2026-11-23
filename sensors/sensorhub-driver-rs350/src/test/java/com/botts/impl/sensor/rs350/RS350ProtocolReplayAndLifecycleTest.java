@@ -117,9 +117,11 @@ public class RS350ProtocolReplayAndLifecycleTest {
         CountDownLatch twoFgProcessed = new CountDownLatch(2);
         List<RS350Message> alarmMsgs = new CopyOnWriteArrayList<>();
 
+        java.io.PipedOutputStream pipeOut = new java.io.PipedOutputStream();
+        java.io.PipedInputStream pipeIn = new java.io.PipedInputStream(pipeOut, 65536);
         MessageHandler handler = new MessageHandler(
                 null,
-                new ByteArrayInputStream(wire.toByteArray()),
+                pipeIn,
                 "</RadInstrumentData>",
                 dummySensor,
                 journal);
@@ -131,8 +133,13 @@ public class RS350ProtocolReplayAndLifecycleTest {
         });
         handler.addAlarmListener(alarmMsgs::add);
 
+        pipeOut.write(wire.toByteArray());
+        pipeOut.flush();
+        pipeOut.close();
+
         assertTrue("Expected both valid foreground frames (before and after malformed XML) to process",
                 twoFgProcessed.await(5, TimeUnit.SECONDS));
+        handler.stopProcessing();
 
         // Exactly the 4 complete STX..ETX frames should be journaled (not the 2 truncated frames)
         assertEquals(4, journaledPayloads.size());
