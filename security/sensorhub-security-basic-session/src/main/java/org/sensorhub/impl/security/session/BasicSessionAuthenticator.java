@@ -942,16 +942,16 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
         bodyHtml.append("<form method=\"post\" action=\"").append(LOGIN_ENROLL_PASSWORD_PATH).append("\">")
                 .append("<input type=\"hidden\" id=\"enroll-token\" name=\"token\" value=\"").append(escapeHtml(rawToken)).append("\">")
                 .append("<input type=\"hidden\" name=\"continue\" value=\"").append(escapeHtml(redirectTarget)).append("\">")
-                .append("<label for=\"new-password\">").append(escapeHtml(copy.newPasswordLabel)).append(" (12+)</label>")
+                .append("<label for=\"new-password\">").append(escapeHtml(copy.newPasswordLabel)).append(" (14+)</label>")
                 .append("<div class=\"pw-wrap\">")
-                .append("<input id=\"new-password\" name=\"newPassword\" type=\"password\" required minlength=\"12\" maxlength=\"512\"")
+                .append("<input id=\"new-password\" name=\"newPassword\" type=\"password\" required minlength=\"14\" maxlength=\"512\"")
                 .append(" autocomplete=\"new-password\" spellcheck=\"false\" autocorrect=\"off\" autocapitalize=\"none\">")
                 .append("<button type=\"button\" id=\"toggle-new-password\" class=\"pw-toggle\" aria-controls=\"new-password\"")
                 .append(" aria-pressed=\"false\" data-show-label=\"").append(escapeHtml(copy.showPassword)).append("\"")
                 .append(" data-hide-label=\"").append(escapeHtml(copy.hidePassword)).append("\" hidden>")
                 .append(escapeHtml(copy.showPassword)).append("</button></div>")
                 .append("<label for=\"confirm-password\">").append(escapeHtml(copy.confirmPasswordLabel)).append("</label>")
-                .append("<input id=\"confirm-password\" name=\"confirmPassword\" type=\"password\" required minlength=\"12\" maxlength=\"512\"")
+                .append("<input id=\"confirm-password\" name=\"confirmPassword\" type=\"password\" required minlength=\"14\" maxlength=\"512\"")
                 .append(" autocomplete=\"new-password\" spellcheck=\"false\" autocorrect=\"off\" autocapitalize=\"none\">");
 
         if (allowKeepSignedIn) {
@@ -2074,14 +2074,14 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
                 + "<input type=\"hidden\" name=\"continue\" value=\"" + escapeHtml(redirectTarget) + "\">"
                 + "<label for=\"new-password\">" + escapeHtml(copy.newPasswordLabel) + "</label>"
                 + "<div class=\"pw-wrap\">"
-                + "<input id=\"new-password\" name=\"newPassword\" type=\"password\" required minlength=\"12\" maxlength=\"512\""
+                + "<input id=\"new-password\" name=\"newPassword\" type=\"password\" required minlength=\"14\" maxlength=\"512\""
                 + " autocomplete=\"new-password\" spellcheck=\"false\" autocorrect=\"off\" autocapitalize=\"none\" autofocus>"
                 + "<button type=\"button\" id=\"toggle-new-password\" class=\"pw-toggle\" aria-controls=\"new-password\""
                 + " aria-pressed=\"false\" data-show-label=\"" + escapeHtml(copy.showPassword) + "\""
                 + " data-hide-label=\"" + escapeHtml(copy.hidePassword) + "\" hidden>" + escapeHtml(copy.showPassword) + "</button>"
                 + "</div>"
                 + "<label for=\"confirm-password\">" + escapeHtml(copy.confirmPasswordLabel) + "</label>"
-                + "<input id=\"confirm-password\" name=\"confirmPassword\" type=\"password\" required minlength=\"12\" maxlength=\"512\""
+                + "<input id=\"confirm-password\" name=\"confirmPassword\" type=\"password\" required minlength=\"14\" maxlength=\"512\""
                 + " autocomplete=\"new-password\" spellcheck=\"false\" autocorrect=\"off\" autocapitalize=\"none\">"
                 + "<button type=\"submit\">" + escapeHtml(copy.savePasswordButton) + "</button></form>"
                 + "<script src=\"" + LOGIN_JS_PATH + "\" defer></script></main></body></html>";
