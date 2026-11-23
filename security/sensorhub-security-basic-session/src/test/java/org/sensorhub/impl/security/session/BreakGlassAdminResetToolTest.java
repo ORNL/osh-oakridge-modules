@@ -186,7 +186,7 @@ public class BreakGlassAdminResetToolTest {
     @Test(expected = IllegalArgumentException.class)
     public void rejectsShortBreakGlassPasswords() throws Exception {
         Path stateDir = tempFolder.newFolder("short-pw").toPath();
-        BreakGlassAdminResetTool.applyOffline(stateDir, "admin", "too-short", false, "root");
+        BreakGlassAdminResetTool.applyOffline(stateDir, "admin", "thirteen-char", false, "root");
     }
 
     @Test(expected = IllegalArgumentException.class)
