@@ -250,7 +250,7 @@ public final class SandboxSampleAssets {
                     <RadInstrumentModelName>RIID-NaI-Tutorial</RadInstrumentModelName>
                     <RadInstrumentVersion>
                       <RadInstrumentComponentName>Firmware</RadInstrumentComponentName>
-                      <RadInstrumentComponentVersion>3.11.9</RadInstrumentComponentVersion>
+                      <RadInstrumentComponentVersion>3.11.10</RadInstrumentComponentVersion>
                     </RadInstrumentVersion>
                   </RadInstrumentInformation>
                   <EnergyCalibration id="ecal-1">
@@ -511,7 +511,7 @@ public final class SandboxSampleAssets {
                       <Name>OSCAR-NII-CargoInspect</Name>
                       <Description>Automated high-energy cargo density and High-Z shielding detector</Description>
                       <Vendor>OSCAR Training Academy</Vendor>
-                      <Version>3.11.9</Version>
+                      <Version>3.11.10</Version>
                       <ModelVersion>2026.11</ModelVersion>
                     </Algorithm>
                     <Result>Found</Result>
@@ -556,7 +556,7 @@ public final class SandboxSampleAssets {
                       <Name>OSCAR-NII-CargoInspect</Name>
                       <Description>Automated homogeneous cargo profile verifier</Description>
                       <Vendor>OSCAR Training Academy</Vendor>
-                      <Version>3.11.9</Version>
+                      <Version>3.11.10</Version>
                       <ModelVersion>2026.11</ModelVersion>
                     </Algorithm>
                     <Result>Not Found</Result>
