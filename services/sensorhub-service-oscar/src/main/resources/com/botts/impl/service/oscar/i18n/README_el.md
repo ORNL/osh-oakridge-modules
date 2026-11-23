@@ -1224,7 +1224,7 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
 
 ### Καθοδηγούμενη περιήγηση επανάληψης (`:443`) και προσωρινό περιβάλλον πρακτικής εκπαίδευσης (`:8444`)
 
-Κάθε συνδεδεμένος χρήστης μπορεί να πατήσει **Καθοδηγούμενη περιήγηση** (**εικονίδιο καπέλου αποφοίτησης** στην επάνω γραμμή, ή μέσα στη **Βοήθεια (`?`)**, **εικονίδιο ερωτηματικού σε κύκλο (`?`)**) ανά πάσα στιγμή στην επιχειρησιακή κονσόλα (`:443`) για να ανοίξει τη **Λειτουργία επανάληψης μόνο για ανάγνωση** — με πρόσβαση στις **13 ασκήσεις ανά ρόλο**, στους **29 ενσωματωμένους βιντεοοδηγούς εκτός σύνδεσης `1080p` στα `30 fps`** (με εγγενείς υπότιτλους στα αγγλικά `en`, ισπανικά `es`, γαλλικά `fr` και ελληνικά `el` που εναλλάσσονται αυτόματα ανάλογα με τη γλώσσα διεπαφής), στις εικόνες αναφοράς και στα κουμπιά 1 κλικ **Επισήμανση εικονιδίου** για την **Κατάσταση υγείας** (εικονίδιο καρδιογράφου παλμών) και κάθε άλλη σελίδα ή εργαλείο στην οθόνη χωρίς έγχυση εικονικών συναγερμών ή αλλοίωση πραγματικών δεδομένων.
+Κάθε συνδεδεμένος χρήστης μπορεί να πατήσει **Καθοδηγούμενη περιήγηση** (**εικονίδιο καπέλου αποφοίτησης** στην επάνω γραμμή, ή μέσα στη **Βοήθεια (`?`)**, **εικονίδιο ερωτηματικού σε κύκλο (`?`)**) ανά πάσα στιγμή στην επιχειρησιακή κονσόλα (`:443`) για να ανοίξει τη **Λειτουργία επανάληψης μόνο για ανάγνωση** — με πρόσβαση στις **13 ασκήσεις ανά ρόλο**, στους **31 ενσωματωμένους βιντεοοδηγούς εκτός σύνδεσης `1080p` στα `30 fps`** (με εγγενείς υπότιτλους στα αγγλικά `en`, ισπανικά `es`, γαλλικά `fr` και ελληνικά `el` που εναλλάσσονται αυτόματα ανάλογα με τη γλώσσα διεπαφής), στις εικόνες αναφοράς και στα κουμπιά 1 κλικ **Επισήμανση εικονιδίου** για την **Κατάσταση υγείας** (εικονίδιο καρδιογράφου παλμών) και κάθε άλλη σελίδα ή εργαλείο στην οθόνη χωρίς έγχυση εικονικών συναγερμών ή αλλοίωση πραγματικών δεδομένων.
 
 Για ασφαλή εξάσκηση με εικονικούς συναγερμούς, δείγματα αρχείων ή ρυθμίσεις λωρίδων πριν τροποποιήσετε ενεργούς αισθητήρες, εκκινήστε το απομονωμένο **Περιβάλλον πρακτικής εκπαίδευσης (`oscar-sandbox`)** στη θύρα HTTPS `8444` (με 1 κλικ από την **Καθοδηγούμενη περιήγηση** / **Βοήθεια (`?`)** όταν έχει ενεργοποιηθεί το `sudo bash oscar.sh sandbox enable-ui-bridge` σε Ubuntu, ή μέσω CLI· η ασφαλής εκκίνηση `start` επιτρέπεται σε κάθε συνδεδεμένο χρήστη, ενώ ο πρόωρος τερματισμός `stop`/`reset` απαιτεί ρόλο **Διαχειριστή**):
 
@@ -1245,6 +1245,38 @@ PostgreSQL παραμένει διαθέσιμη, και σταματά την P
     <track kind="captions" src="/video-guides/captions/es/28-hands-on-training-sandbox.vtt" srclang="es" label="Español">
     <track kind="captions" src="/video-guides/captions/fr/28-hands-on-training-sandbox.vtt" srclang="fr" label="Français">
     <track kind="captions" src="/video-guides/captions/el/28-hands-on-training-sandbox.vtt" srclang="el" label="Ελληνικά" default>
+  </video>
+</details>
+
+### 13.3 Ενημέρωση συστήματος χωρίς σύνδεση GitHub & δημιουργός USB αυτόματης εγκατάστασης
+
+Οι διαχειριστές μπορούν να αναβαθμίσουν το OSCAR απευθείας από το **OSCAR Viewer -> Χρήστες & Πρόσβαση (`/users?tab=update`) -> Ενημέρωση συστήματος** (ή μέσω `sudo bash oscar.sh update check|apply` σε Ubuntu 24.04 και `.\oscar.bat update check|apply` σε Windows 11) **χωρίς λογαριασμό ή διακριτικό GitHub**. Το OSCAR ελέγχει ανώνυμα τις επίσημες εκδόσεις `ORNL/oscar`, επαληθεύει το SHA-256 πριν την εξαγωγή σε καθαρό παράλληλο κατάλογο, διατηρεί `.env`, `secrets/`, `tls/` και τους τόμους Docker, και επαναφέρει αυτόματα την προηγούμενη έκδοση αν αποτύχει το `/healthz`. Σε απομονωμένες πύλες χωρίς διαδίκτυο, μπορεί να μεταφορτωθεί απευθείας αρχείο `oscar-<version>.zip`.
+
+![Ενημέρωση συστήματος από το GitHub χωρίς σύνδεση και εκτός δικτύου](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/54-zero-login-github-system-update.png)
+
+<details class="oscar-video-guide">
+  <summary>Βιντεοοδηγός (#30): Ενημέρωση OSCAR από το GUI χωρίς σύνδεση GitHub (GitHub &amp; .zip εκτός σύνδεσης)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/30-zero-login-github-system-update.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/30-zero-login-github-system-update.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/30-zero-login-github-system-update.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/30-zero-login-github-system-update.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/30-zero-login-github-system-update.vtt" srclang="el" label="Ελληνικά" default>
+  </video>
+</details>
+
+Για νέους φυσικούς εξυπηρετητές Ubuntu Server 24.04 LTS, κατεβάστε το αυτόνομο πακέτο **`oscar-3.11.9-autoinstall-usb-creator.zip`** (`~49 KiB`) μαζί με το `ubuntu-24.04.x-live-server-amd64.iso` και το `oscar-3.11.9-ubuntu-x86_64-offline-full.zip` χωρίς προηγούμενη αποσυμπίεση του πακέτου offline. Εκκινήστε το **GUI επιφάνειας εργασίας** (`create-autoinstall-usb.bat` σε Windows 11 ή `sudo bash create-autoinstall-usb.sh --gui` σε Ubuntu), το **διαδραστικό TUI** (`-Tui` / `--tui`) ή το **CLI** για δημιουργία εκκινήσιμου USB UEFI Secure-Boot με SHA-512 (`$6$`), προαιρετική κρυπτογράφηση LUKS2, `--require-sudo-password` και `--ssh-keys-only`, προστατεύοντας πλήρως τους εσωτερικούς δίσκους και το `OSCAR_BACKUP`.
+
+![Δημιουργός USB αυτόματης εγκατάστασης Ubuntu 24.04 εκτός δικτύου](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/55-bare-metal-autoinstall-usb-creator.png)
+
+<details class="oscar-video-guide">
+  <summary>Βιντεοοδηγός (#31): Δημιουργία USB αυτόματης εγκατάστασης Ubuntu 24.04 εκτός δικτύου (GUI, TUI &amp; CLI)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/31-bare-metal-autoinstall-usb-creator.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/31-bare-metal-autoinstall-usb-creator.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/31-bare-metal-autoinstall-usb-creator.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/31-bare-metal-autoinstall-usb-creator.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/31-bare-metal-autoinstall-usb-creator.vtt" srclang="el" label="Ελληνικά" default>
   </video>
 </details>
 
