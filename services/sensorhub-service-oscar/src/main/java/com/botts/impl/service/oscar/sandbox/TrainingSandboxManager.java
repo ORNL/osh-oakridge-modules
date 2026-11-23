@@ -972,7 +972,7 @@ public final class TrainingSandboxManager implements Closeable {
         v.put("lanesWithCameraCount", lanesWithCamera);
         v.put("lanesWithOcrCount", lanesWithOcr);
         v.put("operationalViewCount", viewKeys.size());
-        v.put("operationalViews", new ArrayList<>(new TreeSet<>(viewKeys)));
+        v.put("operationalViews", viewKeys.stream().sorted().toList());
         v.put("totalOccupancies", totalOccupancies);
         v.put("gammaAlarmCount", gammaAlarms);
         v.put("neutronAlarmCount", neutronAlarms);
