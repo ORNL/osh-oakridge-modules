@@ -1,4 +1,4 @@
-# Manual de administración y operación de OSCAR 3.11.7
+# Manual de administración y operación de OSCAR 3.11.8
 
 Este manual cubre el primer uso y la operación completa: certificado, acceso, plano georreferenciado, importación/creación de carriles, adjudicación y evidencias, eventos, estadísticas nacionales, informes y federación de nodos.
 
@@ -32,7 +32,7 @@ La interfaz de administración selecciona automáticamente la versión del manua
 
 Necesita:
 
-- un despliegue OSCAR 3.11.7 instalado y en ejecución;
+- un despliegue OSCAR 3.11.8 instalado y en ejecución;
 - la URL de OSCAR, normalmente `https://oscar.local/` salvo que se haya elegido otro host;
 - una cuenta administradora para `/sensorhub/admin`;
 - la imagen aprobada del sitio y la latitud/longitud de sus esquinas inferior izquierda y superior derecha;
@@ -63,7 +63,7 @@ Consulte la [Guía de inicio rápido](https://github.com/ORNL/oscar/blob/main/di
 | **Archivo diario y códigos (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | Registro CSV diario por carril con mensajes RPM sin procesar: `GB`/`NB` = fondo gamma/neutrones, `GS` = inicio de ocupación, `GC`/`NC` = perfil de conteo, `GA`/`NA`/`NS` = alarma gamma/neutrones, `GX` = fin de ocupación, `TT`/`TC` = fallo/restablecimiento de manipulación, y `SG1`–`SG3`/`SN1`–`SN2` = parámetros diarios de configuración gamma/neutrones (que actualizan automáticamente los parámetros del controlador Rapiscan en memoria y agrupan cambios en `config.json`). |
 | **UUID de evento (`Event UUID`)** | Identificador único global asignado a cada evento de ocupación para buscarlo, exportar resúmenes QR y rastrearlo en informes y nodos federados. |
 | **Vista operativa (`Operational View`)** | Filtro con nombre seleccionable desde el menú desplegable **Vista operativa** de la barra superior (o mediante URLs `?view=<clave>` / `/view/<clave>`) que limita el Panel, Eventos, Estado de salud, Mapa y Generador de informes a un grupo específico de carriles respetando los permisos `allowedViews` del usuario. |
-| **Nivel frío Parquet (`PARQUET_PRIMARY`)** | Modo de almacenamiento predeterminado de OSCAR 3.11.7 donde PostgreSQL mantiene una ventana temporal de 30 minutos y las particiones cerradas se exportan a archivos Apache Parquet comprimidos con ZSTD (`archive/parquet/`). |
+| **Nivel frío Parquet (`PARQUET_PRIMARY`)** | Modo de almacenamiento predeterminado de OSCAR 3.11.8 donde PostgreSQL mantiene una ventana temporal de 30 minutos y las particiones cerradas se exportan a archivos Apache Parquet comprimidos con ZSTD (`archive/parquet/`). |
 | **Medios retenidos de 5 fotogramas** | En cada ocupación con alarma, OSCAR extrae 5 instantáneas JPEG (`frame-01.jpg` a `frame-05.jpg`). Tras 30 días, se depuran los fotogramas secundarios (`01`, `02`, `04`, `05`) y se conserva el fotograma central (`frame-03.jpg`). |
 | **OCR de vehículos (`ocrConfig`)** | Reconocimiento óptico opcional por carril (`Activar OCR de vehículos = false` de forma predeterminada) que lee de forma asíncrona códigos de contenedor ISO 6346 (con dígito de control) y matrículas según lo permitan los recursos de CPU y memoria (`OcrResourceGovernor`), publicando candidatos `vehicleOcr` (`PARQUET_PRIMARY`), recortes JPEG particionados por fecha (`/sensorhub/buckets/ocr/crops/<YYYY-MM-DD>/`, alineados con `frame-03.jpg` y `ocrCropRetentionDays = 365`) y autocompletado de **ID del vehículo** para contenedores ISO válidos o matrículas con confianza `>= 85%`. Si se desmarca `Solo alarmas`, los clips sin alarma se analizan de forma transitoria y se eliminan tras el OCR manteniendo `occupancy.videoPaths` vacío (`[]`). |
 | **SAN (Nombre alternativo del sujeto)** | Lista de nombres de host y direcciones IP (como `oscar.local` y `192.0.2.10`) incluidos dentro de un certificado HTTPS que el navegador comprueba antes de confiar en la conexión. |
@@ -71,8 +71,9 @@ Consulte la [Guía de inicio rápido](https://github.com/ORNL/oscar/blob/main/di
 | **Tokens de servicio de federación (`oscar_fed_...`)** | Credenciales revocables con alcance limitado (`Visor` de solo lectura u `Operador`) emitidas en **Usuarios y acceso (`/users`)** para federar flujos HTTP y MQTT sin compartir contraseñas de administrador. |
 | **Copias USB (`/usb-backups`)** | Copia incremental opcional sin interrupción (`0.0 s`) en una unidad SSD NVMe USB 3.x externa (`NTFS` predeterminado) gestionada desde **OSCAR Viewer -> Copias USB** o `oscar usb-backup`, con modo `continual` u `occasional`, expulsión segura (`SAFE_TO_UNPLUG`) y restauración `usb-backup restore`. |
 | **Extensiones conectables (`/extensions`)** | Panel de administración (**OSCAR Viewer -> Extensiones**) para cargar paquetes regionales de OCR (`plate-rules.json`, `.onnx` o `.jar` `OcrEngine`), mapas sin conexión `.pmtiles`, bibliotecas de espectroscopia, certificados CA corporativos (`.pem`/`.crt`), paquetes de políticas de adjudicación y complementos EML sin sobrescribir las personalizaciones durante `oscar upgrade` y con restablecimiento en un clic a los valores predeterminados incluidos. |
-| **Entorno práctico de formación (`oscar-sandbox`, `:8444`)** | Pila Docker Compose efímera y aislada (`sudo bash oscar.sh sandbox start` / `.\oscar.bat sandbox start`) que reutiliza las imágenes instaladas en `:8444` con microemuladores locales Rapiscan RPM y cámara RTSP de contenedores, 12 laboratorios guiados (`Ver · Leer · Practicar · Autoverificar`) en pistas de Operador, Supervisor y Administrador (con vista dividida `/sensorhub/admin`), `archive.enabled = false`, marca de agua `TRAINING SANDBOX — NON-OPERATIONAL` y borrado total al ejecutar `sandbox stop` sin tocar PostgreSQL ni archivos Parquet operativos. |
+| **Entorno práctico de formación (`oscar-sandbox`, `:8444`)** | Pila Docker Compose efímera y aislada (`sudo bash oscar.sh sandbox start` / `.\oscar.bat sandbox start`) que reutiliza las imágenes instaladas en `:8444` con microemuladores locales Rapiscan RPM (`127.0.0.1:10099`), cámara RTSP de contenedores (`127.0.0.1:8554/tutorial-cam`) y `WebRelay-Quad` (`127.0.0.1:10180`), 13 laboratorios guiados (`Ver · Leer · Practicar · Autoverificar`) en pistas de Operador, Supervisor y Administrador (con apertura automática de `/event-log` y `/health` según el escenario y vista dividida `/sensorhub/admin`), `archive.enabled = false`, marca de agua `TRAINING SANDBOX — NON-OPERATIONAL` y borrado total al ejecutar `sandbox stop` sin tocar PostgreSQL ni archivos Parquet operativos. |
 | **Luces y sonido del RPM (`webRelayConfig` — WebRelay-Quad)** | Integración opcional de relés en red por carril (`Activar control WebRelay = false` por defecto) para módulos ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`) mediante HTTP/XML (`stateFull.xml` / `state.xml`) en unidad primaria y unidad auxiliar opcional de contactos secos. Admite modo **Automático (`AUTO`)** (arma `R1=1, R2=1` durante la ocupación, suprime luces y sirena en `Code 9999: EML Non-Threat` y opcionalmente `Code 9998: Extended Occupancy Gamma Alarm`, pulsa `R3` luz roja gamma + sirena y/o `R4` luz azul de neutrones en alarmas reales y vuelve a `0,0,0,0` al detenerse), **Paso directo (`PASS_THROUGH`)**, **Silenciado (`MUTED`)** y controles manuales en vivo para administradores en `/sensorhub/admin`, **Estado de salud (`/health`)** y **Vista de carril (`/lane-view`)**. |
+| **Proxy de borde RPM para operación paralela con CAS (`oscar-rpm-proxy`)** | Servicio Docker Compose aislado opcional (`sudo bash oscar.sh rpm-proxy` / `.\oscar.bat rpm-proxy`) para operar OSCAR junto a una estación central de alarmas (CAS) existente. Distribuye `1–50` flujos TCP Rapiscan RPM en tiempo real (`< 1 ms`) mediante puertos mapeados (`11601..11650`) o IP virtual transparente `:1600` en Ubuntu 24.04, reproduce tramas `SG1..SG3` / `SN1..SN2`, mantiene la CAS conectada durante reinicios/actualizaciones de OSCAR y propaga desconexiones físicas del RPM en `<= 4,0 s`. |
 
 ## 2. Confiar en el certificado de OSCAR
 
@@ -259,10 +260,10 @@ más de 1,2 millones de ocupaciones distribuidas uniformemente por hora. Un
 JSON permanente por cámara. Copie y restaure como una unidad todo `videos/retained-media/v1`,
 incluidos índices, puntos de control, colas, manifiestos y libros de trabajo.
 
-Este formato compacto aparece por primera vez en 3.11.7 y no migra los prototipos previos
+Este formato compacto aparece por primera vez en 3.11.8 y no migra los prototipos previos
 `.deleted.json` ni árboles de marcadores por observación. Los sistemas de prueba deben comenzar con
-una base de datos y un prefijo de medios nuevos de 3.11.7. Para volver atrás, restaure ambos desde la
-misma copia coordinada anterior a 3.11.7; no ejecute un binario antiguo sobre este almacenamiento.
+una base de datos y un prefijo de medios nuevos de 3.11.8. Para volver atrás, restaure ambos desde la
+misma copia coordinada anterior a 3.11.8; no ejecute un binario antiguo sobre este almacenamiento.
 
 ### Códigos de disposición personalizados
 
@@ -998,7 +999,7 @@ Con nodos remotos conectados mediante tokens `oscar_fed_...`, **Eventos -> Compa
 
 ## 12. Retención de datos y almacenamiento
 
-El perfil estándar 3.11.7 utiliza la arquitectura por niveles PostgreSQL + Apache Parquet en modo
+El perfil estándar 3.11.8 utiliza la arquitectura por niveles PostgreSQL + Apache Parquet en modo
 `PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Los flujos de configuración estáticos
 (`sensorLocation`, `adjudicationCodes`, `siteInfo`) permanecen en PostgreSQL `ONLY oscar.obs`, mientras
 que las 22 salidas operativas y probatorias permitidas (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
@@ -1065,9 +1066,9 @@ heredado `backup-prune` está retirado.
 Use los comandos `archive status`, `archive verify`, retenciones, exportación portátil y eliminación
 con vista previa y token del lanzador, y `backup` y `backup-verify` solo en modo `single`. Proteja por
 separado la clave de cifrado y conserve una copia externa si la política del sitio exige otro dominio
-de fallo. Nunca borre directamente archivos catalogados. Una actualización anterior a 3.11.7 conserva
+de fallo. Nunca borre directamente archivos catalogados. Una actualización anterior a 3.11.8 conserva
 la base y configuración anteriores: no crea todo el perfil ni activa las sumas de comprobación de
-PostgreSQL. Inicialice un despliegue 3.11.7 nuevo o aplique una migración de producción validada aparte.
+PostgreSQL. Inicialice un despliegue 3.11.8 nuevo o aplique una migración de producción validada aparte.
 Las guías de almacenamiento de `documentation/` son los procedimientos autorizados.
 
 Use el lanzador de la versión para `stop` y `restart` de todo el despliegue. Primero detiene la
@@ -1190,7 +1191,7 @@ En instalaciones con escáneres NII de rayos X (`UFF 2.0` o `UFF 3.0.0`), un adm
 
 - [ ] ID de nodo único; base de datos, Web ID, estadísticas y Auto Start revisados.
 - [ ] Retención de vídeo y presión revisadas antes de activar limpieza.
-- [ ] Se usó una base/configuración 3.11.7 nueva o una migración aprobada; el estado y la integridad del archivo son correctos.
+- [ ] Se usó una base/configuración 3.11.8 nueva o una migración aprobada; el estado y la integridad del archivo son correctos.
 - [ ] Se ha registrado el modo de copia. El modo desactivado no crea copias gestionadas por OSCAR; si se activa `single`, su instantánea actual se verifica, la clave externa se custodia aparte y se ha superado una restauración aislada.
 - [ ] Un carril de muestra publica CSV/manifiesto desde el diario; eventos retenidos muestran cinco JPEG y los heredados siguen reproduciéndose.
 - [ ] Servicios de buckets y OSCAR están iniciados.
@@ -1232,7 +1233,7 @@ Para practicar la inyección de alarmas, subida de muestras o edición de carril
 - **Ubuntu Server 24.04:** `sudo bash oscar.sh sandbox start` (detener y purgar con `sudo bash oscar.sh sandbox stop`).
 - **Windows 11 + WSL 2:** `.\oscar.bat sandbox start` (detener y purgar con `.\oscar.bat sandbox stop`).
 
-El entorno reutiliza las imágenes OSCAR instaladas con volúmenes desechables (`oscar_sandbox_state`, `oscar_sandbox_pg`), copia unidireccional de credenciales y Passkeys (inicie sesión en `https://<host>:8444` con su cuenta habitual sin afectar `:443`), verificación previa de `>= 3.5 GiB` de RAM libre, `archive.enabled = false` (`0` archivos `.parquet`), apagado automático tras `120 min` (2 horas) con cuenta atrás en vivo que purga todos los datos de práctica al expirar (`< 2 s`), marca `TRAINING SANDBOX — NON-OPERATIONAL` en cada exportación y microemuladores locales Rapiscan (`127.0.0.1:10099`) y cámara RTSP (`127.0.0.1:8554/tutorial-cam`) en **13 laboratorios guiados** (**Operador**, **Supervisor y analista** y **Administrador del sistema** con **vista dividida `/sensorhub/admin`**) más certificado PDF de finalización (descárguelo antes de que finalice el temporizador).
+El entorno reutiliza las imágenes OSCAR instaladas con volúmenes desechables (`oscar_sandbox_state`, `oscar_sandbox_pg`), copia unidireccional de credenciales y Passkeys (inicie sesión en `https://<host>:8444` con su cuenta habitual sin afectar `:443`), verificación previa de `>= 3.5 GiB` de RAM libre, `archive.enabled = false` (`0` archivos `.parquet`), apagado automático tras `120 min` (2 horas) con cuenta atrás en vivo que purga todos los datos de práctica al expirar (`< 2 s`), marca `TRAINING SANDBOX — NON-OPERATIONAL` en cada exportación y microemuladores locales Rapiscan (`127.0.0.1:10099`), cámara RTSP (`127.0.0.1:8554/tutorial-cam`) y `WebRelay-Quad` (`127.0.0.1:10180`) en **13 laboratorios guiados** (abriendo automáticamente `/event-log` con la columna **`Código de adjudicación`** visible para `Code 9999`, `Code 9998` y pases limpios, `/health` para fallos y Laboratorio `3.5` WebRelay, y **vista dividida `/sensorhub/admin`**) más certificado PDF de finalización (descárguelo antes de que finalice el temporizador).
 
 ![Asistente de formación y laboratorio de operador en el entorno aislado](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/51-training-sandbox-coach-and-operator-lab.png)
 
@@ -1261,7 +1262,7 @@ El entorno reutiliza las imágenes OSCAR instaladas con volúmenes desechables (
 | OSM 403/bloqueado | No use directamente servidores voluntarios incumpliendo su política. Configure proveedor/proxy OSM aprobado o use Esri mientras se corrige. |
 | CSV rechazado | Revise encabezado/orden, grupos de seis, índices secuenciales, número de celdas, numéricos, vacíos sin comillas y ausencia de comas internas. |
 | Falta un carril tras CSV | Busque UniqueID ya cargado, nombre mayor de 12, errores de hijos y espere la carga asíncrona. |
-| **Sensores** está vacío tras reiniciar después de cargar el CSV | La carga creó módulos en memoria, pero no se conservó la configuración completa. Vuelva a cargar si hace falta, espere a que aparezcan todos los carriles e hijos, pulse **Guardar** globalmente, reinicie OSCAR y compruebe otra vez **Sensores**. Si un nodo 3.11.7 sigue perdiendo los carriles, revise los logs de OSCAR y verifique que el propietario pueda escribir en `/var/lib/oscar/config.json`. |
+| **Sensores** está vacío tras reiniciar después de cargar el CSV | La carga creó módulos en memoria, pero no se conservó la configuración completa. Vuelva a cargar si hace falta, espere a que aparezcan todos los carriles e hijos, pulse **Guardar** globalmente, reinicie OSCAR y compruebe otra vez **Sensores**. Si un nodo 3.11.8 sigue perdiendo los carriles, revise los logs de OSCAR y verifique que el propietario pueda escribir en `/var/lib/oscar/config.json`. |
 | Una vista operativa está vacía o rechaza su clave | Confirme que **Claves de vista operativa** del carril contiene exactamente la clave en minúsculas, aplique y guarde globalmente, reinicie el carril si procede y use `?view=<clave>` o `/view/<clave>`. Una asignación vacía nunca coincide con una vista delimitada. |
 | RPM no inicia | Pruebe alcance del host, puerto, cortafuegos, rango Aspect y disponibilidad; revise el error del hijo. |
 | Cámara no inicia | Pruebe RTSP/credenciales, quite `rtsp://` del host, no duplique puerto, confirme códec Axis o ruta Custom y pruebe desde el host OSCAR. |
@@ -1308,10 +1309,12 @@ Para soporte técnico, exporte un paquete de diagnóstico saneado (`.zip`):
 - [Guía de extensiones de ejecución y mapas sin conexión](https://github.com/ORNL/oscar/blob/main/docs/PLUGGABLE_EXTENSIONS_GUIDE.md)
 - [Guía de inspección no intrusiva de carga (WCO UFF 2.0 y 3.0)](https://github.com/ORNL/oscar/blob/main/docs/CARGO_UFF_INTEGRATION.md)
 - [Guía del entorno práctico de formación y academia guiada](https://github.com/ORNL/oscar/blob/main/docs/TRAINING_SANDBOX_GUIDE.md)
+- [Guía de luces y sonido físicos del RPM por carril (`WebRelay-Quad`)](https://github.com/ORNL/oscar/blob/main/docs/LANE_WEBRELAY_GUIDE.md)
+- [Guía del proxy de borde RPM Rapiscan para operación paralela con CAS (`oscar-rpm-proxy`)](https://github.com/ORNL/oscar/blob/main/docs/RPM_EDGE_PROXY_GUIDE.md)
 - [Sistema de traducción](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)
 - [Módulo Sistema de carril](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
 - [Módulo de servicio OSCAR](https://github.com/ORNL/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)
 
 ---
 
-Base del documento: comportamiento del código OSCAR 3.11.7, revisado el 2026-10-18. Si una versión posterior cambia campos o flujos, actualice conjuntamente el manual canónico en inglés y las tres traducciones.
+Base del documento: comportamiento del código OSCAR 3.11.8, revisado el 2026-10-18. Si una versión posterior cambia campos o flujos, actualice conjuntamente el manual canónico en inglés y las tres traducciones.

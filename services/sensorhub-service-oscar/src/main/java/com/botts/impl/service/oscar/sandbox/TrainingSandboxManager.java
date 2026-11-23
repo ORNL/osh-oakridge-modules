@@ -17,6 +17,8 @@ import com.botts.impl.system.lane.config.LaneConfig;
 import com.botts.impl.system.lane.config.LaneOptionsConfig;
 import com.botts.impl.system.lane.config.OcrConfig;
 import com.botts.impl.system.lane.config.RapiscanRPMConfig;
+import com.botts.impl.system.lane.config.WebRelayConfig;
+import com.botts.impl.system.lane.config.WebRelayOperatingMode;
 import org.sensorhub.api.ISensorHub;
 import org.sensorhub.api.command.CommandData;
 import org.sensorhub.api.command.ICommandStatus;
@@ -93,6 +95,8 @@ public final class TrainingSandboxManager implements Closeable {
     private Path uffShareDir;
     private SandboxRapiscanLoopbackServer rapiscan1;
     private SandboxRapiscanLoopbackServer rapiscan2;
+    private SandboxWebRelayLoopbackServer webrelay1;
+    private SandboxWebRelayLoopbackServer webrelay2;
     private SandboxRtspCameraStreamer cameraStreamer;
     private ExecutorService backgroundSeeder;
     private volatile String activeTrack = TRACK_OPERATOR;
@@ -144,6 +148,13 @@ public final class TrainingSandboxManager implements Closeable {
             this.rapiscan1.start();
             this.rapiscan2 = new SandboxRapiscanLoopbackServer(reqPort2, "DemoLane02", log);
             this.rapiscan2.start();
+
+            int wrPort1 = Integer.getInteger("oscar.sandbox.webRelayPort1", TrainingSandboxEnvironment.DEFAULT_WEBRELAY_PORT_1);
+            int wrPort2 = Integer.getInteger("oscar.sandbox.webRelayPort2", TrainingSandboxEnvironment.DEFAULT_WEBRELAY_PORT_2);
+            this.webrelay1 = new SandboxWebRelayLoopbackServer(wrPort1, "DemoLane01-WebRelay", log);
+            this.webrelay1.start();
+            this.webrelay2 = new SandboxWebRelayLoopbackServer(wrPort2, "DemoLane02-WebRelay", log);
+            this.webrelay2.start();
 
             boolean skipRtsp = Boolean.getBoolean("oscar.sandbox.skipRtsp");
             if (!skipRtsp) {
@@ -202,6 +213,14 @@ public final class TrainingSandboxManager implements Closeable {
         return cameraStreamer != null ? cameraStreamer.getRtspPort() : TrainingSandboxEnvironment.DEFAULT_RTSP_PORT;
     }
 
+    public int getWebRelayPort1() {
+        return webrelay1 != null ? webrelay1.getListeningPort() : TrainingSandboxEnvironment.DEFAULT_WEBRELAY_PORT_1;
+    }
+
+    public int getWebRelayPort2() {
+        return webrelay2 != null ? webrelay2.getListeningPort() : TrainingSandboxEnvironment.DEFAULT_WEBRELAY_PORT_2;
+    }
+
     public Map<String, Object> getSandboxActiveStatus() {
         Map<String, Object> out = new LinkedHashMap<>();
         boolean sandbox = TrainingSandboxEnvironment.isSandboxMode();
@@ -213,6 +232,9 @@ public final class TrainingSandboxManager implements Closeable {
         out.put("watermark", TrainingSandboxEnvironment.WATERMARK_TEXT);
         out.put("activeTrack", activeTrack);
         out.put("stagingInProgress", stagingInProgress);
+        out.put("busyOccupancy",
+                (rapiscan1 != null && rapiscan1.isBusyOccupancy())
+                        || (rapiscan2 != null && rapiscan2.isBusyOccupancy()));
         out.put("stageStatusMessage", stageStatusMessage);
         out.put("startedEpochSeconds", TrainingSandboxEnvironment.getStartedEpochSeconds());
         out.put("expiresEpochSeconds", TrainingSandboxEnvironment.getExpiresEpochSeconds());
@@ -233,6 +255,9 @@ public final class TrainingSandboxManager implements Closeable {
         endpoints.put("containerId1", TrainingSandboxEnvironment.CONTAINER_1);
         endpoints.put("containerId2", TrainingSandboxEnvironment.CONTAINER_2);
         endpoints.put("plate1", TrainingSandboxEnvironment.PLATE_1);
+        endpoints.put("webRelayHost", "127.0.0.1");
+        endpoints.put("webRelayPort1", getWebRelayPort1());
+        endpoints.put("webRelayPort2", getWebRelayPort2());
         endpoints.put("localUffSamplePath", uffShareDir != null ? uffShareDir.toString() : "/var/lib/oscar/sandbox-tutorial/uff-share");
         out.put("loopbackEndpoints", endpoints);
 
@@ -243,12 +268,15 @@ public final class TrainingSandboxManager implements Closeable {
 
     public Map<String, Object> injectScenario(String scenario, Integer laneSlot) {
         requireSandboxActive();
+        String normScenario = scenario == null ? "" : scenario.trim().toLowerCase(Locale.ROOT);
+        if ("stage_webrelay_demo".equals(normScenario)) {
+            return stageLoopbackWebRelayDemoLane();
+        }
         int slot = (laneSlot != null && laneSlot == 2) ? 2 : 1;
         SandboxRapiscanLoopbackServer target = (slot == 2) ? rapiscan2 : rapiscan1;
         if (target == null) {
             throw new IllegalStateException("Sandbox Rapiscan loopback emulator is not started.");
         }
-        String normScenario = scenario == null ? "" : scenario.trim().toLowerCase(Locale.ROOT);
         boolean isFaultOnly = "fault_gamma_high".equals(normScenario)
                 || "fault_tamper".equals(normScenario)
                 || "clear_faults".equals(normScenario);
@@ -262,6 +290,58 @@ public final class TrainingSandboxManager implements Closeable {
         res.put("laneSlot", slot);
         res.put("message", message);
         return res;
+    }
+
+    private Map<String, Object> stageLoopbackWebRelayDemoLane() {
+        try {
+            LaneSystem targetLane = null;
+            if (hub != null && hub.getModuleRegistry() != null) {
+                var existing = hub.getModuleRegistry().getLoadedModules(LaneSystem.class);
+                if (!existing.isEmpty()) {
+                    targetLane = existing.iterator().next();
+                }
+            }
+            if (targetLane == null) {
+                targetLane = ensureSandboxLaneLoaded(
+                        "DemoLane01",
+                        "demo-lane-01",
+                        List.of("north-gate"),
+                        35.9312,
+                        -84.3100,
+                        getRapiscanPort1(),
+                        "/tutorial-cam",
+                        true);
+                waitForRpmClientConnected(rapiscan1, 5_000L);
+            }
+            LaneConfig lcfg = targetLane.getConfiguration();
+            WebRelayConfig wr = new WebRelayConfig();
+            wr.enabled = true;
+            wr.mode = WebRelayOperatingMode.AUTO;
+            wr.primaryHost = "127.0.0.1";
+            wr.primaryPort = getWebRelayPort1();
+            wr.ancillaryEnabled = true;
+            wr.ancillaryHost = "127.0.0.1";
+            wr.ancillaryPort = getWebRelayPort2();
+            wr.suppressExtendedOccupancyGamma = true;
+            wr.soundOnNeutronAlarm = true;
+            wr.alarmPulseSeconds = 10;
+            wr.pollIntervalSeconds = 10;
+            lcfg.webRelayConfig = wr;
+            targetLane.refreshWebRelayRuntime();
+            if (targetLane.getWebRelayController() != null) {
+                targetLane.getWebRelayController().pollAndReconcileNow();
+            }
+            Map<String, Object> res = new LinkedHashMap<>();
+            res.put("ok", true);
+            res.put("scenario", "stage_webrelay_demo");
+            res.put("laneSlot", 1);
+            res.put("message", "Staged " + targetLane.getName()
+                    + " with live loopback WebRelay-Quad (Primary 127.0.0.1:" + getWebRelayPort1()
+                    + ", Ancillary 127.0.0.1:" + getWebRelayPort2() + ", AUTO mode armed R1=1, R2=1).");
+            return res;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed staging loopback WebRelay demo lane: " + e.getMessage(), e);
+        }
     }
 
     public Map<String, Object> stageTrack(String rawTrack) throws Exception {
@@ -507,7 +587,10 @@ public final class TrainingSandboxManager implements Closeable {
 
             int idx = 0;
             for (UnadjudicatedAlarmRef ref : pending) {
-                LaneSystem owner = (lane2 != null && ref.systemUid.contains("tutorial-lane-02")) ? lane2 : lane1;
+                LaneSystem owner = (lane2 != null
+                        && (ref.systemUid.contains("demo-lane-02") || ref.systemUid.contains("tutorial-lane-02")))
+                        ? lane2
+                        : lane1;
                 if (idx == 0) {
                     submitSeededAdjudication(
                             owner,
@@ -664,6 +747,8 @@ public final class TrainingSandboxManager implements Closeable {
         int startedLanes = 0;
         int lanesWithCamera = 0;
         int lanesWithOcr = 0;
+        int webRelayConfigured = 0;
+        int webRelayOnline = 0;
         Set<String> viewKeys = new HashSet<>();
 
         if (hub != null && hub.getModuleRegistry() != null) {
@@ -681,6 +766,13 @@ public final class TrainingSandboxManager implements Closeable {
                     }
                     if (lcfg.ocrConfig != null && lcfg.ocrConfig.enabled) {
                         lanesWithOcr++;
+                    }
+                    if (lcfg.webRelayConfig != null && lcfg.webRelayConfig.enabled) {
+                        webRelayConfigured++;
+                        var wrCtrl = lane.getWebRelayController();
+                        if (wrCtrl != null && wrCtrl.getStatusSnapshot().primaryState().online()) {
+                            webRelayOnline++;
+                        }
                     }
                     if (lcfg.operationalViewKeys != null) {
                         viewKeys.addAll(lcfg.operationalViewKeys);
@@ -871,6 +963,8 @@ public final class TrainingSandboxManager implements Closeable {
         v.put("policyPackActive", policyPackActive);
         v.put("cargoUffEnabled", uffEnabled);
         v.put("cargoUffIndexedCount", uffIndexedCount);
+        v.put("webRelayConfiguredCount", webRelayConfigured);
+        v.put("webRelayOnlineCount", webRelayOnline);
         return v;
     }
 
@@ -900,7 +994,7 @@ public final class TrainingSandboxManager implements Closeable {
 
             Instant now = Instant.now();
             pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
-                    "OSCAR 3.11.7 Hands-On Training Completion Record",
+                    "OSCAR 3.11.8 Hands-On Training Completion Record",
                     nodeId,
                     "Trainee: " + safeTrainee,
                     TrainingSandboxEnvironment.WATERMARK_TEXT + "  |  Zero Production Database / Parquet Impact",
@@ -996,6 +1090,14 @@ public final class TrainingSandboxManager implements Closeable {
         if (cameraStreamer != null) {
             cameraStreamer.close();
             cameraStreamer = null;
+        }
+        if (webrelay1 != null) {
+            webrelay1.close();
+            webrelay1 = null;
+        }
+        if (webrelay2 != null) {
+            webrelay2.close();
+            webrelay2 = null;
         }
         if (rapiscan1 != null) {
             rapiscan1.close();

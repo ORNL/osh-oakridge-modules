@@ -28,6 +28,8 @@ public final class TrainingSandboxEnvironment {
     public static final int DEFAULT_RAPISCAN_PORT_1 = 10099;
     public static final int DEFAULT_RAPISCAN_PORT_2 = 10100;
     public static final int DEFAULT_RTSP_PORT = 8554;
+    public static final int DEFAULT_WEBRELAY_PORT_1 = 10180;
+    public static final int DEFAULT_WEBRELAY_PORT_2 = 10181;
 
     public static final String WATERMARK_TEXT = "TRAINING SANDBOX — NON-OPERATIONAL";
     public static final String WATERMARK_BANNER = "TRAINING SANDBOX — NON-OPERATIONAL PRACTICE DATA (FLUSHED ON EXIT)";

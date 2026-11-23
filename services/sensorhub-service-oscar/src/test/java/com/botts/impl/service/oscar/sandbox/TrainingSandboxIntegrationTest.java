@@ -14,6 +14,7 @@ import com.botts.impl.service.oscar.uff.UffZipReader;
 import com.botts.impl.service.oscar.uff.WcoUffModels;
 import com.botts.impl.service.oscar.uff.WcoUffParser;
 import com.botts.impl.system.lane.config.LaneConfig;
+import com.botts.impl.system.lane.helpers.webrelay.WebRelayQuadClient;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.apache.pdfbox.Loader;
@@ -65,6 +66,8 @@ public class TrainingSandboxIntegrationTest {
         System.clearProperty(SandboxHostControlBridge.PROP_CONTROL_DIR);
         System.clearProperty("oscar.sandbox.rapiscanPort1");
         System.clearProperty("oscar.sandbox.rapiscanPort2");
+        System.clearProperty("oscar.sandbox.webRelayPort1");
+        System.clearProperty("oscar.sandbox.webRelayPort2");
         System.clearProperty("oscar.sandbox.skipRtsp");
         System.clearProperty("oscar.sandbox.skipAutoStage");
         if (tempRoot != null && Files.exists(tempRoot)) {
@@ -293,6 +296,8 @@ public class TrainingSandboxIntegrationTest {
         System.setProperty(TrainingSandboxManager.PROP_WORK_DIR, tempRoot.resolve("work").toString());
         System.setProperty("oscar.sandbox.rapiscanPort1", "0");
         System.setProperty("oscar.sandbox.rapiscanPort2", "0");
+        System.setProperty("oscar.sandbox.webRelayPort1", "0");
+        System.setProperty("oscar.sandbox.webRelayPort2", "0");
         System.setProperty("oscar.sandbox.skipRtsp", "true");
         System.setProperty("oscar.sandbox.skipAutoStage", "true");
 
@@ -409,6 +414,22 @@ public class TrainingSandboxIntegrationTest {
                 assertNotNull(normEval);
                 assertTrue(normEval.isAutoReleaseNonThreat());
             }
+
+            // 1b. Verify SandboxWebRelayLoopbackServer responds to WebRelayQuadClient (Lab 3.5)
+            int wrPort = manager.getWebRelayPort1();
+            assertTrue(wrPort > 0);
+            WebRelayQuadClient wrClient = new WebRelayQuadClient();
+            WebRelayQuadClient.EndpointSpec wrEndpoint = new WebRelayQuadClient.EndpointSpec("127.0.0.1", wrPort, "", "");
+            var initSnap = wrClient.readState(wrEndpoint);
+            assertTrue(initSnap.online());
+            assertTrue(initSnap.isPassThrough());
+            var armedSnap = wrClient.setArmedIntercept(wrEndpoint);
+            assertTrue(armedSnap.isArmedIntercept());
+            var pulseSnap = wrClient.pulseIndicators(wrEndpoint, true, false, 1);
+            assertTrue(pulseSnap.isGammaIndicatorActive());
+            assertFalse(pulseSnap.isNeutronIndicatorActive());
+            var passSnap = wrClient.setPassThrough(wrEndpoint);
+            assertTrue(passSnap.isPassThrough());
 
             // 2. Render 1-page PDF Training Completion Certificate and verify watermark text
             String certBody = """
