@@ -972,6 +972,7 @@ public final class TrainingSandboxManager implements Closeable {
         v.put("lanesWithCameraCount", lanesWithCamera);
         v.put("lanesWithOcrCount", lanesWithOcr);
         v.put("operationalViewCount", viewKeys.size());
+        v.put("operationalViews", viewKeys.stream().sorted().toList());
         v.put("totalOccupancies", totalOccupancies);
         v.put("gammaAlarmCount", gammaAlarms);
         v.put("neutronAlarmCount", neutronAlarms);
@@ -1018,7 +1019,7 @@ public final class TrainingSandboxManager implements Closeable {
 
             Instant now = Instant.now();
             pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
-                    "OSCAR 3.11.9 Hands-On Training Completion Record",
+                    "OSCAR 3.11.10 Hands-On Training Completion Record",
                     nodeId,
                     "Trainee: " + safeTrainee,
                     TrainingSandboxEnvironment.WATERMARK_TEXT + "  |  Zero Production Database / Parquet Impact",
