@@ -27,10 +27,10 @@ public abstract class SerialReport {
     private final byte componentId;
     private final byte reportId;
 
-    private static String reportName = "Report";
-    private static String reportLabel = "Report";
-    private static String reportDescription = "Report";
-    private static String reportDefinition = SWEHelper.getPropertyUri(reportName);
+    private String reportName = "Report";
+    private String reportLabel = "Report";
+    private String reportDescription = "Report";
+    private String reportDefinition = SWEHelper.getPropertyUri("Report");
     private static final int overheadLength = KROMEK_SERIAL_MESSAGE_OVERHEAD + KROMEK_SERIAL_REPORTS_HEADER_OVERHEAD;
     private int pollingRate = 1;
 
@@ -173,7 +173,7 @@ public abstract class SerialReport {
      *
      * @return The name of the report.
      */
-    public static String getReportName() {
+    public String getReportName() {
         return reportName;
     }
 
@@ -184,7 +184,7 @@ public abstract class SerialReport {
      * @param reportName The name of the report.
      */
     void setReportName(String reportName) {
-        SerialReport.reportName = reportName;
+        this.reportName = reportName;
     }
 
     /**
@@ -193,7 +193,7 @@ public abstract class SerialReport {
      *
      * @return The label for the report.
      */
-    public static String getReportLabel() {
+    public String getReportLabel() {
         return reportLabel;
     }
 
@@ -204,7 +204,7 @@ public abstract class SerialReport {
      * @param reportLabel The label for the report.
      */
     void setReportLabel(String reportLabel) {
-        SerialReport.reportLabel = reportLabel;
+        this.reportLabel = reportLabel;
     }
 
     /**
@@ -213,7 +213,7 @@ public abstract class SerialReport {
      *
      * @return The description for the report.
      */
-    public static String getReportDescription() {
+    public String getReportDescription() {
         return reportDescription;
     }
 
@@ -224,7 +224,7 @@ public abstract class SerialReport {
      * @param reportDescription The description for the report.
      */
     void setReportDescription(String reportDescription) {
-        SerialReport.reportDescription = reportDescription;
+        this.reportDescription = reportDescription;
     }
 
     /**
@@ -233,7 +233,7 @@ public abstract class SerialReport {
      *
      * @return The definition for the report.
      */
-    public static String getReportDefinition() {
+    public String getReportDefinition() {
         return reportDefinition;
     }
 
@@ -244,7 +244,7 @@ public abstract class SerialReport {
      * @param reportDefinition The definition for the report.
      */
     void setReportDefinition(String reportDefinition) {
-        SerialReport.reportDefinition = reportDefinition;
+        this.reportDefinition = reportDefinition;
     }
 
     /**

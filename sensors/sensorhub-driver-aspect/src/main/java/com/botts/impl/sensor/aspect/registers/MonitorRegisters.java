@@ -45,42 +45,38 @@ public class MonitorRegisters {
     }
 
     public void readRegisters(int unitID) throws ModbusException {
-        try{
-            if(!tcpMasterConnection.isConnected()){
-                throw new IllegalStateException("TCP connection was not established!");
-            }
-
-            ReadMultipleRegistersRequest readMultipleRegistersRequest = new ReadMultipleRegistersRequest(ref, count);
-            readMultipleRegistersRequest.setUnitID(unitID);
-
-            ModbusTCPTransaction modbusTCPTransaction = new ModbusTCPTransaction(tcpMasterConnection);
-            modbusTCPTransaction.setRequest(readMultipleRegistersRequest);
-            modbusTCPTransaction.execute();
-
-            ReadMultipleRegistersResponse response = (ReadMultipleRegistersResponse) modbusTCPTransaction.getResponse();
-
-            timeElapsed = convertRegistersToInteger(response.getRegisterValue(0), response.getRegisterValue(1));
-            inputSignals = response.getRegisterValue(2);
-            gammaChannelStatus = response.getRegisterValue(3);
-            gammaChannelCount = convertRegistersToInteger(response.getRegisterValue(4), response.getRegisterValue(5));
-            gammaChannelBackground = convertRegistersToFloat(response.getRegisterValue(6), response.getRegisterValue(7));
-            gammaChannelVariance = convertRegistersToFloat(response.getRegisterValue(8), response.getRegisterValue(9));
-            neutronChannelStatus = response.getRegisterValue(10);
-            neutronChannelCount = convertRegistersToInteger(response.getRegisterValue(11), response.getRegisterValue(12));
-            neutronChannelBackground = convertRegistersToFloat(response.getRegisterValue(13), response.getRegisterValue(14));
-            neutronChannelVariance = convertRegistersToFloat(response.getRegisterValue(15), response.getRegisterValue(16));
-            objectCount = response.getRegisterValue(17);
-            objectMark = response.getRegisterValue(18);
-            objectSpeed = response.getRegisterValue(19);
-            outputSignals = response.getRegisterValue(20);
-
-            log.debug("Registers read successfully: ", this.toString());
-        }catch(ModbusException e){
-            log.debug("Error reading Modbus Registers: ", e);
-        }catch(Exception e){
-            log.debug("Error: ",e);
+        if (tcpMasterConnection == null || !tcpMasterConnection.isConnected()) {
+            throw new ModbusException("TCP connection was not established!");
         }
 
+        ReadMultipleRegistersRequest readMultipleRegistersRequest = new ReadMultipleRegistersRequest(ref, count);
+        readMultipleRegistersRequest.setUnitID(unitID);
+
+        ModbusTCPTransaction modbusTCPTransaction = new ModbusTCPTransaction(tcpMasterConnection);
+        modbusTCPTransaction.setRequest(readMultipleRegistersRequest);
+        modbusTCPTransaction.execute();
+
+        if (!(modbusTCPTransaction.getResponse() instanceof ReadMultipleRegistersResponse response)
+                || response.getWordCount() < count) {
+            throw new ModbusException("Malformed or truncated Aspect monitor register response");
+        }
+
+        timeElapsed = convertRegistersToInteger(response.getRegisterValue(0), response.getRegisterValue(1));
+        inputSignals = response.getRegisterValue(2);
+        gammaChannelStatus = response.getRegisterValue(3);
+        gammaChannelCount = convertRegistersToInteger(response.getRegisterValue(4), response.getRegisterValue(5));
+        gammaChannelBackground = convertRegistersToFloat(response.getRegisterValue(6), response.getRegisterValue(7));
+        gammaChannelVariance = convertRegistersToFloat(response.getRegisterValue(8), response.getRegisterValue(9));
+        neutronChannelStatus = response.getRegisterValue(10);
+        neutronChannelCount = convertRegistersToInteger(response.getRegisterValue(11), response.getRegisterValue(12));
+        neutronChannelBackground = convertRegistersToFloat(response.getRegisterValue(13), response.getRegisterValue(14));
+        neutronChannelVariance = convertRegistersToFloat(response.getRegisterValue(15), response.getRegisterValue(16));
+        objectCount = response.getRegisterValue(17);
+        objectMark = response.getRegisterValue(18);
+        objectSpeed = response.getRegisterValue(19);
+        outputSignals = response.getRegisterValue(20);
+
+        log.debug("Registers read successfully: {}", this);
     }
 
     public String toString() {

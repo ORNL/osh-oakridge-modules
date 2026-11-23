@@ -16,6 +16,7 @@ import com.botts.impl.sensor.kromek.d5.reports.SerialReport;
 import com.fazecast.jSerialComm.SerialPort;
 
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -30,44 +31,42 @@ import static com.botts.impl.sensor.kromek.d5.reports.SerialReport.bytesToUInt;
 public class Shared {
     /**
      * Receive data from the given input stream.
-     * Reads until a framing byte is received, then reads the length, then reads the rest of the message.
+     * Reads until a SLIP start framing byte is received, skips extra framing bytes,
+     * and collects the SLIP-encoded body up to the closing framing delimiter.
      *
      * @param in The input stream to read from.
-     * @return The received data, excluding overhead.
+     * @return The SLIP-encoded frame body between framing bytes.
      */
     static byte[] receiveData(InputStream in) throws IOException {
-        List<Byte> output = new ArrayList<>();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
         int b;
 
         // Read until we get a framing byte
         do {
             b = in.read();
+            if (b == -1) {
+                throw new EOFException("Unexpected end of stream before Kromek D5 SLIP frame delimiter");
+            }
         } while ((byte) b != KROMEK_SERIAL_FRAMING_FRAME_BYTE);
 
         // Read until we get a non-framing byte. Extra framing bytes are harmless and can be ignored.
         do {
             b = in.read();
+            if (b == -1) {
+                throw new EOFException("Unexpected end of stream after Kromek D5 SLIP start delimiter");
+            }
         } while ((byte) b == KROMEK_SERIAL_FRAMING_FRAME_BYTE);
 
-        // The first two bytes after framing byte are the message length
-        byte length1 = (byte) b;
-        byte length2 = (byte) in.read();
-        int length = bytesToUInt(length1, length2);
-
-        output.add(length1);
-        output.add(length2);
-
-        // Read the rest of the message, excluding the two bytes we already read
-        for (int i = 0; i < length - 2; i++) {
+        // Read SLIP frame body up to the closing framing delimiter
+        while ((byte) b != KROMEK_SERIAL_FRAMING_FRAME_BYTE) {
+            output.write(b);
             b = in.read();
-            output.add((byte) b);
+            if (b == -1) {
+                throw new EOFException("Truncated Kromek D5 SLIP frame before closing delimiter");
+            }
         }
 
-        byte[] result = new byte[output.size()];
-        for (int i = 0; i < output.size(); i++) {
-            result[i] = output.get(i);
-        }
-        return result;
+        return output.toByteArray();
     }
 
     /**
@@ -106,6 +105,16 @@ public class Shared {
 
         // Decode the received data using SLIP framing
         byte[] decodedData = decodeSLIP(receivedData);
+        int minFrameLength = KROMEK_SERIAL_MESSAGE_OVERHEAD + KROMEK_SERIAL_REPORTS_HEADER_OVERHEAD;
+        if (decodedData.length < minFrameLength) {
+            throw new IOException("Truncated Kromek D5 frame: expected at least "
+                    + minFrameLength + " bytes, got " + decodedData.length);
+        }
+        int declaredLength = bytesToUInt(decodedData[0], decodedData[1]);
+        if (declaredLength != decodedData.length) {
+            throw new IOException("Malformed Kromek D5 frame length: declared "
+                    + declaredLength + " bytes, decoded " + decodedData.length);
+        }
 
         // The first five bytes are the header
         byte componentId = decodedData[3];
@@ -158,29 +167,28 @@ public class Shared {
      * If it finds any ESC bytes, it replaces the escaped byte sequences with the original bytes.
      */
     public static byte[] decodeSLIP(byte[] input) {
-        List<Byte> output = new ArrayList<>();
+        ByteArrayOutputStream output = new ByteArrayOutputStream(input.length);
         for (int i = 0; i < input.length; ) {
             byte b = input[i];
-            if (b == KROMEK_SERIAL_FRAMING_ESC_BYTE && i < input.length - 1) {
+            if (b == KROMEK_SERIAL_FRAMING_ESC_BYTE) {
+                if (i >= input.length - 1) {
+                    throw new IllegalArgumentException("Truncated SLIP escape sequence at end of frame");
+                }
                 byte nextByte = input[i + 1];
                 if (nextByte == KROMEK_SERIAL_FRAMING_ESC_FRAME_BYTE) {
-                    output.add(KROMEK_SERIAL_FRAMING_FRAME_BYTE);
+                    output.write(KROMEK_SERIAL_FRAMING_FRAME_BYTE);
                 } else if (nextByte == KROMEK_SERIAL_FRAMING_ESC_ESC_BYTE) {
-                    output.add(KROMEK_SERIAL_FRAMING_ESC_BYTE);
+                    output.write(KROMEK_SERIAL_FRAMING_ESC_BYTE);
                 } else {
-                    throw new RuntimeException("Invalid SLIP escape sequence: " + nextByte);
+                    throw new IllegalArgumentException("Invalid SLIP escape sequence: " + nextByte);
                 }
                 i += 2;
             } else {
-                output.add(b);
+                output.write(b);
                 i++;
             }
         }
 
-        byte[] result = new byte[output.size()];
-        for (int i = 0; i < output.size(); i++) {
-            result[i] = output.get(i);
-        }
-        return result;
+        return output.toByteArray();
     }
 }
