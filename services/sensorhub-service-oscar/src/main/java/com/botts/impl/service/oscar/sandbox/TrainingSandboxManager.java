@@ -32,6 +32,8 @@ import org.sensorhub.api.datastore.obs.DataStreamKey;
 import org.sensorhub.api.datastore.obs.ObsFilter;
 import org.sensorhub.api.module.ModuleEvent;
 import org.sensorhub.api.sensor.PositionConfig;
+import org.sensorhub.impl.system.CommandStreamTransactionHandler;
+import org.sensorhub.impl.system.SystemDatabaseTransactionHandler;
 import org.sensorhub.impl.utils.rad.RADHelper;
 import org.sensorhub.impl.utils.rad.eml.EmlRuntimeRegistry;
 import org.sensorhub.impl.utils.rad.model.Adjudication;
@@ -687,13 +689,35 @@ public final class TrainingSandboxManager implements Closeable {
                     .vehicleId(vehicleId)
                     .feedback(feedback)
                     .build();
-            CommandData cmd = new CommandData.Builder()
-                    .withId(org.sensorhub.api.common.BigId.fromLong(0, commandSeq.incrementAndGet()))
-                    .withCommandStream(BigIdHelper.zeroBigId())
-                    .withSender("sandbox-supervisor")
-                    .withParams(Adjudication.fromAdjudication(adj))
-                    .build();
-            adjControl.submitCommand(cmd).get(5, TimeUnit.SECONDS);
+            IObsSystemDatabase db = hub != null && hub.getDatabaseRegistry() != null
+                    ? hub.getDatabaseRegistry().getFederatedDatabase()
+                    : null;
+            CommandStreamTransactionHandler cmdTxn = null;
+            if (db != null && hub.getEventBus() != null) {
+                var sysTxnHandler = new SystemDatabaseTransactionHandler(hub.getEventBus(), db);
+                cmdTxn = sysTxnHandler.getCommandStreamHandler(
+                        lane.getUniqueIdentifier(), AdjudicationControl.NAME);
+            }
+            if (cmdTxn != null) {
+                CommandData cmd = new CommandData.Builder()
+                        .withSender("sandbox-supervisor")
+                        .withCommandStream(cmdTxn.getCommandStreamKey().getInternalID())
+                        .withParams(Adjudication.fromAdjudication(adj))
+                        .build();
+                cmdTxn.submitCommand(
+                        commandSeq.incrementAndGet(),
+                        cmd,
+                        10,
+                        TimeUnit.SECONDS).get(10, TimeUnit.SECONDS);
+            } else {
+                CommandData cmd = new CommandData.Builder()
+                        .withId(org.sensorhub.api.common.BigId.fromLong(0, commandSeq.incrementAndGet()))
+                        .withCommandStream(BigIdHelper.zeroBigId())
+                        .withSender("sandbox-supervisor")
+                        .withParams(Adjudication.fromAdjudication(adj))
+                        .build();
+                adjControl.submitCommand(cmd).get(5, TimeUnit.SECONDS);
+            }
         } catch (Exception e) {
             log.debug("Seeded adjudication skipped: {}", e.getMessage());
         }
