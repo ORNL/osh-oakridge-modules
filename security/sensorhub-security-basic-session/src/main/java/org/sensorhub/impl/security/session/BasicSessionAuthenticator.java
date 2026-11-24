@@ -99,6 +99,7 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
     private static final String LOGOUT_PATH = "/logout";
     private static final String SESSION_PATH = "/session";
     private static final String SENSORHUB_SESSION_PATH = "/sensorhub/session";
+    private static final String RESPONSE_SENT_ATTRIBUTE = BasicSessionAuthenticator.class.getName() + ".responseSent";
     private static final String LANGUAGE_COOKIE_NAME = "osh-language";
     private static final int LANGUAGE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
     private static final int MAX_AUTH_HEADER_LENGTH = 16 * 1024;
@@ -212,8 +213,27 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
         return true;
     }
 
+    /**
+     * Several Jetty security handlers share this authenticator: the {@code /sensorhub} servlet
+     * context and the viewer's root file server, whose handler wraps its context and so sees
+     * every path. Jetty records a logged-in result on the request, but not a response this
+     * authenticator wrote itself (session API, login, enrollment, logout), so a later handler
+     * would call it again for the same request and repeat the side effects: a second invite
+     * that revokes the one just returned, or a second password reset that overwrites the
+     * temporary password just shown. Answer each request at most once.
+     */
     @Override
     public Authentication validateRequest(ServletRequest req, ServletResponse resp, boolean mandatory)
+            throws ServerAuthException {
+        if (req.getAttribute(RESPONSE_SENT_ATTRIBUTE) != null)
+            return Authentication.SEND_CONTINUE;
+        Authentication result = validateRequestOnce(req, resp, mandatory);
+        if (result instanceof Authentication.ResponseSent)
+            req.setAttribute(RESPONSE_SENT_ATTRIBUTE, Boolean.TRUE);
+        return result;
+    }
+
+    private Authentication validateRequestOnce(ServletRequest req, ServletResponse resp, boolean mandatory)
             throws ServerAuthException {
         HttpServletRequest request = (HttpServletRequest) req;
         HttpServletResponse response = (HttpServletResponse) resp;

@@ -208,7 +208,13 @@ public class BasicSessionAuthenticatorTest
         assertEquals(204, logoutResp.status);
 
         ResponseCapture afterLogoutResp = new ResponseCapture();
-        auth2.validateRequest(sessReq, afterLogoutResp.proxy(), true);
+        HttpServletRequest afterLogoutReq = createRequest(
+            "GET",
+            "/sensorhub/session",
+            Map.of(),
+            new Cookie[] {new Cookie("OSCAR_SESSION", sessionToken)},
+            Map.of("Host", "oscar.local"));
+        auth2.validateRequest(afterLogoutReq, afterLogoutResp.proxy(), true);
         assertEquals(401, afterLogoutResp.status);
     }
 
@@ -772,6 +778,69 @@ public class BasicSessionAuthenticatorTest
     }
 
 
+    @Test
+    public void answersEachRequestOnceWhenTwoSecurityHandlersShareTheAuthenticator() throws Exception
+    {
+        Path storePath = tempFolder.newFile("oscar-double-dispatch.json").toPath();
+        Files.deleteIfExists(storePath);
+        InMemoryUserRegistry registry = new InMemoryUserRegistry();
+        registry.addAdmin("admin", "StrongAdminPassword!23");
+        BasicSessionAuthenticator auth = createAuthenticator(storePath, registry);
+        Cookie[] adminCookies = {signIn(auth, "admin", "StrongAdminPassword!23")};
+
+        ResponseCapture created = new ResponseCapture();
+        auth.validateRequest(createJsonRequest("POST", "/sensorhub/session/admin/users",
+            "{\"username\":\"Mike\",\"role\":\"operator\"}", adminCookies, "oscar.local"), created.proxy(), true);
+        assertEquals(201, created.status);
+
+        // On a live node the /sensorhub servlet context and the root file server both run this
+        // authenticator for /sensorhub/session requests, so the same request arrives twice.
+        HttpServletRequest inviteRequest = createJsonRequest("POST", "/sensorhub/session/admin/users/Mike/invite",
+            "{\"inviteExpiresInHours\":168}", adminCookies, "oscar.local");
+        ResponseCapture invite = new ResponseCapture();
+        assertEquals(Authentication.SEND_CONTINUE, auth.validateRequest(inviteRequest, invite.proxy(), true));
+        ResponseCapture inviteAgain = new ResponseCapture();
+        assertEquals(Authentication.SEND_CONTINUE, auth.validateRequest(inviteRequest, inviteAgain.proxy(), true));
+        assertEquals("The second pass must not write a response", 0, inviteAgain.out.size());
+
+        String inviteToken = JsonParser.parseString(invite.bodyUtf8()).getAsJsonObject().get("inviteToken").getAsString();
+        assertEquals("The QR invite shown to the admin must open the enrollment page", 200, openEnrollPage(auth, inviteToken));
+
+        HttpServletRequest resetRequest = createJsonRequest("POST", "/sensorhub/session/admin/users/Mike/reset-password",
+            "{\"mustChangePassword\":true}", adminCookies, "oscar.local");
+        ResponseCapture reset = new ResponseCapture();
+        auth.validateRequest(resetRequest, reset.proxy(), true);
+        auth.validateRequest(resetRequest, new ResponseCapture().proxy(), true);
+        JsonObject resetJson = JsonParser.parseString(reset.bodyUtf8()).getAsJsonObject();
+        assertEquals(200, openEnrollPage(auth, resetJson.get("inviteToken").getAsString()));
+
+        ResponseCapture login = new ResponseCapture();
+        auth.validateRequest(createRequest("POST", "/login",
+            Map.of("username", "Mike", "password", resetJson.get("temporaryPassword").getAsString()),
+            null, Map.of("Host", "oscar.local")), login.proxy(), true);
+        assertEquals("The temporary password shown after a reset must work", 302, login.status);
+        assertTrue(login.redirectLocation.startsWith("/login/password-change"));
+    }
+
+
+    private static Cookie signIn(BasicSessionAuthenticator auth, String username, String password) throws Exception
+    {
+        ResponseCapture login = new ResponseCapture();
+        auth.validateRequest(createRequest("POST", "/login", Map.of("username", username, "password", password),
+            null, Map.of("Host", "oscar.local")), login.proxy(), true);
+        return new Cookie("OSCAR_SESSION", extractCookieValue(login.setCookies.get(0), "OSCAR_SESSION"));
+    }
+
+
+    private static int openEnrollPage(BasicSessionAuthenticator auth, String inviteToken) throws Exception
+    {
+        ResponseCapture page = new ResponseCapture();
+        auth.validateRequest(createRequest("GET", "/login/enroll", Map.of("token", inviteToken),
+            null, Map.of("Host", "oscar.local", "Accept", "text/html")), page.proxy(), true);
+        return page.status;
+    }
+
+
     private static String extractCookieValue(String setCookieHeader, String name)
     {
         String prefix = name + "=";
@@ -878,12 +947,21 @@ public class BasicSessionAuthenticatorTest
             Map<String, String> headers,
             byte[] bodyBytes)
     {
+        Map<String, Object> attributes = new HashMap<>();
         return (HttpServletRequest) Proxy.newProxyInstance(
             HttpServletRequest.class.getClassLoader(),
             new Class<?>[] {HttpServletRequest.class},
             (proxy, m, args) -> {
                 switch (m.getName())
                 {
+                    case "getAttribute":
+                        return attributes.get(args[0]);
+                    case "setAttribute":
+                        attributes.put((String) args[0], args[1]);
+                        return null;
+                    case "removeAttribute":
+                        attributes.remove(args[0]);
+                        return null;
                     case "getMethod":
                         return method;
                     case "getContextPath":
