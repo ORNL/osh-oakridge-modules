@@ -673,6 +673,38 @@ public final class OscarIdentityStore {
         return profile == null || profile.enabled;
     }
 
+    /**
+     * Maps a typed sign-in name to the stored account name. Accounts keep the letter case
+     * they were created with, but people type them in any case ("mike" for "Mike"). An
+     * exact match wins; otherwise the one account whose name differs only in case is used.
+     * The input is returned unchanged when no account, or more than one, matches, so the
+     * caller fails exactly as before.
+     */
+    public String resolveUsername(String typed) {
+        if (typed == null || typed.isEmpty() || securityManager == null)
+            return typed;
+        if (securityManager.getUserInfo(typed) != null)
+            return typed;
+        String match = findCaseInsensitiveUser(typed);
+        return match != null ? match : typed;
+    }
+
+    /** The one human account whose name equals {@code username} ignoring case, or null. */
+    private String findCaseInsensitiveUser(String username) {
+        IUserRegistry registry = safeUserRegistry();
+        if (registry == null)
+            return null;
+        String match = null;
+        for (String id : registry.keySet()) {
+            if (id == null || id.startsWith(FED_SERVICE_USER_PREFIX) || !id.equalsIgnoreCase(username))
+                continue;
+            if (match != null)
+                return null;
+            match = id;
+        }
+        return match;
+    }
+
     public synchronized UserProfileRecord ensureProfile(String username) {
         UserProfileRecord existing = profiles.get(username);
         if (existing != null) {
@@ -797,6 +829,10 @@ public final class OscarIdentityStore {
 
         if (securityManager.getUserInfo(cleanUser) != null)
             throw new IllegalArgumentException("User already exists: " + cleanUser);
+        String caseVariant = findCaseInsensitiveUser(cleanUser);
+        if (caseVariant != null)
+            throw new IllegalArgumentException("User already exists: " + caseVariant
+                    + " (usernames are not case-sensitive at sign-in)");
 
         String normalizedRole = normalizeRole(role);
         List<String> sanitizedViews = sanitizeAllowedViews(allowedViews);
@@ -1619,6 +1655,14 @@ public final class OscarIdentityStore {
                 cleanDisplay = cleanDisplay.substring(0, 128);
 
             IUserInfo existing = securityManager.getUserInfo(rawUser);
+            if (existing == null) {
+                String caseVariant = findCaseInsensitiveUser(rawUser);
+                if (caseVariant != null) {
+                    errors.add(new BulkRowError(rowNum, rawUser, "User already exists as '" + caseVariant
+                            + "' (usernames are not case-sensitive at sign-in)"));
+                    continue;
+                }
+            }
             if (existing != null) {
                 if (!reissueExisting) {
                     skippedCount++;
