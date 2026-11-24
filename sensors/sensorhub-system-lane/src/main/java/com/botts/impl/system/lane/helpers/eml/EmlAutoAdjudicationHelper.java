@@ -54,6 +54,7 @@ public final class EmlAutoAdjudicationHelper implements AutoCloseable {
     private final ExecutorService worker;
     private volatile Flow.Subscription subscription;
     private volatile boolean stopped = false;
+    private volatile boolean subscriptionRequested;
 
     public EmlAutoAdjudicationHelper(
             LaneSystem laneSystem,
@@ -88,6 +89,7 @@ public final class EmlAutoAdjudicationHelper implements AutoCloseable {
                     this.subscription = sub;
                     sub.request(Long.MAX_VALUE);
                 });
+        subscriptionRequested = true;
     }
 
     private void onOccupancyEvent(ObsEvent event) {
@@ -303,6 +305,11 @@ public final class EmlAutoAdjudicationHelper implements AutoCloseable {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** Whether this helper subscribed; false when its occupancy producer had no UID yet. */
+    public boolean isAttached() {
+        return !stopped && subscriptionRequested;
     }
 
     public void stop() {

@@ -101,6 +101,9 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     private volatile RpmRecoverySupervisor rpmRecovery = null;
     private volatile boolean autoStartDispatchComplete;
     private final AtomicBoolean syncingEndpoints = new AtomicBoolean(false);
+    /** Guards creating and stopping the occupancy helpers (EML auto-adjudication, WebID, OCR). */
+    private final Object occupancyHelperLock = new Object();
+    private volatile org.sensorhub.api.datastore.obs.IObsStore laneObsStore;
     Map<String, FFMPEGConfig> ffmpegConfigs = null;
     OccupancyWrapper occupancyWrapper;
     OccupancyStatusOutput occupancyStatusOutput;
@@ -472,34 +475,108 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             return;
         }
         adjudicationControl.setObsStore(obsStore);
+        laneObsStore = obsStore;
 
+        synchronized (occupancyHelperLock) {
+            attachEmlHelper();
+            attachWebIdHelper();
+            attachOcrHelper();
+        }
+
+        refreshWebRelayRuntime();
+    }
+
+    // The occupancy helpers bind to the occupancy producer when they are created. Call these
+    // under occupancyHelperLock.
+
+    private void attachEmlHelper() {
         if (emlAutoAdjudicationHelper != null) {
             emlAutoAdjudicationHelper.stop();
             emlAutoAdjudicationHelper = null;
         }
-        if (occupancyProducer != null) {
-            emlAutoAdjudicationHelper = new EmlAutoAdjudicationHelper(this, occupancyProducer, obsStore);
+        if (occupancyProducer != null && laneObsStore != null) {
+            emlAutoAdjudicationHelper = new EmlAutoAdjudicationHelper(this, occupancyProducer, laneObsStore);
         }
+    }
 
+    /**
+     * Portal lanes, whose RPM is the occupancy producer and has a UID from init, so the EML helper
+     * subscribes at lane start. On RS-350/D5 lanes the occupancy process has no UID yet when the
+     * helper is created, so it never subscribes; re-attaching would newly enable it there.
+     */
+    private boolean emlReattachExpected() {
+        return occupancyProducer != null && occupancyProducer == existingRPMModule;
+    }
+
+    private boolean webIdExpected() {
+        return existingRPMModule != null && WEBID_SENSORS.contains(existingRPMModule.getClass());
+    }
+
+    private void attachWebIdHelper() {
         if (webIdHelper != null) {
             webIdHelper.stop();
         }
-        if (WEBID_SENSORS.contains(existingRPMModule.getClass())) {
-            webIdHelper = new WebIdHelper(this, occupancyProducer);
-        } else {
-            webIdHelper = null;
-        }
+        webIdHelper = webIdExpected() ? new WebIdHelper(this, occupancyProducer) : null;
+    }
 
+    private boolean ocrExpected() {
+        var ocrConfig = getConfiguration().ocrConfig;
+        return ocrConfig != null && ocrConfig.enabled && vehicleOcrOutput != null && occupancyProducer != null;
+    }
+
+    private void attachOcrHelper() {
         if (ocrHelper != null) {
             ocrHelper.stop();
             ocrHelper = null;
         }
-        var ocrConfig = getConfiguration().ocrConfig;
-        if (ocrConfig != null && ocrConfig.enabled && vehicleOcrOutput != null && occupancyProducer != null) {
-            ocrHelper = new OcrHelper(this, occupancyProducer, vehicleOcrOutput, ocrConfig);
+        if (ocrExpected()) {
+            ocrHelper = new OcrHelper(this, occupancyProducer, vehicleOcrOutput, getConfiguration().ocrConfig);
         }
+    }
 
-        refreshWebRelayRuntime();
+    /**
+     * Re-attaches occupancy helpers that gave up because the occupancy producer was not running
+     * when the lane started. WebIdHelper waits 5 s and OcrHelper 10 s for it to reach STARTED, and
+     * both give up at once if it is in error, which is where a detector offline at boot leaves an
+     * RPM. EmlAutoAdjudicationHelper does nothing without a producer UID (re-attached on portal
+     * lanes only, see {@link #emlReattachExpected()}). A detector that comes up later
+     * (RpmRecoverySupervisor, operator restart) therefore left the lane without WebID analysis or
+     * vehicle OCR until the next node restart. Runs on the lane executor once the
+     * lane's auto-start pass is over; a helper that is attached or still waiting is left alone.
+     */
+    private void reattachStrandedOccupancyHelpers() {
+        if (!isStarted() || !autoStartDispatchComplete || laneObsStore == null)
+            return;
+        var pool = threadPool;
+        if (pool == null || pool.isShutdown())
+            return;
+        try {
+            pool.execute(() -> {
+                synchronized (occupancyHelperLock) {
+                    if (!isStarted() || occupancyProducer == null)
+                        return;
+                    List<String> reattached = new ArrayList<>();
+                    if (emlReattachExpected()
+                            && (emlAutoAdjudicationHelper == null || !emlAutoAdjudicationHelper.isAttached())) {
+                        attachEmlHelper();
+                        reattached.add("EML auto-adjudication");
+                    }
+                    if (webIdExpected() && (webIdHelper == null || !webIdHelper.isAttachedOrStarting())) {
+                        attachWebIdHelper();
+                        reattached.add("WebID");
+                    }
+                    if (ocrExpected() && (ocrHelper == null || !ocrHelper.isAttachedOrStarting())) {
+                        attachOcrHelper();
+                        reattached.add("vehicle OCR");
+                    }
+                    if (!reattached.isEmpty())
+                        getLogger().info("Re-attached {} after the occupancy source of lane {} started late",
+                                String.join(", ", reattached), getName());
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // The lane is stopping; its next start creates the helpers again.
+        }
     }
 
     protected void doStop() throws SensorHubException {
@@ -510,17 +587,21 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             webRelayController.close();
             webRelayController = null;
         }
-        if (emlAutoAdjudicationHelper != null) {
-            emlAutoAdjudicationHelper.stop();
-            emlAutoAdjudicationHelper = null;
-        }
-        if (ocrHelper != null) {
-            ocrHelper.stop();
-            ocrHelper = null;
+        synchronized (occupancyHelperLock) {
+            if (emlAutoAdjudicationHelper != null) {
+                emlAutoAdjudicationHelper.stop();
+                emlAutoAdjudicationHelper = null;
+            }
+            if (ocrHelper != null) {
+                ocrHelper.stop();
+                ocrHelper = null;
+            }
         }
         super.doStop();
-        if (webIdHelper != null) {
-            webIdHelper.stop();
+        synchronized (occupancyHelperLock) {
+            if (webIdHelper != null) {
+                webIdHelper.stop();
+            }
         }
         if (occupancyProducer != null && occupancyProducer != existingRPMModule) {
             removeSubSystem(occupancyProducer.getConfiguration().id);
@@ -539,13 +620,15 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             webRelayController.close();
             webRelayController = null;
         }
-        if (emlAutoAdjudicationHelper != null) {
-            emlAutoAdjudicationHelper.stop();
-            emlAutoAdjudicationHelper = null;
-        }
-        if (ocrHelper != null) {
-            ocrHelper.stop();
-            ocrHelper = null;
+        synchronized (occupancyHelperLock) {
+            if (emlAutoAdjudicationHelper != null) {
+                emlAutoAdjudicationHelper.stop();
+                emlAutoAdjudicationHelper = null;
+            }
+            if (ocrHelper != null) {
+                ocrHelper.stop();
+                ocrHelper = null;
+            }
         }
         super.cleanup();
 
@@ -674,6 +757,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                         if (occupancyWrapper != null)
                             occupancyWrapper.start();
                         refreshWebRelayRuntime();
+                        reattachStrandedOccupancyHelpers();
                     } else if (event.getNewState() == ModuleEvent.ModuleState.STOPPING) {
                         if (occupancyWrapper != null)
                             occupancyWrapper.stop();
