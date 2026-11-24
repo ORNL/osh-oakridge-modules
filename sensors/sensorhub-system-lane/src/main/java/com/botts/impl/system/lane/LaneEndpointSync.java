@@ -22,11 +22,14 @@ import com.botts.impl.sensor.aspect.comm.ModbusTCPCommProviderConfig;
 import com.botts.impl.sensor.rapiscan.EMLConfig;
 import com.botts.impl.sensor.rapiscan.RapiscanConfig;
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
+import com.botts.impl.sensor.kromek.d5.D5Config;
+import com.botts.impl.sensor.kromek.d5.D5Sensor;
 import com.botts.impl.sensor.rs350.RS350Config;
 import com.botts.impl.sensor.rs350.RS350Sensor;
 import com.botts.impl.system.lane.config.AspectRPMConfig;
 import com.botts.impl.system.lane.config.AxisCameraConfig;
 import com.botts.impl.system.lane.config.CustomCameraConfig;
+import com.botts.impl.system.lane.config.D5RPMConfig;
 import com.botts.impl.system.lane.config.FFMpegConfig;
 import com.botts.impl.system.lane.config.LaneConfig;
 import com.botts.impl.system.lane.config.RPMConfig;
@@ -399,9 +402,22 @@ public final class LaneEndpointSync {
             comm.connection.connectTimeout = 5000;
             comm.connection.reconnectAttempts = 10;
             config = rs350Config;
+        } else if (rpmConfig instanceof D5RPMConfig d5RPMConfig) {
+            // Kromek D5 (mobile detector lanes)
+            D5Config d5Config = new D5Config();
+            d5Config.serialNumber = laneConfig.uniqueID;
+            d5Config.moduleClass = D5Sensor.class.getCanonicalName();
+
+            var comm = new TCPCommProviderConfig();
+            comm.protocol.remoteHost = d5RPMConfig.remoteHost;
+            comm.protocol.remotePort = d5RPMConfig.remotePort;
+            comm.connection.connectTimeout = 5000;
+            comm.connection.reconnectAttempts = 10;
+            d5Config.commSettings = comm;
+            config = d5Config;
         } else {
             throw new IllegalArgumentException(
-                    "RPM Config specified is invalid, config must be AspectRPMConfig, RapiscanRPMConfig or RS350RPMConfig");
+                    "RPM Config specified is invalid, config must be AspectRPMConfig, RapiscanRPMConfig, RS350RPMConfig or D5RPMConfig");
         }
 
         config.name = laneConfig.name + " - RPM";
@@ -522,6 +538,13 @@ public final class LaneEndpointSync {
             }
             rs350Child.commSettings.protocol.remoteHost = rs350Rpm.remoteHost;
             rs350Child.commSettings.protocol.remotePort = rs350Rpm.remotePort;
+        } else if (rpmConfig instanceof D5RPMConfig d5Rpm && childConfig instanceof D5Config d5Child) {
+            if (!(d5Child.commSettings instanceof TCPCommProviderConfig)) {
+                d5Child.commSettings = new TCPCommProviderConfig();
+            }
+            var protocol = ((TCPCommProviderConfig) d5Child.commSettings).protocol;
+            protocol.remoteHost = d5Rpm.remoteHost;
+            protocol.remotePort = d5Rpm.remotePort;
         }
     }
 
@@ -559,6 +582,12 @@ public final class LaneEndpointSync {
             target.remotePort = rs350Child.commSettings.protocol.remotePort;
             target.markSyncedEndpoint(rpmSyncToken(target));
             return target;
+        } else if (childConfig instanceof D5Config d5Child && d5Child.commSettings instanceof TCPCommProviderConfig tcp) {
+            D5RPMConfig target = existingSimple instanceof D5RPMConfig d ? d : new D5RPMConfig();
+            target.remoteHost = tcp.protocol.remoteHost;
+            target.remotePort = tcp.protocol.remotePort;
+            target.markSyncedEndpoint(rpmSyncToken(target));
+            return target;
         }
         return existingSimple;
     }
@@ -593,7 +622,8 @@ public final class LaneEndpointSync {
     private static boolean rpmTypeMatches(RPMConfig rpmConfig, SensorConfig childConfig) {
         return (rpmConfig instanceof AspectRPMConfig && childConfig instanceof AspectConfig)
                 || (rpmConfig instanceof RapiscanRPMConfig && childConfig instanceof RapiscanConfig)
-                || (rpmConfig instanceof RS350RPMConfig && childConfig instanceof RS350Config);
+                || (rpmConfig instanceof RS350RPMConfig && childConfig instanceof RS350Config)
+                || (rpmConfig instanceof D5RPMConfig && childConfig instanceof D5Config);
     }
 
     private static String cameraSyncToken(String connectionString, int bufferSize) {
@@ -645,6 +675,10 @@ public final class LaneEndpointSync {
         if (child instanceof RS350Config rs && rs.commSettings != null) {
             return (rs.commSettings.protocol.remoteHost == null ? "" : rs.commSettings.protocol.remoteHost.trim())
                     + ":" + rs.commSettings.protocol.remotePort;
+        }
+        if (child instanceof D5Config d5 && d5.commSettings instanceof TCPCommProviderConfig tcp) {
+            return (tcp.protocol.remoteHost == null ? "" : tcp.protocol.remoteHost.trim())
+                    + ":" + tcp.protocol.remotePort;
         }
         return "";
     }
