@@ -47,6 +47,9 @@ public class OnnxOcrEngine implements OcrEngine {
     public static final String DET_MODEL = "det.onnx";
     public static final String REC_MODEL = "rec.onnx";
     public static final String DICT_FILE = "dict.txt";
+    public static final String STENCIL_DET_MODEL = "stencil_det_fp32.onnx";
+    public static final String PARSEQ_REC_MODEL = "parseq_rec_int8.onnx";
+    public static final String PARSEQ_VOCAB_FILE = "parseq_vocab.txt";
 
     private static final Path CONTAINER_MODEL_FALLBACK = Paths.get("/opt/oscar/models/ocr");
     private static final Path DEV_MODEL_FALLBACK = Paths.get("dist/models/ocr");
@@ -83,9 +86,14 @@ public class OnnxOcrEngine implements OcrEngine {
     private OrtEnvironment env;
     private OrtSession detSession;
     private OrtSession recSession;
+    private OrtSession stencilDetSession;
+    private OrtSession parseqSession;
     private String detInputName;
     private String recInputName;
+    private String stencilDetInputName;
+    private String parseqInputName;
     private CtcGreedyDecoder decoder;
+    private ParseqDecoder parseqDecoder;
     private final DbNetPostProcessor postProcessor = new DbNetPostProcessor();
     private int recHeight = REC_DEFAULT_HEIGHT;
     private boolean closed = false;
@@ -130,6 +138,30 @@ public class OnnxOcrEngine implements OcrEngine {
         return Files.isReadable(dir.resolve(DET_MODEL))
                 && Files.isReadable(dir.resolve(REC_MODEL))
                 && Files.isReadable(dir.resolve(DICT_FILE));
+    }
+
+    public static boolean hasTierZeroModelFiles(Path dir) {
+        if (dir == null)
+            return false;
+        return Files.isReadable(dir.resolve(STENCIL_DET_MODEL))
+                && Files.isReadable(dir.resolve(PARSEQ_REC_MODEL))
+                && Files.isReadable(dir.resolve(PARSEQ_VOCAB_FILE));
+    }
+
+    private static Path resolveTierZeroDirectory(Path requestedDir, Path resolvedBaseDir) {
+        if (hasTierZeroModelFiles(resolvedBaseDir))
+            return resolvedBaseDir;
+        // When configured with the default relative "models/ocr" path on an upgraded persistent volume
+        // that only pre-seeded det/rec/dict, automatically discover packaged Tier-0 models in /opt/oscar/models/ocr.
+        boolean isDefaultRelative = requestedDir == null
+                || (!requestedDir.isAbsolute() && "models/ocr".equals(requestedDir.toString().replace('\\', '/')));
+        if (isDefaultRelative) {
+            if (hasTierZeroModelFiles(CONTAINER_MODEL_FALLBACK))
+                return CONTAINER_MODEL_FALLBACK.toAbsolutePath().normalize();
+            if (hasTierZeroModelFiles(DEV_MODEL_FALLBACK))
+                return DEV_MODEL_FALLBACK.toAbsolutePath().normalize();
+        }
+        return null;
     }
 
     /**
@@ -190,6 +222,16 @@ public class OnnxOcrEngine implements OcrEngine {
         }
 
         @Override
+        public boolean supportsFastRoiPass() {
+            return delegate.supportsFastRoiPass();
+        }
+
+        @Override
+        public List<OcrRead> recognizeFastRoi(BufferedImage frame) {
+            return delegate.recognizeFastRoi(frame);
+        }
+
+        @Override
         public synchronized void close() {
             if (released)
                 return;
@@ -224,10 +266,28 @@ public class OnnxOcrEngine implements OcrEngine {
 
                 List<String> charset = Files.readAllLines(dictPath, StandardCharsets.UTF_8);
                 decoder = new CtcGreedyDecoder(charset);
+
+                Path tierZeroDir = resolveTierZeroDirectory(requestedDir, modelDir);
+                if (tierZeroDir != null) {
+                    Path stencilPath = tierZeroDir.resolve(STENCIL_DET_MODEL);
+                    Path parseqPath = tierZeroDir.resolve(PARSEQ_REC_MODEL);
+                    Path parseqVocabPath = tierZeroDir.resolve(PARSEQ_VOCAB_FILE);
+                    try (OrtSession.SessionOptions options = createBoundedSessionOptions()) {
+                        stencilDetSession = env.createSession(stencilPath.toString(), options);
+                    }
+                    try (OrtSession.SessionOptions options = createBoundedSessionOptions()) {
+                        parseqSession = env.createSession(parseqPath.toString(), options);
+                    }
+                    stencilDetInputName = stencilDetSession.getInputNames().iterator().next();
+                    parseqInputName = parseqSession.getInputNames().iterator().next();
+                    parseqDecoder = new ParseqDecoder(Files.readString(parseqVocabPath, StandardCharsets.UTF_8).strip());
+                    logger.info("Loaded general camera-agnostic OrientedStencil + PARSeq ONNX models from {}", tierZeroDir);
+                }
+
                 closed = false;
 
-                logger.info("OCR ONNX engine initialized from {} (recHeight={}, intraOpThreads={})",
-                        modelDir, recHeight, intraOpThreads);
+                logger.info("OCR ONNX engine initialized from {} (recHeight={}, intraOpThreads={}, fastRoi={})",
+                        modelDir, recHeight, intraOpThreads, stencilDetSession != null);
             } catch (OrtException | IOException e) {
                 close();
                 throw new OcrEngineException("Failed to initialize ONNX OCR engine from " + modelDir, e);
@@ -257,6 +317,130 @@ public class OnnxOcrEngine implements OcrEngine {
             logger.debug("Could not query rec model input shape, using default height", e);
         }
         return REC_DEFAULT_HEIGHT;
+    }
+
+    @Override
+    public boolean supportsFastRoiPass() {
+        synchronized (inferenceLock) {
+            return !closed && stencilDetSession != null && parseqSession != null && parseqDecoder != null;
+        }
+    }
+
+    @Override
+    public List<OcrRead> recognizeFastRoi(BufferedImage image) {
+        if (image == null)
+            return List.of();
+        int w = image.getWidth();
+        int h = image.getHeight();
+        if (w <= 1 || h <= 1 || (long) w * h > MAX_FRAME_PIXELS)
+            throw new OcrEngineException("Invalid frame dimensions for OCR: " + w + "x" + h);
+
+        synchronized (inferenceLock) {
+            if (closed || stencilDetSession == null || parseqSession == null)
+                return recognize(image, DET_MAX_SIDE);
+
+            List<OrientedStencilPostProcessor.OrientedBox> peaks = detectOrientedStencils(image);
+            if (peaks.isEmpty())
+                return List.of();
+
+            List<OcrRead> reads = new ArrayList<>(peaks.size() * 2);
+            for (OrientedStencilPostProcessor.OrientedBox ob : peaks) {
+                Rectangle bounds = ob.axisAlignedBounds(w, h);
+                if (ob.classId() == 0) {
+                    // Container stencil peak: run fast 48px CTC recognizer first (~2 ms, zero language-prior
+                    // hallucination) on tight & wide deskewed crops, invoking 2D-Attention PARSeq only when
+                    // CTC misses (e.g., 2-line stacked rear-door stencils or heavy rib skew) and gating PARSeq
+                    // on >= 0.90 confidence + registered BIC prefix.
+                    BufferedImage tight = OrientedStencilPostProcessor.extractDeskewedCrop(image, ob, 1.12, 1.08);
+                    boolean cleanIso = false;
+                    try {
+                        if (recSession != null) {
+                            CtcGreedyDecoder.Decoded ctcTight = recognizeCrop(tight);
+                            if (ctcTight.text() != null && !ctcTight.text().isBlank()) {
+                                reads.add(new OcrRead(ctcTight.text(), ctcTight.confidence(), bounds));
+                                var cm = com.botts.impl.process.ocr.domain.Iso6346.extractBest(ctcTight.text());
+                                cleanIso = cm.isPresent() && cm.get().checksumValid() && !cm.get().checkDigitRepaired();
+                            }
+                        }
+                        if (!cleanIso) {
+                            BufferedImage wide = OrientedStencilPostProcessor.extractDeskewedCrop(image, ob, 1.42, 1.15);
+                            try {
+                                if (recSession != null) {
+                                    CtcGreedyDecoder.Decoded ctcWide = recognizeCrop(wide);
+                                    if (ctcWide.text() != null && !ctcWide.text().isBlank()) {
+                                        reads.add(new OcrRead(ctcWide.text(), ctcWide.confidence(), bounds));
+                                        var cm = com.botts.impl.process.ocr.domain.Iso6346.extractBest(ctcWide.text());
+                                        cleanIso = cm.isPresent() && cm.get().checksumValid() && !cm.get().checkDigitRepaired();
+                                    }
+                                }
+                                if (!cleanIso && recSession != null
+                                        && tight.getHeight() >= 24
+                                        && tight.getWidth() < tight.getHeight() * 4.0) {
+                                    // 2-line stacked container stencil (OWNER above SERIAL + boxed check digit)
+                                    int th = tight.getHeight();
+                                    int tw = tight.getWidth();
+                                    BufferedImage topLine = tight.getSubimage(0, 0, tw, Math.max(8, (th * 56) / 100));
+                                    BufferedImage botLine = tight.getSubimage(0, (th * 42) / 100, tw, Math.max(8, th - (th * 42) / 100));
+                                    CtcGreedyDecoder.Decoded dTop = recognizeCrop(topLine);
+                                    CtcGreedyDecoder.Decoded dBot = recognizeCrop(botLine);
+                                    if (dTop.text() != null && !dTop.text().isBlank() && dBot.text() != null && !dBot.text().isBlank()) {
+                                        String combined = dTop.text().strip() + " " + dBot.text().strip();
+                                        float combConf = Math.min(dTop.confidence(), dBot.confidence());
+                                        var sm = com.botts.impl.process.ocr.domain.Iso6346.extractBest(combined);
+                                        if (sm.isPresent() && sm.get().checksumValid() && !sm.get().checkDigitRepaired()) {
+                                            reads.add(new OcrRead(combined, combConf, bounds));
+                                            cleanIso = true;
+                                        }
+                                    }
+                                }
+                                if (!cleanIso && ob.score() >= 0.28) {
+                                    CtcGreedyDecoder.Decoded pDec = recognizeParseqCrop(tight);
+                                    if (pDec.text() != null && pDec.confidence() >= 0.90f) {
+                                        var pm = com.botts.impl.process.ocr.domain.Iso6346.extractBest(pDec.text());
+                                        if (pm.isPresent() && pm.get().checksumValid() && !pm.get().checkDigitRepaired()
+                                                && com.botts.impl.process.ocr.domain.Iso6346.isKnownBicPrefix(pm.get().compact())) {
+                                            reads.add(new OcrRead(pDec.text(), pDec.confidence(), bounds));
+                                            cleanIso = true;
+                                        }
+                                    }
+                                    if (!cleanIso && ob.score() >= 0.36) {
+                                        CtcGreedyDecoder.Decoded pWide = recognizeParseqCrop(wide);
+                                        if (pWide.text() != null && pWide.confidence() >= 0.91f) {
+                                            var pmw = com.botts.impl.process.ocr.domain.Iso6346.extractBest(pWide.text());
+                                            if (pmw.isPresent() && pmw.get().checksumValid() && !pmw.get().checkDigitRepaired()
+                                                    && com.botts.impl.process.ocr.domain.Iso6346.isKnownBicPrefix(pmw.get().compact())) {
+                                                reads.add(new OcrRead(pWide.text(), pWide.confidence(), bounds));
+                                            }
+                                        }
+                                    }
+                                }
+                            } finally {
+                                if (wide != image)
+                                    wide.flush();
+                            }
+                        }
+                    } finally {
+                        if (tight != image)
+                            tight.flush();
+                    }
+                } else {
+                    // License plate / secondary ID peak: fast 2ms CTC recognizer
+                    if (recSession != null) {
+                        BufferedImage plateCrop = OrientedStencilPostProcessor.extractDeskewedCrop(image, ob, 1.14, 1.16);
+                        try {
+                            CtcGreedyDecoder.Decoded pCtc = recognizeCrop(plateCrop);
+                            if (pCtc.text() != null && !pCtc.text().isBlank()) {
+                                reads.add(new OcrRead(pCtc.text(), pCtc.confidence(), bounds));
+                            }
+                        } finally {
+                            if (plateCrop != image)
+                                plateCrop.flush();
+                        }
+                    }
+                }
+            }
+            return reads;
+        }
     }
 
     @Override
@@ -293,32 +477,211 @@ public class OnnxOcrEngine implements OcrEngine {
                 CtcGreedyDecoder.Decoded decoded = recognizeCrop(crop);
                 if (decoded.text() != null && !decoded.text().isBlank()) {
                     reads.add(new OcrRead(decoded.text(), decoded.confidence(), box));
-                    // When a horizontal container box splits at a vertical door locking bar right after
-                    // the 10-character owner+category+serial prefix, run a lightweight rightward strip
-                    // re-read (+38% width) to optically capture the boxed 11th Modulo-11 check digit.
-                    if (box.width > box.height * 2 && box.x + box.width < w - 4) {
-                        var match = com.botts.impl.process.ocr.domain.Iso6346.extractBest(decoded.text());
-                        if (match.isPresent() && match.get().checkDigitRepaired()) {
-                            int extW = Math.min(w - box.x, Math.max(box.width + 8, (int) Math.round(box.width * 1.38)));
-                            if (extW > box.width + 4) {
-                                Rectangle extBox = new Rectangle(box.x, box.y, extW, box.height);
-                                BufferedImage extCrop = image.getSubimage(extBox.x, extBox.y, extBox.width, extBox.height);
-                                CtcGreedyDecoder.Decoded extDecoded = recognizeCrop(extCrop);
-                                if (extDecoded.text() != null && !extDecoded.text().isBlank()) {
-                                    var extMatch = com.botts.impl.process.ocr.domain.Iso6346.extractBest(extDecoded.text());
-                                    if (extMatch.isPresent()
-                                            && extMatch.get().checksumValid()
-                                            && !extMatch.get().checkDigitRepaired()) {
-                                        reads.add(new OcrRead(extDecoded.text(), extDecoded.confidence(), extBox));
-                                    }
-                                }
-                            }
+                }
+            }
+            recoverSplitAndBoxedCheckDigits(image, reads);
+            return reads;
+        }
+    }
+
+    /**
+     * Recovers optically verified 11-character ISO 6346 reads when DBNet splits a stencil across a
+     * vertical rear-door locking bar or drops a single-character boxed Modulo-11 check digit:
+     * <ul>
+     *   <li>Single-box 10-character prefixes ({@code [A-Z]{3}[UJZR]\d{6}}) are re-read with {@code ±15%}
+     *       vertical margin and {@code 1.38x}/{@code 1.54x} rightward span to capture taller painted
+     *       check-digit borders ({@code [0]}) across locking bars.</li>
+     *   <li>Split {@code 4 + 6} door/corrugation stencils (owner prefix box left of or stacked above a
+     *       6-digit serial box, or an isolated 6/7-digit serial box whose narrow 4-letter prefix across
+     *       the locking bar fell below DBNet's blob threshold) run a targeted span/rightward re-read,
+     *       committing strictly when {@link com.botts.impl.process.ocr.domain.Iso6346} confirms an
+     *       unrepaired optical Modulo-11 check digit.</li>
+     * </ul>
+     */
+    private void recoverSplitAndBoxedCheckDigits(BufferedImage image, List<OcrRead> reads) {
+        int baseCount = reads.size();
+        if (baseCount == 0)
+            return;
+        int imgW = image.getWidth();
+        int imgH = image.getHeight();
+
+        for (int i = 0; i < baseCount; i++) {
+            OcrRead cur = reads.get(i);
+            Rectangle box = cur.boundingBox();
+            if (box == null || box.width <= 1 || box.height <= 1)
+                continue;
+
+            // 1. Single-box 10-char ISO prefix whose boxed 11th check digit was missed or clipped:
+            //    try tight (0% y-pad, 1.38x) first so adjacent 22G1/45G1 stencils below are never grazed,
+            //    falling back to ±12% y-pad / 1.52x across wider rear-door locking bars.
+            if (box.width > box.height * 2 && box.x + box.width < imgW - 4) {
+                var match = com.botts.impl.process.ocr.domain.Iso6346.extractBest(cur.text());
+                if (match.isPresent() && match.get().checkDigitRepaired()) {
+                    Rectangle[] candidates = new Rectangle[]{
+                            new Rectangle(box.x, box.y,
+                                    Math.min(imgW - box.x, Math.max(box.width + 8, (int) Math.round(box.width * 1.38))),
+                                    box.height),
+                            paddedSpanBox(box.x, box.y,
+                                    Math.max(box.width + 8, (int) Math.round(box.width * 1.50)), box.height, imgW, imgH)
+                    };
+                    for (Rectangle extBox : candidates) {
+                        if (extBox.width <= box.width + 4)
+                            continue;
+                        OcrRead upgraded = tryOpticalIsoCrop(image, extBox, cur.confidence());
+                        if (upgraded != null) {
+                            reads.add(upgraded);
+                            break;
                         }
+                    }
+                    continue;
+                }
+            }
+
+            // 2. Split 4 + 6 door/corrugation stencil where an explicit 4-char owner prefix box sits
+            //    to the left of or directly above a 6-digit serial box.
+            String norm = com.botts.impl.process.ocr.domain.Iso6346.normalize(cur.text());
+            if (norm.length() == 6 && isAllDigits(norm) && box.width >= box.height * 1.4 && box.x + box.width < imgW - 4) {
+                OcrRead leftOwner = findSameLineLeftOwner(reads, baseCount, box);
+                if (leftOwner != null) {
+                    Rectangle ob = leftOwner.boundingBox();
+                    int spanRight = Math.min(imgW, box.x + (int) Math.round(box.width * 1.50));
+                    int topY = Math.min(ob.y, box.y);
+                    int botY = Math.max(ob.y + ob.height, box.y + box.height);
+                    double minBaseConf = Math.min(leftOwner.confidence(), cur.confidence());
+                    OcrRead fullHit = tryOpticalIsoCrop(image,
+                            new Rectangle(ob.x, topY, spanRight - ob.x, botY - topY), minBaseConf);
+                    if (fullHit == null) {
+                        fullHit = tryOpticalIsoCrop(image,
+                                paddedSpanBox(ob.x, topY, spanRight - ob.x, botY - topY, imgW, imgH), minBaseConf);
+                    }
+                    if (fullHit != null) {
+                        reads.add(fullHit);
+                        continue;
+                    }
+                    OcrRead extSerial = trySerialRightwardExtension(image, leftOwner.text(), box, cur.confidence(), imgW, imgH);
+                    if (extSerial != null) {
+                        reads.set(i, extSerial);
+                    }
+                    continue;
+                }
+
+                OcrRead topOwner = findStackedTopOwner(reads, baseCount, box);
+                if (topOwner != null) {
+                    OcrRead extSerial = trySerialRightwardExtension(image, topOwner.text(), box, cur.confidence(), imgW, imgH);
+                    if (extSerial != null) {
+                        reads.set(i, extSerial);
                     }
                 }
             }
-            return reads;
         }
+    }
+
+    private OcrRead tryOpticalIsoCrop(BufferedImage image, Rectangle extBox, double baseConf) {
+        if (extBox.width <= 4 || extBox.height <= 4)
+            return null;
+        CtcGreedyDecoder.Decoded dec = recognizeCrop(image.getSubimage(extBox.x, extBox.y, extBox.width, extBox.height));
+        if (dec.text() == null || dec.text().isBlank())
+            return null;
+        var m = com.botts.impl.process.ocr.domain.Iso6346.extractBest(dec.text());
+        if (m.isPresent() && m.get().checksumValid() && !m.get().checkDigitRepaired()) {
+            return new OcrRead(dec.text(), Math.max(dec.confidence(), baseConf * 0.96), extBox);
+        }
+        return null;
+    }
+
+    private OcrRead trySerialRightwardExtension(BufferedImage image,
+                                                String ownerText,
+                                                Rectangle serialBox,
+                                                double baseConf,
+                                                int imgW,
+                                                int imgH) {
+        Rectangle[] candidates = new Rectangle[]{
+                new Rectangle(serialBox.x, serialBox.y,
+                        Math.min(imgW - serialBox.x, Math.max(serialBox.width + 8, (int) Math.round(serialBox.width * 1.46))),
+                        serialBox.height),
+                paddedSpanBox(serialBox.x, serialBox.y,
+                        Math.max(serialBox.width + 8, (int) Math.round(serialBox.width * 1.58)), serialBox.height, imgW, imgH)
+        };
+        for (Rectangle extBox : candidates) {
+            if (extBox.width <= serialBox.width + 4)
+                continue;
+            CtcGreedyDecoder.Decoded dec = recognizeCrop(image.getSubimage(extBox.x, extBox.y, extBox.width, extBox.height));
+            if (dec.text() == null || dec.text().isBlank())
+                continue;
+            var m = com.botts.impl.process.ocr.domain.Iso6346.extractBest(ownerText + " " + dec.text());
+            if (m.isPresent() && m.get().checksumValid() && !m.get().checkDigitRepaired()) {
+                return new OcrRead(dec.text(), Math.max(dec.confidence(), baseConf * 0.96), extBox);
+            }
+        }
+        return null;
+    }
+
+    private static Rectangle paddedSpanBox(int x, int y, int width, int height, int imgW, int imgH) {
+        int padY = Math.max(2, (int) Math.round(height * 0.12));
+        int nx = Math.max(0, x);
+        int ny = Math.max(0, y - padY);
+        int nw = Math.min(imgW - nx, width);
+        int nh = Math.min(imgH - ny, height + 2 * padY);
+        return new Rectangle(nx, ny, Math.max(1, nw), Math.max(1, nh));
+    }
+
+    private static OcrRead findSameLineLeftOwner(List<OcrRead> reads, int count, Rectangle serialBox) {
+        OcrRead best = null;
+        int bestGap = Integer.MAX_VALUE;
+        for (int j = 0; j < count; j++) {
+            OcrRead cand = reads.get(j);
+            Rectangle cb = cand.boundingBox();
+            if (cb == null || !isOwnerPrefixToken(cand.text()))
+                continue;
+            double maxH = Math.max(cb.height, serialBox.height);
+            int gapX = serialBox.x - (cb.x + cb.width);
+            if (Math.abs(cb.getCenterY() - serialBox.getCenterY()) <= maxH * 0.65
+                    && gapX >= -((int) (maxH * 0.5)) && gapX <= maxH * 4.5 && gapX < bestGap) {
+                best = cand;
+                bestGap = gapX;
+            }
+        }
+        return best;
+    }
+
+    private static OcrRead findStackedTopOwner(List<OcrRead> reads, int count, Rectangle serialBox) {
+        for (int j = 0; j < count; j++) {
+            OcrRead cand = reads.get(j);
+            Rectangle cb = cand.boundingBox();
+            if (cb == null || !isOwnerPrefixToken(cand.text()))
+                continue;
+            double maxH = Math.max(cb.height, serialBox.height);
+            int gapY = serialBox.y - (cb.y + cb.height);
+            if (gapY >= -((int) (maxH * 0.35)) && gapY <= maxH * 1.85
+                    && (Math.abs(serialBox.x - cb.x) <= maxH * 2.5
+                    || Math.abs(serialBox.getCenterX() - cb.getCenterX()) <= maxH * 3.0)) {
+                return cand;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isOwnerPrefixToken(String raw) {
+        String s = com.botts.impl.process.ocr.domain.Iso6346.normalize(raw);
+        if (s.length() != 4)
+            return false;
+        char cat = s.charAt(3);
+        if (cat != 'U' && cat != 'J' && cat != 'Z' && cat != 'R')
+            return false;
+        int letters = 0;
+        for (int i = 0; i < 3; i++) {
+            if (Character.isLetter(s.charAt(i)))
+                letters++;
+        }
+        return letters >= 2;
+    }
+
+    private static boolean isAllDigits(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            if (!Character.isDigit(s.charAt(i)))
+                return false;
+        }
+        return !s.isEmpty();
     }
 
     private List<Rectangle> detect(BufferedImage image, int detMaxSide) {
@@ -364,6 +727,30 @@ public class OnnxOcrEngine implements OcrEngine {
         } finally {
             if (resized != crop)
                 resized.flush();
+        }
+    }
+
+    private List<OrientedStencilPostProcessor.OrientedBox> detectOrientedStencils(BufferedImage image) {
+        OrientedStencilPostProcessor.LetterboxInput lb = OrientedStencilPostProcessor.preprocess(image);
+        long[] shape = {1, 3, OrientedStencilPostProcessor.INPUT_HEIGHT, OrientedStencilPostProcessor.INPUT_WIDTH};
+        try (OnnxTensor input = OnnxTensor.createTensor(env, FloatBuffer.wrap(lb.tensor()), shape);
+             OrtSession.Result result = stencilDetSession.run(Collections.singletonMap(stencilDetInputName, input))) {
+            float[][][][] output = (float[][][][]) result.get(0).getValue();
+            return OrientedStencilPostProcessor.decodePeaks(output[0], lb, image.getWidth(), image.getHeight(), 0.16, 0.20);
+        } catch (OrtException e) {
+            throw new OcrEngineException("Oriented stencil detection failed", e);
+        }
+    }
+
+    private CtcGreedyDecoder.Decoded recognizeParseqCrop(BufferedImage crop) {
+        float[] tensor = ParseqDecoder.toInputTensor(crop);
+        long[] shape = {1, 3, ParseqDecoder.INPUT_HEIGHT, ParseqDecoder.INPUT_WIDTH};
+        try (OnnxTensor input = OnnxTensor.createTensor(env, FloatBuffer.wrap(tensor), shape);
+             OrtSession.Result result = parseqSession.run(Collections.singletonMap(parseqInputName, input))) {
+            float[][][] output = (float[][][]) result.get(0).getValue();
+            return parseqDecoder.decode(output[0]);
+        } catch (OrtException e) {
+            throw new OcrEngineException("PARSeq recognition failed", e);
         }
     }
 
@@ -444,6 +831,22 @@ public class OnnxOcrEngine implements OcrEngine {
                 logger.warn("Error closing ONNX recognition session", e);
             } finally {
                 recSession = null;
+            }
+            try {
+                if (stencilDetSession != null)
+                    stencilDetSession.close();
+            } catch (Exception e) {
+                logger.warn("Error closing ONNX stencil detection session", e);
+            } finally {
+                stencilDetSession = null;
+            }
+            try {
+                if (parseqSession != null)
+                    parseqSession.close();
+            } catch (Exception e) {
+                logger.warn("Error closing ONNX PARSeq session", e);
+            } finally {
+                parseqSession = null;
             }
         }
     }

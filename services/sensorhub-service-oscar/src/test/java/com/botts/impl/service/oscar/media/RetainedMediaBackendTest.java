@@ -1400,6 +1400,47 @@ public class RetainedMediaBackendTest {
     private static final class SimulatedPublicationCrash extends RuntimeException {
     }
 
+    @Test
+    public void missingSourceAfterGraceFinalizesSourceDeletedWhenRetainedFramesAreVerified() throws Exception {
+        Path root = temporaryFolder.newFolder("missing-source-after-grace").toPath();
+        FileSystemBucketStore bucketStore = new FileSystemBucketStore(root);
+        bucketStore.createBucket(MediaSetStore.VIDEO_BUCKET);
+        String sourceKey = "clips/missing-after-grace/source.ts";
+        Path source = Path.of(bucketStore.getWritableResourceURI(MediaSetStore.VIDEO_BUCKET, sourceKey));
+        Files.createDirectories(source.getParent());
+        Files.copy(bundledH264Fixture(), source);
+
+        Instant t0 = Instant.parse("2026-11-01T00:00:00Z");
+        MediaSetStore store = new MediaSetStore(bucketStore);
+        MediaSetStore.Identity identity = new MediaSetStore.Identity("event-post-grace", "lane-1", "cam-0");
+        RetainedMediaBackend publishBackend = new RetainedMediaBackend(
+                bucketStore, store, new JpegFrameExtractor(85), Duration.ofHours(24),
+                Clock.fixed(t0, ZoneOffset.UTC), LoggerFactory.getLogger(getClass()));
+        assertTrue(publishBackend.process(identity, "videos/" + sourceKey));
+
+        // External removal BEFORE rollback grace expires must still fail closed and keep retry state.
+        Files.delete(source);
+        RetainedMediaBackend beforeGraceBackend = new RetainedMediaBackend(
+                bucketStore, store, new JpegFrameExtractor(85), Duration.ofHours(24),
+                Clock.fixed(t0.plus(Duration.ofHours(2)), ZoneOffset.UTC), LoggerFactory.getLogger(getClass()));
+        assertFalse(beforeGraceBackend.process(identity, "videos/" + sourceKey));
+        assertEquals(MediaManifest.SourceState.PRESERVED_FOR_ROLLBACK,
+                store.findManifest(identity).orElseThrow().source().state());
+
+        // Once rollback grace has elapsed and all five JPEGs pass SHA-256 verification, lifecycle
+        // reconciliation transitions cleanly to DELETED instead of looping indefinitely.
+        MediaManifest published = store.findManifest(identity).orElseThrow();
+        RetainedMediaBackend afterGraceBackend = new RetainedMediaBackend(
+                bucketStore, store, new JpegFrameExtractor(85), Duration.ofHours(24),
+                Clock.fixed(published.source().rollbackDeleteAfter().plusSeconds(1), ZoneOffset.UTC),
+                LoggerFactory.getLogger(getClass()));
+        assertTrue(afterGraceBackend.process(identity, "videos/" + sourceKey));
+        assertEquals(MediaManifest.SourceState.DELETED,
+                store.findManifest(identity).orElseThrow().source().state());
+        assertEquals(MediaJobLedger.JobState.SOURCE_DELETED,
+                store.readLedger(identity).orElseThrow().state());
+    }
+
     private static final class BoundedMaintenanceBucketStore extends FileSystemBucketStore {
         private int unboundedPrefixCalls;
         private int boundedPrefixCalls;

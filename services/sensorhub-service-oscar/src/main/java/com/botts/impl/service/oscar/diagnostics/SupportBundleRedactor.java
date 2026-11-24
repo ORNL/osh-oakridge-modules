@@ -85,6 +85,9 @@ public final class SupportBundleRedactor {
             "client_secret",
             "keystorepassword",
             "truststorepassword",
+            "encryptedpassword",
+            "smbpassword",
+            "webrelaypassword",
             "hmac"
     );
 

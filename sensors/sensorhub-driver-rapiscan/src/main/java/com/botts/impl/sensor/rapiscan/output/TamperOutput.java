@@ -57,7 +57,7 @@ public class TamperOutput  extends AbstractSensorOutput<RapiscanSensor> {
 
         int index = 0;
 
-        dataBlock.setLongValue(index++, System.currentTimeMillis()/1000);
+        dataBlock.setDoubleValue(index++, System.currentTimeMillis() / 1000.0);
         dataBlock.setBooleanValue(index++, tamperState);
 
         //dataBlock.updateAtomCount();

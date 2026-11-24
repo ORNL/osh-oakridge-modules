@@ -22,6 +22,12 @@ import com.botts.impl.service.oscar.vehicle.VehicleSearchHandler;
 import com.botts.impl.service.oscar.dailyfile.DailyFileSliceHandler;
 import com.botts.impl.service.oscar.diagnostics.SupportBundleHandler;
 import com.botts.impl.service.oscar.eml.EmlPluginHandler;
+import com.botts.impl.service.oscar.extensions.RuntimeExtensionsManager;
+import com.botts.impl.service.oscar.extensions.RuntimeExtensionsServlet;
+import com.botts.impl.service.oscar.sandbox.TrainingSandboxManager;
+import com.botts.impl.service.oscar.sandbox.TrainingSandboxServlet;
+import com.botts.impl.service.oscar.update.SystemUpdateServlet;
+import com.botts.impl.service.oscar.webrelay.LaneWebRelayServlet;
 import com.botts.impl.service.oscar.purge.DatabasePurger;
 import com.botts.impl.service.oscar.retention.StoragePressureRetention;
 import com.botts.impl.service.oscar.reports.RequestReportControl;
@@ -82,6 +88,13 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
 
     SpreadsheetHandler spreadsheetHandler;
     EmlPluginHandler emlPluginHandler;
+    RuntimeExtensionsManager runtimeExtensionsManager;
+    RuntimeExtensionsServlet runtimeExtensionsServlet;
+    TrainingSandboxManager trainingSandboxManager;
+    TrainingSandboxServlet trainingSandboxServlet;
+    SystemUpdateServlet systemUpdateServlet;
+    LaneWebRelayServlet laneWebRelayServlet;
+    HttpServer extensionsHttpServer;
     VideoRetention videoRetention;
     DatabasePurger databasePurger;
     AdjudicationCodeMarkerBackfill adjudicationCodeBackfill;
@@ -121,11 +134,28 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         emlPluginHandler = new EmlPluginHandler(getParentHub(), getLogger(), config);
         emlPluginHandler.restoreConfiguredOrActivePlugin(config.emlPluginPath);
 
+        runtimeExtensionsManager = new RuntimeExtensionsManager(
+                getParentHub(),
+                config,
+                emlPluginHandler,
+                getLogger(),
+                this::republishEffectiveAdjudicationCodes,
+                () -> this.bucketStore
+        );
+        runtimeExtensionsManager.restoreAllOnStartup();
+
+        trainingSandboxManager = new TrainingSandboxManager(
+                getParentHub(),
+                this,
+                runtimeExtensionsManager,
+                getLogger()
+        );
+
         spreadsheetHandler = new SpreadsheetHandler(getParentHub().getModuleRegistry(), bucketStore, getLogger(), config);
         if (config.spreadsheetConfigPath != null && !config.spreadsheetConfigPath.isEmpty())
             spreadsheetHandler.handleFile(config.spreadsheetConfigPath);
 
-        system = new OSCARSystem(config.nodeId);
+        system = new OSCARSystem(config.nodeId, config.nodeName);
 
         createOutputs();
         createControls();
@@ -292,6 +322,10 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         if (storagePressureRetention != null)
             storagePressureRetention.start();
 
+        if (trainingSandboxManager != null)
+            trainingSandboxManager.start();
+
+        deployRuntimeExtensionsServlet();
         startStaticGuideMimeRegistration();
         startApplicationReadiness();
     }
@@ -345,6 +379,10 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                 this::unregisterVehicleSearchHandler);
         failure = runStopStep(failure, "support bundle object handler",
                 this::unregisterSupportBundleHandler);
+        failure = runStopStep(failure, "runtime extensions servlet",
+                this::undeployRuntimeExtensionsServlet);
+        failure = runStopStep(failure, "training sandbox manager",
+                this::stopTrainingSandboxManager);
         failure = runStopStep(failure, "static guide MIME registration",
                 this::stopStaticGuideMimeRegistration);
         failure = runStopStep(failure, "OSCAR system registration", this::unregisterSystem);
@@ -365,8 +403,24 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         }
 
         awaitSystemRegistration(registry.register(system));
+        republishEffectiveAdjudicationCodes();
+    }
+
+    public synchronized void republishEffectiveAdjudicationCodes() {
+        if (adjudicationCodesOutput == null) {
+            return;
+        }
         purgePriorAdjudicationCodesObservations();
-        adjudicationCodesOutput.publish(config.customAdjudicationCodes);
+        adjudicationCodesOutput.publish(getEffectiveCustomAdjudicationCodes());
+    }
+
+    public java.util.List<AdjudicationCodeConfig> getEffectiveCustomAdjudicationCodes() {
+        if (runtimeExtensionsManager != null) {
+            return runtimeExtensionsManager.getEffectiveCustomAdjudicationCodes();
+        }
+        return (config != null && config.customAdjudicationCodes != null)
+                ? config.customAdjudicationCodes
+                : java.util.List.of();
     }
 
     private void purgePriorAdjudicationCodesObservations() {
@@ -747,8 +801,94 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         }
     }
 
+    public RuntimeExtensionsManager getRuntimeExtensionsManager() {
+        return runtimeExtensionsManager;
+    }
+
+    public TrainingSandboxManager getTrainingSandboxManager() {
+        return trainingSandboxManager;
+    }
+
+    private void deployRuntimeExtensionsServlet() {
+        if (runtimeExtensionsManager == null || getParentHub() == null || getParentHub().getModuleRegistry() == null) {
+            return;
+        }
+        try {
+            HttpServer server = getParentHub().getModuleRegistry().getModuleByType(HttpServer.class);
+            if (server == null) {
+                server = getParentHub().getModuleRegistry()
+                        .waitForModuleType(HttpServer.class, ModuleEvent.ModuleState.STARTED)
+                        .get(5, TimeUnit.SECONDS);
+            }
+            if (server != null && server.isStarted()) {
+                runtimeExtensionsServlet = new RuntimeExtensionsServlet(
+                        getParentHub(), runtimeExtensionsManager, getLogger());
+                server.deployServlet(runtimeExtensionsServlet, RuntimeExtensionsServlet.ENDPOINT_WILDCARD);
+                server.addServletSecurity(RuntimeExtensionsServlet.ENDPOINT_WILDCARD, true);
+                if (trainingSandboxManager != null) {
+                    trainingSandboxServlet = new TrainingSandboxServlet(
+                            getParentHub(), trainingSandboxManager, getLogger());
+                    server.deployServlet(trainingSandboxServlet, TrainingSandboxServlet.ENDPOINT_WILDCARD);
+                    server.addServletSecurity(TrainingSandboxServlet.ENDPOINT_WILDCARD, true);
+                }
+                laneWebRelayServlet = new LaneWebRelayServlet(getParentHub(), getLogger());
+                server.deployServlet(laneWebRelayServlet, LaneWebRelayServlet.ENDPOINT_WILDCARD);
+                server.addServletSecurity(LaneWebRelayServlet.ENDPOINT_WILDCARD, true);
+                systemUpdateServlet = new SystemUpdateServlet(getParentHub(), getLogger());
+                server.deployServlet(systemUpdateServlet, SystemUpdateServlet.ENDPOINT_WILDCARD);
+                server.addServletSecurity(SystemUpdateServlet.ENDPOINT_WILDCARD, true);
+                extensionsHttpServer = server;
+            }
+        } catch (Exception e) {
+            getLogger().debug("HTTP server not active when deploying runtime extensions servlet: {}", e.getMessage());
+        }
+    }
+
+    void undeployRuntimeExtensionsServlet() {
+        HttpServer server = extensionsHttpServer;
+        RuntimeExtensionsServlet servlet = runtimeExtensionsServlet;
+        TrainingSandboxServlet sbServlet = trainingSandboxServlet;
+        LaneWebRelayServlet wrServlet = laneWebRelayServlet;
+        SystemUpdateServlet updServlet = systemUpdateServlet;
+        extensionsHttpServer = null;
+        runtimeExtensionsServlet = null;
+        trainingSandboxServlet = null;
+        laneWebRelayServlet = null;
+        systemUpdateServlet = null;
+        if (server != null && server.isStarted()) {
+            if (servlet != null) {
+                server.undeployServlet(servlet);
+                servlet.destroy();
+            }
+            if (sbServlet != null) {
+                server.undeployServlet(sbServlet);
+                sbServlet.destroy();
+            }
+            if (wrServlet != null) {
+                server.undeployServlet(wrServlet);
+                wrServlet.destroy();
+            }
+            if (updServlet != null) {
+                server.undeployServlet(updServlet);
+                updServlet.destroy();
+            }
+        }
+    }
+
+    void stopTrainingSandboxManager() {
+        TrainingSandboxManager sb = trainingSandboxManager;
+        if (sb != null) {
+            sb.close();
+        }
+    }
+
     @Override
     public boolean isCustomAdjudicationCode(int code) {
-        return config != null && config.getCustomAdjudicationCodeValues().contains(code);
+        for (AdjudicationCodeConfig entry : getEffectiveCustomAdjudicationCodes()) {
+            if (entry != null && entry.code == code) {
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -42,7 +42,12 @@ public class D5MessageRouter implements Runnable {
     OutputStream outputStream;
 
     private static final Logger logger = LoggerFactory.getLogger(D5Sensor.class);
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private static final long STOP_TIMEOUT_MILLIS = 2_000L;
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "kromek-d5-router");
+        t.setDaemon(true);
+        return t;
+    });
     private int count = 0;
 
     /** Polling cycles in a row in which every request failed; see {@link #run()}. */
@@ -64,7 +69,16 @@ public class D5MessageRouter implements Runnable {
     }
 
     public void stop() {
-        scheduler.shutdown();
+        scheduler.shutdownNow();
+        try {
+            scheduler.awaitTermination(STOP_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    boolean isStopped() {
+        return scheduler.isShutdown() && scheduler.isTerminated();
     }
 
     public synchronized void run() {
@@ -96,12 +110,14 @@ public class D5MessageRouter implements Runnable {
                 attempted++;
                 report = sendRequest(report, inputStream, outputStream);
 
-                output.setData(report);
+                if (report != null) {
+                    output.setData(report);
 
-                // RadiometricStatus carries the unit's GPS fix; mirror it to
-                // the dedicated location output for map/tracking consumers
-                if (report instanceof KromekSerialRadiometricStatusReport statusReport)
-                    sensor.publishLocation(statusReport);
+                    // RadiometricStatus carries the unit's GPS fix; mirror it to
+                    // the dedicated location output for map/tracking consumers
+                    if (report instanceof KromekSerialRadiometricStatusReport statusReport)
+                        sensor.publishLocation(statusReport);
+                }
             } catch (Exception e) {
                 failed++;
                 lastError = e;

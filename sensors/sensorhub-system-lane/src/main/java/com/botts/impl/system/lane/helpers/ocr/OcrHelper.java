@@ -18,7 +18,7 @@ package com.botts.impl.system.lane.helpers.ocr;
 import com.botts.api.service.bucket.IBucketService;
 import com.botts.api.service.bucket.IBucketStore;
 import com.botts.impl.process.ocr.engine.OcrEngine;
-import com.botts.impl.process.ocr.engine.OnnxOcrEngine;
+import com.botts.impl.process.ocr.runtime.OcrRuntimeRegistry;
 import com.botts.impl.process.ocr.pipeline.OcrJob;
 import com.botts.impl.process.ocr.pipeline.OcrSettings;
 import com.botts.impl.process.ocr.pipeline.VehicleOcrProcessor;
@@ -110,7 +110,7 @@ public final class OcrHelper implements AutoCloseable {
             String rawModelDir = (config.modelDir == null || config.modelDir.isBlank())
                     ? "models/ocr"
                     : config.modelDir.trim();
-            this.engineLease = OnnxOcrEngine.acquireShared(Paths.get(rawModelDir));
+            this.engineLease = OcrRuntimeRegistry.forHub(hub).acquireEngine(Paths.get(rawModelDir));
             resolveBucketService();
             this.processorLease = VehicleOcrProcessor.acquireShared(bucketStore, bucketService);
         } catch (Throwable t) {

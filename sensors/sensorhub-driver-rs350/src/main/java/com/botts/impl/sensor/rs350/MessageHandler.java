@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -31,6 +32,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 
 public class MessageHandler {
@@ -40,7 +43,7 @@ public class MessageHandler {
     final LinkedList<String> messageQueue = new LinkedList<>();
     private final AbstractSensorModule<?> sensorModule;
     WebIdAnalyzer webIdAnalyzer;
-    boolean hasAlarm = false;
+    volatile boolean hasAlarm = false;
     String laneUID;
     IBucketStore bucketStore;
     private final DailyFileJournalConnection dailyFileJournal;
@@ -70,13 +73,15 @@ public class MessageHandler {
         void onNewMessage(RS350Message message);
     }
 
-    private final ArrayList<StatusListener> statusListeners = new ArrayList<>();
-    private final ArrayList<BackgroundListener> backgroundListeners = new ArrayList<>();
-    private final ArrayList<ForegroundListener> foregroundListeners = new ArrayList<>();
-    private final ArrayList<AlarmListener> alarmListeners = new ArrayList<>();
+    private final List<StatusListener> statusListeners = new CopyOnWriteArrayList<>();
+    private final List<BackgroundListener> backgroundListeners = new CopyOnWriteArrayList<>();
+    private final List<ForegroundListener> foregroundListeners = new CopyOnWriteArrayList<>();
+    private final List<AlarmListener> alarmListeners = new CopyOnWriteArrayList<>();
     //private final ArrayList<N42Output> n42Listeners = new ArrayList<>();
 
     private final AtomicBoolean isProcessing = new AtomicBoolean(true);
+    private final AtomicBoolean readerFinished = new AtomicBoolean(false);
+    private volatile long lastMessageReceivedMillis = System.currentTimeMillis();
     private volatile long stopDeadlineNanos;
 
     // The RS350 occupancy is created by the Rs350OutputToOccupancy process module
@@ -94,86 +99,76 @@ public class MessageHandler {
     private final Thread messageReader = new Thread(new Runnable() {
         @Override
         public void run() {
-
-            boolean continueProcessing = true;
-
             try {
-
-                ArrayList<Character> buffer = new ArrayList<>();
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                lastMessageReceivedMillis = System.currentTimeMillis();
                 timeSinceLastMessage = 0;
 
-                while (continueProcessing) {
-
+                while (isProcessing.get()) {
                     int character = msgIn.read();
+                    if (character == -1) {
+                        break;
+                    }
 
-                    // Detected STX
+                    // Detected STX (0x02)
                     if (character == 0x02) {
+                        buffer.reset();
                         character = msgIn.read();
-                        // Detect ETX
+                        // Read until ETX (0x03), resynchronizing cleanly if a new STX arrives
                         while (character != 0x03 && character != -1) {
-                            buffer.add((char)character);
-                            character = msgIn.read();
-                            if (character == -1){
-                                System.out.println("did not read complete message");
+                            if (character == 0x02) {
+                                log.warn("RS350 frame restarted with STX before ETX; discarding truncated prefix");
+                                buffer.reset();
+                            } else {
+                                buffer.write(character);
                             }
-                        }
-                        StringBuilder sb = new StringBuilder(buffer.size());
-
-                        for (char c : buffer) {
-
-                            sb.append(c);
+                            character = msgIn.read();
                         }
 
-                        String n42Message = journalBeforeParsing(sb.toString(), Instant.now(),
+                        if (character == -1) {
+                            log.warn("RS350 stream ended before ETX; discarding truncated frame ({} bytes)",
+                                    buffer.size());
+                            break;
+                        }
+
+                        lastMessageReceivedMillis = System.currentTimeMillis();
+                        String rawPayload = buffer.toString(StandardCharsets.UTF_8);
+                        String n42Message = journalBeforeParsing(rawPayload, Instant.now(),
                                 dailyFileJournal, MessageHandler::normalizeN42Message);
 
                         synchronized (messageQueue) {
-
                             messageQueue.add(n42Message);
-
                             messageQueue.notifyAll();
                         }
-                        buffer.clear();
-                    }
-
-                    synchronized (isProcessing) {
-
-                        continueProcessing = isProcessing.get();
+                        buffer.reset();
                     }
                 }
             } catch (IOException exception) {
                 if (isProcessing.get())
                     log.error("RS350 message reader stopped after an I/O failure", exception);
                 isProcessing.set(false);
+            } finally {
+                readerFinished.set(true);
                 synchronized (messageQueue) {
                     messageQueue.notifyAll();
                 }
             }
         }
-    });
+    }, "rs350-message-reader");
 
     private final Thread messageNotifier = new Thread(() -> {
-
-        boolean continueProcessing = true;
-
-        while (continueProcessing) {
-
+        while (true) {
             final String currentMessage;
 
             synchronized (messageQueue) {
-
                 try {
-
-                    while (messageQueue.isEmpty()) {
-
+                    while (messageQueue.isEmpty() && isProcessing.get() && !readerFinished.get()) {
                         messageQueue.wait();
-
                     }
-
+                    if (messageQueue.isEmpty()) {
+                        return;
+                    }
                     currentMessage = messageQueue.removeFirst();
-
-                    //n42Listeners.forEach(listener -> listener.onNewMessage(currentMessage));
-
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;
@@ -181,14 +176,14 @@ public class MessageHandler {
             }
 
             if (currentMessage != null && !currentMessage.isEmpty()) {
-
                 try {
                     RadInstrumentDataType radInstrumentDataType = radHelper.getRadInstrumentData(currentMessage);
                     RS350Message message = new RS350Message(radInstrumentDataType);
 
-                    // Add webid handler call here
-
-                    if (message.getRs350InstrumentCharacteristics() != null && message.getRs350Item() != null && message.getRs350LinEnergyCalibration() != null && message.getRs350CmpEnergyCalibration() != null) {
+                    if (message.getRs350InstrumentCharacteristics() != null
+                            && message.getRs350Item() != null
+                            && message.getRs350LinEnergyCalibration() != null
+                            && message.getRs350CmpEnergyCalibration() != null) {
                         statusListeners.forEach(listener -> listener.onNewMessage(message));
                     }
 
@@ -196,32 +191,34 @@ public class MessageHandler {
                         backgroundListeners.forEach(listener -> listener.onNewMessage(message));
                     }
 
-                    if (message.getRs350ForegroundMeasurement() != null) {
-                        foregroundListeners.forEach(listener -> listener.onNewMessage(message));
-                    }
-
-                    if (message.getRs350RadAlarm() != null && message.getRs350DerivedData() != null) {
+                    boolean alarmFrame = message.getRs350RadAlarm() != null && message.getRs350DerivedData() != null;
+                    if (alarmFrame) {
                         if (!hasAlarm) {
                             hasAlarm = true;
                             publishWebIdRequest(currentMessage);
                         }
-                        alarmListeners.forEach(listener -> listener.onNewMessage(message));
                     } else {
                         hasAlarm = false;
                     }
-                }
-                catch (Exception e){
+
+                    if (message.getRs350ForegroundMeasurement() != null) {
+                        foregroundListeners.forEach(listener -> listener.onNewMessage(message));
+                    }
+
+                    if (alarmFrame) {
+                        alarmListeners.forEach(listener -> listener.onNewMessage(message));
+                    }
+                } catch (Exception e) {
                     if (isProcessing.get())
                         log.error("Error reading message: " + e, e);
                 }
             }
 
-            synchronized (isProcessing) {
-
-                continueProcessing = isProcessing.get();
+            if (!isProcessing.get()) {
+                return;
             }
         }
-    });
+    }, "rs350-message-notifier");
 
     public MessageHandler(WebIdAnalyzer webIdAnalyzer, InputStream msgIn, String messageDelimiter, AbstractSensorModule<?> parentSensor) {
         this(webIdAnalyzer, msgIn, messageDelimiter, parentSensor, null);
@@ -235,9 +232,20 @@ public class MessageHandler {
         this.msgIn = msgIn;
         this.messageDelimiter = messageDelimiter;
         this.dailyFileJournal = dailyFileJournal;
-        laneUID = parentSensor.getParentSystemUID();
-        var bucketService = parentSensor.getParentHub().getModuleRegistry().getModuleByType(IBucketService.class);
-        bucketStore = bucketService.getBucketStore();
+        laneUID = parentSensor != null ? parentSensor.getParentSystemUID() : null;
+        if (parentSensor != null) {
+            try {
+                var hub = parentSensor.getParentHub();
+                if (hub != null && hub.getModuleRegistry() != null) {
+                    var bucketService = hub.getModuleRegistry().getModuleByType(IBucketService.class);
+                    if (bucketService != null) {
+                        bucketStore = bucketService.getBucketStore();
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("IBucketService not available for RS350 WebID bucket archival", e);
+            }
+        }
 
         this.messageReader.start();
         this.messageNotifier.start();
@@ -355,7 +363,7 @@ public class MessageHandler {
     }
 
     public long getTimeSinceLastMessage() {
-        return timeSinceLastMessage;
+        return Math.max(0L, System.currentTimeMillis() - lastMessageReceivedMillis);
     }
 
     private void publishWebIdRequest(String n42) {
@@ -413,7 +421,7 @@ public class MessageHandler {
         var analysis = this.webIdAnalyzer.processWebIdRequest(requestBuilder.build());
 
         // Store analysis JSON in bucket
-        if (analysis != null) {
+        if (analysis != null && bucketStore != null) {
             var analysisJson = analysis.toString();
             Map<String, String> jsonMetadata = new HashMap<>();
             jsonMetadata.put("Content-Type", "application/json");

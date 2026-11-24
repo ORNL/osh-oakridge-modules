@@ -168,8 +168,10 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
         MessageHandler activeHandler = messageHandler;
         if (activeHandler != null)
             activeHandler.requestStop();
-        if(tcpConnectionThread != null)
+        if(tcpConnectionThread != null) {
+            tcpConnectionThread.interrupt();
             tcpConnectionThread = null;
+        }
 
         if (connection != null) {
             try {

@@ -34,6 +34,7 @@ import com.botts.impl.sensor.rs350.RS350Sensor;
 import com.botts.impl.system.lane.helpers.eml.EmlAutoAdjudicationHelper;
 import com.botts.impl.system.lane.helpers.ocr.OcrHelper;
 import com.botts.impl.system.lane.helpers.webid.WebIdHelper;
+import com.botts.impl.system.lane.helpers.webrelay.LaneWebRelayController;
 import org.sensorhub.impl.utils.rad.output.N42Output;
 import com.botts.impl.system.lane.config.*;
 import com.botts.impl.system.lane.helpers.occupancy.OccupancyWrapper;
@@ -68,6 +69,7 @@ import org.vast.sensorML.SMLFactory;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Extended functionality of the SensorSystem class unique for Open Source Central Alarm (OSCAR)
@@ -100,6 +102,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     private long subscriptionGeneration = 0;
     private ExecutorService threadPool = null;
     private volatile boolean autoStartDispatchComplete;
+    private final AtomicBoolean syncingEndpoints = new AtomicBoolean(false);
     Map<String, FFMPEGConfig> ffmpegConfigs = null;
     OccupancyWrapper occupancyWrapper;
     OccupancyStatusOutput occupancyStatusOutput;
@@ -107,6 +110,8 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     EmlAutoAdjudicationHelper emlAutoAdjudicationHelper;
 
     AdjudicationControl adjudicationControl;
+    LaneRelayControl laneRelayControl;
+    LaneWebRelayController webRelayController;
     WebIdOutput webIdOutput;
     N42Output<?> n42Output;
     VehicleOcrOutput vehicleOcrOutput;
@@ -143,6 +148,8 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         threadPool = Executors.newSingleThreadExecutor();
         ffmpegConfigs = new HashMap<>();
         occupancyWrapper = null;
+        existingRPMModule = null;
+        occupancyProducer = null;
 
         // generate unique ID
         if (config.uniqueID != null && !config.uniqueID.equals(AUTO_ID)) {
@@ -176,32 +183,8 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             }
         }
 
-        // Lane database and process setup
-        if (getConfiguration().laneOptionsConfig != null) {
-            // Initial RPM config
-            var rpmConfig = getConfiguration().laneOptionsConfig.rpmConfig;
-            if (rpmConfig != null && existingRPMModule == null) {
-                // Create Rapiscan or Aspect config, then add as submodule
-                var config = createRPMConfig(rpmConfig);
-                existingRPMModule = (AbstractSensorModule<?>) registerSubmodule(config);
-            } else if (rpmConfig != null) {
-                // Lane-level host/port is authoritative: push it down to the existing
-                // RPM member so the two never silently diverge
-                syncRPMCommSettings(rpmConfig, existingRPMModule);
-            }
-
-            // Initial FFmpeg config
-            var ffmpegConfigList = getConfiguration().laneOptionsConfig.ffmpegConfig;
-            if (ffmpegConfigList != null) {
-                for (var simpleConfig : ffmpegConfigList) {
-                    FFMPEGConfig config = createFFmpegConfig(simpleConfig, ffmpegConfigList.indexOf(simpleConfig));
-                    var ffmpegModule = createFFmpegModule(config);
-                    if (occupancyWrapper != null) {
-                        //occupancyWrapper.addFFmpegSensor(ffmpegModule);
-                    }
-                }
-            }
-        }
+        // Bidirectional synchronization between LaneOptionsConfig and child sensor ModuleConfigs
+        reconcileLaneEndpoints();
 
         webIdOutput = new WebIdOutput(this);
         addOutput(webIdOutput, false);
@@ -223,6 +206,13 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
 
         adjudicationControl = new AdjudicationControl(this);
         addControlInput(adjudicationControl);
+
+        if (getConfiguration().webRelayConfig != null && getConfiguration().webRelayConfig.enabled) {
+            laneRelayControl = new LaneRelayControl(this);
+            addControlInput(laneRelayControl);
+        } else {
+            laneRelayControl = null;
+        }
 
         String statusMsg = "Note: ";
         if (existingRPMModule == null)
@@ -297,6 +287,9 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                         .forEach(keywords::addKeyword);
             }
             keywords.addKeyword(EXTENDED_OCCUPANCY_THRESHOLD_KEYWORD_PREFIX + getExtendedOccupancyThresholdMinutes());
+            if (getConfiguration().webRelayConfig != null && getConfiguration().webRelayConfig.enabled) {
+                keywords.addKeyword("oscar:webrelay-enabled:true");
+            }
 
             if (keywords.getNumKeywords() > 0)
                 sensorDescription.addKeywords(keywords);
@@ -368,6 +361,45 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
 
     public OccupancyWrapper getOccupancyWrapper() {
         return occupancyWrapper;
+    }
+
+    public LaneWebRelayController getWebRelayController() {
+        return webRelayController;
+    }
+
+    public synchronized void refreshWebRelayRuntime() {
+        WebRelayConfig wrCfg = getConfiguration() != null ? getConfiguration().webRelayConfig : null;
+        if (wrCfg == null) {
+            wrCfg = new WebRelayConfig();
+            if (getConfiguration() != null) {
+                getConfiguration().webRelayConfig = wrCfg;
+            }
+        }
+        var state = getCurrentState();
+        boolean runtimeActive = state == ModuleEvent.ModuleState.STARTING
+                || state == ModuleEvent.ModuleState.STARTED
+                || state == ModuleEvent.ModuleState.INITIALIZED;
+        if (sensorDescription != null) {
+            updateSensorDescription();
+        }
+        if (!runtimeActive || !wrCfg.enabled) {
+            if (webRelayController != null) {
+                webRelayController.close();
+                webRelayController = null;
+            }
+            return;
+        }
+        if (laneRelayControl == null) {
+            laneRelayControl = new LaneRelayControl(this);
+            if (!getCommandInputs().containsKey(LaneRelayControl.NAME)) {
+                addControlInput(laneRelayControl);
+            }
+        }
+        if (webRelayController == null) {
+            webRelayController = new LaneWebRelayController(this, occupancyProducer, wrCfg);
+        } else {
+            webRelayController.reconfigure(wrCfg, occupancyProducer);
+        }
     }
 
     private FFMPEGSensorBase<?> createFFmpegModule(FFMPEGConfig ffmpegConfig) throws SensorHubException {
@@ -538,11 +570,17 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         if (ocrConfig != null && ocrConfig.enabled && vehicleOcrOutput != null && occupancyProducer != null) {
             ocrHelper = new OcrHelper(this, occupancyProducer, vehicleOcrOutput, ocrConfig);
         }
+
+        refreshWebRelayRuntime();
     }
 
     protected void doStop() throws SensorHubException {
         cancelLaneEventSubscription();
         shutdownThreadPool();
+        if (webRelayController != null) {
+            webRelayController.close();
+            webRelayController = null;
+        }
         if (emlAutoAdjudicationHelper != null) {
             emlAutoAdjudicationHelper.stop();
             emlAutoAdjudicationHelper = null;
@@ -567,6 +605,10 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     public void cleanup() throws SensorHubException {
         cancelLaneEventSubscription();
         shutdownThreadPool();
+        if (webRelayController != null) {
+            webRelayController.close();
+            webRelayController = null;
+        }
         if (emlAutoAdjudicationHelper != null) {
             emlAutoAdjudicationHelper.stop();
             emlAutoAdjudicationHelper = null;
@@ -687,6 +729,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                     if (event.getNewState() == ModuleEvent.ModuleState.STARTED) {
                         if (occupancyWrapper != null)
                             occupancyWrapper.start();
+                        refreshWebRelayRuntime();
                     } else if (event.getNewState() == ModuleEvent.ModuleState.STOPPING) {
                         if (occupancyWrapper != null)
                             occupancyWrapper.stop();
@@ -744,43 +787,42 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                     if (occupancyWrapper != null) {
                         occupancyWrapper.setExtendedOccupancyThresholdMinutes(thresholdMinutes);
                     }
+                    refreshWebRelayRuntime();
                     updateSensorDescription();
+                    if (isStarted() && !syncingEndpoints.get() && threadPool != null && !threadPool.isShutdown()) {
+                        threadPool.execute(() -> {
+                            try {
+                                reconcileLaneEndpoints();
+                            } catch (SensorHubException ex) {
+                                getLogger().error("Failed to synchronize lane endpoints after configuration change", ex);
+                            }
+                        });
+                    }
                 }
 
-                // FFmpeg config changed events
+                // Child FFmpeg camera config changed in Admin UI or API -> sync back to LaneOptionsConfig
                 if (event.getModule() instanceof FFMPEGSensor ffmpegDriver) {
-                    // Let's only handle our own ffmpeg children
                     if (ffmpegDriver.getParentSystem() == null || !ffmpegDriver.getParentSystem().equals(this))
                         return;
 
-                    var oldConfig = ffmpegConfigs.get(ffmpegDriver.getLocalID());
-
-                    if (oldConfig == null) {
-                        ffmpegConfigs.put(ffmpegDriver.getLocalID(), ffmpegDriver.getConfiguration());
-                        return;
-                    }
-
                     var newConfig = ffmpegDriver.getConfiguration();
+                    ffmpegConfigs.put(ffmpegDriver.getLocalID(), newConfig);
+                    syncSubsystemConfigReference(ffmpegDriver);
 
-                    // If important parts of configuration are updated, remove data from old driver
-                    if (newConfig.connection.useTCP != oldConfig.connection.useTCP
-                    || !Objects.equals(newConfig.connection.connectionString, oldConfig.connection.connectionString)
-                    || !Objects.equals(newConfig.connection.transportStreamPath, oldConfig.connection.transportStreamPath)) {
-                        if (ffmpegDriver.getUniqueIdentifier() != null && getParentHub().getSystemDriverRegistry().getDatabase(getUniqueIdentifier()) != null) {
+                    if (!syncingEndpoints.get()) {
+                        syncChildCameraToLaneOptions(ffmpegDriver, newConfig);
+                    }
+                }
 
-                            try {
-                                ffmpegDriver.stop();
-                                ffmpegDriver.waitForState(ModuleEvent.ModuleState.INITIALIZED, 5000);
-                                deleteSystemsFromDatabase(List.of(ffmpegDriver.getUniqueIdentifier()));
-                                getParentHub().getSystemDriverRegistry().register(ffmpegDriver);
-                                if (ffmpegDriver.getConfiguration().autoStart)
-                                    ffmpegDriver.start();
-                            } catch (SensorHubException ex) {
-                                getLogger().error("Failed to delete FFmpeg driver from database. Please delete old FFmpeg system in database to avoid further issues" + ex.getMessage());
-                            }
-                        }
-                        ffmpegConfigs.put(ffmpegDriver.getLocalID(), ffmpegDriver.getConfiguration());
-
+                // Child RPM config changed in Admin UI or API -> sync back to LaneOptionsConfig
+                if ((event.getModule() instanceof RapiscanSensor
+                        || event.getModule() instanceof AspectSensor
+                        || event.getModule() instanceof RS350Sensor)
+                        && getMembers().containsValue(event.getModule())) {
+                    var rpmModule = (AbstractSensorModule<?>) event.getModule();
+                    syncSubsystemConfigReference(rpmModule);
+                    if (!syncingEndpoints.get()) {
+                        syncChildRpmToLaneOptions(rpmModule);
                     }
                 }
             }
@@ -851,150 +893,9 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         return config;
     }
 
-    private SensorConfig createRPMConfig(RPMConfig rpmConfig) {
-        Asserts.checkNotNull(rpmConfig.remoteHost);
 
-        SensorConfig config = null;
 
-        if(rpmConfig instanceof AspectRPMConfig aspectRPMConfig){
-            AspectConfig aspectConfig = new AspectConfig();
-            aspectConfig.serialNumber = getConfiguration().uniqueID;
-            aspectConfig.moduleClass = AspectSensor.class.getCanonicalName();
 
-            // Setup communication config
-            var comm = aspectConfig.commSettings = new ModbusTCPCommProviderConfig();
-            comm.protocol.remoteHost = aspectRPMConfig.remoteHost;
-            comm.protocol.remotePort = aspectRPMConfig.remotePort;
-
-            comm.protocol.addressRange.from = aspectRPMConfig.addressRange.from;
-            comm.protocol.addressRange.to = aspectRPMConfig.addressRange.to;
-            // Update connection timeout to be 5 seconds instead of 3 seconds by default
-            comm.connection.connectTimeout = 5000;
-            comm.connection.reconnectAttempts = 10;
-            comm.moduleClass = ModbusTCPCommProvider.class.getCanonicalName();
-            config = aspectConfig;
-        } else if(rpmConfig instanceof RapiscanRPMConfig rapiscanRPMConfig){
-            RapiscanConfig rapiscanConfig = new RapiscanConfig();
-            rapiscanConfig.serialNumber = getConfiguration().uniqueID;
-            rapiscanConfig.moduleClass = RapiscanSensor.class.getCanonicalName();
-
-            // add eml for rapiscan
-            if (rapiscanRPMConfig.emlConfig != null) {
-                var eml = rapiscanConfig.emlConfig = new EMLConfig();
-                eml.emlEnabled = rapiscanRPMConfig.emlConfig.emlEnabled;
-                eml.isCollimated = rapiscanRPMConfig.emlConfig.isCollimated;
-                eml.laneWidth = rapiscanRPMConfig.emlConfig.laneWidth;
-            }
-
-            // Setup communication config
-            var comm = rapiscanConfig.commSettings = new TCPCommProviderConfig();
-            comm.protocol.remoteHost = rapiscanRPMConfig.remoteHost;
-            comm.protocol.remotePort = rapiscanRPMConfig.remotePort;
-            // Update connection timeout to be 5 seconds instead of 3 seconds by default
-            comm.connection.connectTimeout = 5000;
-            comm.connection.reconnectAttempts = 10;
-
-            config = rapiscanConfig;
-        } else if (rpmConfig instanceof RS350RPMConfig rS350RPMConfig){
-            RS350Config rs350Config = new RS350Config();
-            rs350Config.serialNumber = getConfiguration().uniqueID;
-            rs350Config.moduleClass = RS350Sensor.class.getCanonicalName();
-
-            var comm = rs350Config.commSettings = new TCPCommProviderConfig();
-
-            comm.protocol.remoteHost = rS350RPMConfig.remoteHost;
-            comm.protocol.remotePort = rS350RPMConfig.remotePort;
-            comm.connection.connectTimeout = 5000;
-            comm.connection.reconnectAttempts = 10;
-
-            config = rs350Config;
-        } else if (rpmConfig instanceof D5RPMConfig d5RPMConfig){
-            D5Config d5Config = new D5Config();
-            d5Config.serialNumber = getConfiguration().uniqueID;
-            d5Config.moduleClass = D5Sensor.class.getCanonicalName();
-
-            var comm = new TCPCommProviderConfig();
-            comm.protocol.remoteHost = d5RPMConfig.remoteHost;
-            comm.protocol.remotePort = d5RPMConfig.remotePort;
-            comm.connection.connectTimeout = 5000;
-            comm.connection.reconnectAttempts = 10;
-            d5Config.commSettings = comm;
-
-            config = d5Config;
-        } else{
-            reportError("RPM Config specified is invalid, config must be of type AspectRPMConfig, RapiscanRPMConfig, RS350RPMConfig or D5RPMConfig", new IllegalArgumentException());
-        }
-
-        config.name = getConfiguration().name + " - RPM";
-        config.autoStart = true;
-
-        return config;
-    }
-
-    /**
-     * Re-applies the lane-level RPM endpoint to an existing RPM member's comm
-     * settings. The lane config is the single source of truth for host/port;
-     * without this, edits to the lane config are silently ignored once a
-     * subsystem has been persisted.
-     */
-    private void syncRPMCommSettings(RPMConfig rpmConfig, AbstractSensorModule<?> rpmModule) {
-        if (rpmConfig.remoteHost == null || rpmModule == null)
-            return;
-
-        var driverConfig = rpmModule.getConfiguration();
-
-        if (driverConfig instanceof AspectConfig aspectConfig) {
-            if (aspectConfig.commSettings == null) {
-                aspectConfig.commSettings = new ModbusTCPCommProviderConfig();
-                aspectConfig.commSettings.connection.connectTimeout = 5000;
-                aspectConfig.commSettings.connection.reconnectAttempts = 10;
-                aspectConfig.commSettings.moduleClass = ModbusTCPCommProvider.class.getCanonicalName();
-            }
-            var protocol = aspectConfig.commSettings.protocol;
-            warnIfEndpointDiverges(rpmModule, protocol.remoteHost, protocol.remotePort, rpmConfig);
-            protocol.remoteHost = rpmConfig.remoteHost;
-            protocol.remotePort = rpmConfig.remotePort;
-            if (rpmConfig instanceof AspectRPMConfig aspectRPMConfig && aspectRPMConfig.addressRange != null) {
-                protocol.addressRange.from = aspectRPMConfig.addressRange.from;
-                protocol.addressRange.to = aspectRPMConfig.addressRange.to;
-            }
-        } else if (driverConfig instanceof RapiscanConfig rapiscanConfig) {
-            if (rapiscanConfig.commSettings == null)
-                rapiscanConfig.commSettings = newTCPCommSettings();
-            var protocol = rapiscanConfig.commSettings.protocol;
-            warnIfEndpointDiverges(rpmModule, protocol.remoteHost, protocol.remotePort, rpmConfig);
-            protocol.remoteHost = rpmConfig.remoteHost;
-            protocol.remotePort = rpmConfig.remotePort;
-        } else if (driverConfig instanceof RS350Config rs350Config) {
-            if (rs350Config.commSettings == null)
-                rs350Config.commSettings = newTCPCommSettings();
-            var protocol = rs350Config.commSettings.protocol;
-            warnIfEndpointDiverges(rpmModule, protocol.remoteHost, protocol.remotePort, rpmConfig);
-            protocol.remoteHost = rpmConfig.remoteHost;
-            protocol.remotePort = rpmConfig.remotePort;
-        } else if (driverConfig instanceof D5Config d5Config) {
-            if (!(d5Config.commSettings instanceof TCPCommProviderConfig)) {
-                d5Config.commSettings = newTCPCommSettings();
-            }
-            var protocol = ((TCPCommProviderConfig) d5Config.commSettings).protocol;
-            warnIfEndpointDiverges(rpmModule, protocol.remoteHost, protocol.remotePort, rpmConfig);
-            protocol.remoteHost = rpmConfig.remoteHost;
-            protocol.remotePort = rpmConfig.remotePort;
-        }
-    }
-
-    private TCPCommProviderConfig newTCPCommSettings() {
-        var comm = new TCPCommProviderConfig();
-        comm.connection.connectTimeout = 5000;
-        comm.connection.reconnectAttempts = 10;
-        return comm;
-    }
-
-    private void warnIfEndpointDiverges(AbstractSensorModule<?> rpmModule, String currentHost, int currentPort, RPMConfig rpmConfig) {
-        if (currentHost != null && (!currentHost.equals(rpmConfig.remoteHost) || currentPort != rpmConfig.remotePort))
-            getLogger().warn("Overriding {} comm settings {}:{} with lane RPM config {}:{} (lane config is authoritative)",
-                    rpmModule.getName(), currentHost, currentPort, rpmConfig.remoteHost, rpmConfig.remotePort);
-    }
 
     private FFMPEGConfig createFFmpegConfig(FFMpegConfig ffmpegConfig, int videoIndex) {
         String defaultAxis = AxisCameraConfig.CodecEndpoint.H264.getPath();
@@ -1052,6 +953,214 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             index++;
         }
         return "/" + candidate.substring(index);
+    }
+
+    private void reconcileLaneEndpoints() throws SensorHubException {
+        if (getConfiguration() == null) {
+            return;
+        }
+        if (getConfiguration().laneOptionsConfig == null) {
+            getConfiguration().laneOptionsConfig = new LaneOptionsConfig();
+        }
+        boolean configDirty = false;
+        syncingEndpoints.set(true);
+        try {
+            var opts = getConfiguration().laneOptionsConfig;
+
+            // 1. Reconcile RPM configuration bidirectionally
+            SensorConfig existingRpmCfg = existingRPMModule != null
+                    ? (SensorConfig) existingRPMModule.getConfiguration()
+                    : null;
+            var rpmResult = LaneEndpointSync.reconcileRpm(getConfiguration(), opts.rpmConfig, existingRpmCfg);
+            configDirty |= rpmResult.metadataUpdated();
+            if (rpmResult.action() == LaneEndpointSync.SyncAction.REGISTER_NEW_CHILD) {
+                existingRPMModule = (AbstractSensorModule<?>) registerSubmodule(rpmResult.childConfig());
+                if (existingRPMModule instanceof RapiscanSensor || existingRPMModule instanceof AspectSensor) {
+                    occupancyProducer = (IDataProducerModule<?>) existingRPMModule;
+                }
+                configDirty = true;
+            } else if (rpmResult.action() == LaneEndpointSync.SyncAction.UPDATE_CHILD && existingRPMModule != null) {
+                SensorConfig updatedChild = rpmResult.childConfig();
+                updatedChild.id = existingRPMModule.getLocalID();
+                if (!existingRPMModule.getClass().getCanonicalName().equals(updatedChild.moduleClass)) {
+                    removeSubSystem(existingRPMModule.getLocalID());
+                    existingRPMModule = (AbstractSensorModule<?>) registerSubmodule(updatedChild);
+                } else {
+                    @SuppressWarnings({"unchecked", "rawtypes"})
+                    AbstractSensorModule rawRpm = existingRPMModule;
+                    rawRpm.updateConfig(updatedChild);
+                    syncSubsystemConfigReference(existingRPMModule);
+                }
+                if (existingRPMModule instanceof RapiscanSensor || existingRPMModule instanceof AspectSensor) {
+                    occupancyProducer = (IDataProducerModule<?>) existingRPMModule;
+                }
+                configDirty = true;
+            } else if (rpmResult.action() == LaneEndpointSync.SyncAction.UPDATE_PARENT) {
+                opts.rpmConfig = rpmResult.simpleConfig();
+                configDirty = true;
+            }
+
+            // 2. Backfill any orphan child FFMPEGSensors into LaneOptionsConfig.ffmpegConfig
+            if (opts.ffmpegConfig == null) {
+                opts.ffmpegConfig = new ArrayList<>();
+            }
+            for (var member : getMembers().values()) {
+                if (member instanceof FFMPEGSensor camSensor) {
+                    int camIdx = LaneEndpointSync.parseCameraIndexFromSerial(camSensor.getConfiguration().serialNumber);
+                    if (camIdx >= opts.ffmpegConfig.size() && camIdx >= 0) {
+                        while (opts.ffmpegConfig.size() <= camIdx) {
+                            opts.ffmpegConfig.add(null);
+                        }
+                        opts.ffmpegConfig.set(
+                                camIdx,
+                                LaneEndpointSync.applyChildToSimpleCameraConfig(camSensor.getConfiguration(), null));
+                        configDirty = true;
+                    }
+                }
+            }
+
+            // 3. Reconcile every camera slot bidirectionally
+            for (int i = 0; i < opts.ffmpegConfig.size(); i++) {
+                FFMpegConfig simpleCam = opts.ffmpegConfig.get(i);
+                if (simpleCam == null) {
+                    continue;
+                }
+                FFMPEGSensor existingCam = findFFmpegMemberForIndex(i);
+                var camResult = LaneEndpointSync.reconcileCamera(
+                        getConfiguration(),
+                        i,
+                        simpleCam,
+                        existingCam != null ? existingCam.getConfiguration() : null);
+                configDirty |= camResult.metadataUpdated();
+
+                if (camResult.action() == LaneEndpointSync.SyncAction.REGISTER_NEW_CHILD) {
+                    var createdCam = (FFMPEGSensor) registerSubmodule(camResult.childConfig());
+                    ffmpegConfigs.put(createdCam.getLocalID(), createdCam.getConfiguration());
+                    configDirty = true;
+                } else if (camResult.action() == LaneEndpointSync.SyncAction.UPDATE_CHILD && existingCam != null) {
+                    FFMPEGConfig updatedChild = camResult.childConfig();
+                    updatedChild.id = existingCam.getLocalID();
+                    existingCam.updateConfig(updatedChild);
+                    syncSubsystemConfigReference(existingCam);
+                    ffmpegConfigs.put(existingCam.getLocalID(), existingCam.getConfiguration());
+                    configDirty = true;
+                } else if (camResult.action() == LaneEndpointSync.SyncAction.UPDATE_PARENT) {
+                    opts.ffmpegConfig.set(i, camResult.simpleConfig());
+                    configDirty = true;
+                }
+            }
+        } finally {
+            syncingEndpoints.set(false);
+        }
+
+        if (configDirty) {
+            persistLaneConfigurationSafely();
+        }
+    }
+
+    private void syncChildCameraToLaneOptions(FFMPEGSensor ffmpegDriver, FFMPEGConfig childConfig) {
+        if (getConfiguration() == null || childConfig == null) {
+            return;
+        }
+        syncingEndpoints.set(true);
+        try {
+            if (getConfiguration().laneOptionsConfig == null) {
+                getConfiguration().laneOptionsConfig = new LaneOptionsConfig();
+            }
+            if (getConfiguration().laneOptionsConfig.ffmpegConfig == null) {
+                getConfiguration().laneOptionsConfig.ffmpegConfig = new ArrayList<>();
+            }
+            var camList = getConfiguration().laneOptionsConfig.ffmpegConfig;
+            int idx = LaneEndpointSync.parseCameraIndexFromSerial(childConfig.serialNumber);
+            if (idx < 0) {
+                idx = findMemberCameraOrdinal(ffmpegDriver);
+            }
+            if (idx < 0) {
+                idx = 0;
+            }
+            while (camList.size() <= idx) {
+                camList.add(null);
+            }
+            FFMpegConfig updatedSimple = LaneEndpointSync.applyChildToSimpleCameraConfig(childConfig, camList.get(idx));
+            camList.set(idx, updatedSimple);
+            persistLaneConfigurationSafely();
+        } finally {
+            syncingEndpoints.set(false);
+        }
+    }
+
+    private void syncChildRpmToLaneOptions(AbstractSensorModule<?> rpmModule) {
+        if (getConfiguration() == null || rpmModule == null) {
+            return;
+        }
+        syncingEndpoints.set(true);
+        try {
+            if (getConfiguration().laneOptionsConfig == null) {
+                getConfiguration().laneOptionsConfig = new LaneOptionsConfig();
+            }
+            var existingSimple = getConfiguration().laneOptionsConfig.rpmConfig;
+            getConfiguration().laneOptionsConfig.rpmConfig = LaneEndpointSync.extractSimpleRpmConfig(
+                    (SensorConfig) rpmModule.getConfiguration(),
+                    existingSimple);
+            persistLaneConfigurationSafely();
+        } finally {
+            syncingEndpoints.set(false);
+        }
+    }
+
+    private FFMPEGSensor findFFmpegMemberForIndex(int videoIndex) {
+        String expectedSerial = LaneEndpointSync.cameraSerialNumber(getConfiguration().uniqueID, videoIndex);
+        String rawExpectedSerial = "lane:" + getConfiguration().uniqueID + ":" + videoIndex;
+        for (var member : getMembers().values()) {
+            if (member instanceof FFMPEGSensor cam && cam.getConfiguration() != null) {
+                String serial = cam.getConfiguration().serialNumber;
+                if (Objects.equals(serial, expectedSerial) || Objects.equals(serial, rawExpectedSerial)) {
+                    return cam;
+                }
+            }
+        }
+        return null;
+    }
+
+    private int findMemberCameraOrdinal(FFMPEGSensor target) {
+        int ordinal = 0;
+        for (var member : getMembers().values()) {
+            if (member instanceof FFMPEGSensor cam) {
+                if (cam == target || Objects.equals(cam.getLocalID(), target.getLocalID())) {
+                    return ordinal;
+                }
+                ordinal++;
+            }
+        }
+        return -1;
+    }
+
+    private void syncSubsystemConfigReference(AbstractModule<?> childModule) {
+        if (getConfiguration() == null || getConfiguration().subsystems == null || childModule == null) {
+            return;
+        }
+        String localId = childModule.getLocalID();
+        for (var sub : getConfiguration().subsystems) {
+            if (sub != null && sub.config != null && Objects.equals(sub.config.id, localId)) {
+                sub.config = childModule.getConfiguration();
+                return;
+            }
+        }
+    }
+
+    private void persistLaneConfigurationSafely() {
+        try {
+            if (getParentHub() == null || getConfiguration() == null || getConfiguration().id == null) {
+                return;
+            }
+            var registry = getParentHub().getModuleRegistry();
+            if (registry != null && registry.getLoadedModuleById(getConfiguration().id) != null) {
+                registry.saveConfiguration(getConfiguration());
+            }
+        } catch (Exception e) {
+            getLogger().debug("Skipping immediate config repository commit for lane {}: {}",
+                    getLocalID(), e.getMessage());
+        }
     }
 
     @Override

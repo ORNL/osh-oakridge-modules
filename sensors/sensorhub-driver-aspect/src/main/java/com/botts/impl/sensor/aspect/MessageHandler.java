@@ -43,9 +43,11 @@ public class MessageHandler {
     int maxGamma = 0;
     int deviceAddress = -1;
 
-    private static final int BACKGROUND_INTERVAL_MS = 5000;
-    private static final int SCAN_INTERVAL_MS = 200;
-    private long timeSinceLastMessage;
+    static final int BACKGROUND_INTERVAL_MS = 5000;
+    static final int SCAN_INTERVAL_MS = 200;
+    volatile long backgroundIntervalMs = BACKGROUND_INTERVAL_MS;
+    volatile long scanIntervalMs = SCAN_INTERVAL_MS;
+    private volatile long timeSinceLastMessage;
     private long timeOfLastMessage;
     private long timer = 0;
 
@@ -79,11 +81,24 @@ public class MessageHandler {
 
                 MonitorRegisters monitorRegisters = new MonitorRegisters(parentSensor.commProviderModule.getConnection(), 100, 21);
                 while (!stopRequested.get() && !Thread.currentThread().isInterrupted()) {
-                    timer += timeSinceLastMessage;
-                    timeSinceLastMessage = System.currentTimeMillis() - timeOfLastMessage;
-                    timeOfLastMessage = System.currentTimeMillis();
+                    try {
+                        monitorRegisters.readRegisters(deviceAddress);
+                    } catch (Exception readError) {
+                        if (stopRequested.get() || Thread.currentThread().isInterrupted()
+                                || parentSensor.commProviderModule == null
+                                || parentSensor.commProviderModule.getConnection() == null
+                                || !parentSensor.commProviderModule.getConnection().isConnected()) {
+                            break;
+                        }
+                        log.debug("Skipping malformed or failed Aspect Modbus register read on unit #{}: {}",
+                                deviceAddress, readError.getMessage());
+                        continue;
+                    }
 
-                    monitorRegisters.readRegisters(deviceAddress);
+                    long nowMillis = System.currentTimeMillis();
+                    timeSinceLastMessage = nowMillis - timeOfLastMessage;
+                    timeOfLastMessage = nowMillis;
+                    timer += timeSinceLastMessage;
 
                     SampleClock sampleClock = sampleClock(Instant.now());
                     Instant sampleTime = sampleClock.observationTime();
@@ -95,7 +110,8 @@ public class MessageHandler {
                             && occupancyCount != previousOccupancyCount;
 
                     if (checkScan(monitorRegisters)) {
-                        if (shouldPublishDailyFile(true, timer, occupancyStartedThisSample)) {
+                        if (shouldPublishDailyFile(true, timer, occupancyStartedThisSample,
+                                backgroundIntervalMs, scanIntervalMs)) {
                             timer = 0;
 
                             publishDailyFile(monitorRegisters, sampleTime);
@@ -106,7 +122,8 @@ public class MessageHandler {
                         }
 
                     } else {
-                        if (shouldPublishDailyFile(false, timer, occupancyStartedThisSample)) {
+                        if (shouldPublishDailyFile(false, timer, occupancyStartedThisSample,
+                                backgroundIntervalMs, scanIntervalMs)) {
                             timer = 0;
 
                             publishDailyFile(monitorRegisters, sampleTime);
@@ -187,8 +204,16 @@ public class MessageHandler {
     /** Occupancy transitions bypass cadence throttling so correlation never uses a later sample. */
     static boolean shouldPublishDailyFile(boolean scan, long elapsedMillis,
                                           boolean occupancyStartedThisSample) {
+        return shouldPublishDailyFile(scan, elapsedMillis, occupancyStartedThisSample,
+                BACKGROUND_INTERVAL_MS, SCAN_INTERVAL_MS);
+    }
+
+    static boolean shouldPublishDailyFile(boolean scan, long elapsedMillis,
+                                          boolean occupancyStartedThisSample,
+                                          long backgroundCadenceMs,
+                                          long scanCadenceMs) {
         return occupancyStartedThisSample
-                || elapsedMillis >= (scan ? SCAN_INTERVAL_MS : BACKGROUND_INTERVAL_MS);
+                || elapsedMillis >= (scan ? scanCadenceMs : backgroundCadenceMs);
     }
 
     public void requestStop() {
@@ -291,7 +316,9 @@ public class MessageHandler {
     }
 
     public int calcMax(LinkedList<Integer> occBatch){
-
+        if (occBatch == null || occBatch.isEmpty()) {
+            return 0;
+        }
         int temp = 0;
         int position = 0;
         for(int i = 0; i < occBatch.size(); i++){

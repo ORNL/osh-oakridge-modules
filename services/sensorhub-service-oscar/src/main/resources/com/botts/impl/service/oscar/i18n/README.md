@@ -1,4 +1,4 @@
-# OSCAR 3.11.0 administrator and operator manual
+# OSCAR 3.11.12 administrator and operator manual
 
 This manual covers the complete first-use and operations workflow including certificate trust, sign-in, site-diagram georeferencing, lane import/manual creation, alarm adjudication and evidence, event review, national statistics, reports, and node federation.
 
@@ -32,7 +32,7 @@ The screenshots show the English interface. OSCAR also supplies Spanish, French,
 
 You need:
 
-- an installed and running OSCAR 3.11.0 deployment;
+- an installed and running OSCAR 3.11.12 deployment;
 - the OSCAR URL, normally `https://oscar.local/` unless deployment selected another hostname;
 - an administrator account for `/sensorhub/admin`;
 - the approved site image and the latitude/longitude of its lower-left and upper-right corners;
@@ -62,11 +62,18 @@ Use the release [Quick Start](https://github.com/ORNL/oscar/blob/main/dist/relea
 | **WebID & DRF (Detector Response Function)** | **WebID** is the Sandia Full Spectrum isotope identification service used to analyze uploaded handheld RIID and portal spectra (`.n42`, Ortec ASCII `.spe`, Ortec/Canberra binary `.spc`, and `.xml`), with automatic local photopeak nuclide identification fallback when Full Spectrum is offline or air-gapped; gamma energy spectrograms default to logarithmic `Counts (Log)` scale with a 1-click `Linear` toggle. A **DRF** tells WebID the physical detector model and geometry used to capture the spectrum. |
 | **Daily File & Record Codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | The per-lane daily CSV log of raw RPM messages: `GB`/`NB` = gamma/neutron background, `GS` = occupancy start, `GC`/`NC` = gamma/neutron count profile, `GA`/`NA`/`NS` = gamma/neutron alarm, `GX` = occupancy end, `TT`/`TC` = tamper fault/clear, and `SG1`–`SG3`/`SN1`–`SN2` = daily gamma/neutron hardware setup parameters (which automatically update the Rapiscan driver's parameters in memory and coalesce changes into `config.json`). |
 | **Event UUID** | Globally unique identifier (`UUID`) assigned to each occupancy event so operators can search, export QR summaries, and trace the exact event across reports and federated nodes. |
-| **Operational View** | A named filter (`?view=<key>` or `/view/<key>`) that scopes a workstation's Dashboard, Events, Status of Health, and Report Generator to a specific group of lanes (for example, `north-gate`). |
-| **Parquet Cold Tier (`PARQUET_PRIMARY`)** | OSCAR 3.11.0's default storage mode where PostgreSQL holds a 30-minute hot staging window and completed 30-minute partitions are exported to ZSTD-compressed Apache Parquet files (`archive/parquet/`) for fast, compact long-term querying. |
+| **Operational View** | A named filter selectable from the top-bar **Scoped View** dropdown (or via `?view=<key>` / `/view/<key>` URLs) that scopes a workstation's Dashboard, Events, Status of Health, Map, and Report Generator to a specific group of lanes (for example, `north-gate`) while honoring user `allowedViews` permissions. |
+| **Parquet Cold Tier (`PARQUET_PRIMARY`)** | OSCAR 3.11.12's default storage mode where PostgreSQL holds a 30-minute hot staging window and completed 30-minute partitions are exported to ZSTD-compressed Apache Parquet files (`archive/parquet/`) for fast, compact long-term querying. |
 | **Retained 5-Frame Media** | For every alarm occupancy, OSCAR extracts 5 evenly spaced JPEG snapshots (`frame-01.jpg` to `frame-05.jpg`). After 30 days, secondary frames (`01`, `02`, `04`, `05`) are pruned while the midpoint keyframe (`frame-03.jpg`) is preserved. |
 | **Vehicle OCR (`ocrConfig`)** | Optional per-lane background OCR (`Enable Vehicle OCR = false` by default) that asynchronously reads ISO 6346 shipping container codes (with check-digit verification) and license plates from occupancy camera clips as CPU and heap resources allow (`OcrResourceGovernor`), publishing `vehicleOcr` (`PARQUET_PRIMARY`) candidates, date-partitioned JPEG evidence crops (`/sensorhub/buckets/ocr/crops/<YYYY-MM-DD>/`, aligned with retained `frame-03.jpg` media and `ocrCropRetentionDays = 365`), and auto-filled **Vehicle ID** for checksum-valid containers or high-confidence (`>= 85%`) plates. When `Alarms Only` is cleared, non-alarm clips are scanned transiently and deleted immediately after OCR while keeping `occupancy.videoPaths` empty (`[]`). |
 | **SAN (Subject Alternative Name)** | The list of hostnames and IP addresses (such as `oscar.local` and `192.0.2.10`) embedded inside an HTTPS certificate that a browser checks before trusting the connection. |
+| **Passkeys (WebAuthn / FIDO2) & Persistent Sessions** | Phishing-resistant public-key sign-in (`ES256` / `RS256`) using Windows Hello, Touch ID, Face ID, or USB/NFC hardware security keys (such as YubiKey) verified 100% locally on the OSCAR server without internet access. Dedicated workstations stay signed in across browser restarts, host reboots, and `oscar upgrade` until explicit **Log Out** or administrator revocation; phone-free facilities can use individual PBKDF2 local passwords (which are completely independent of any Octelium Zero-Trust tunnel credentials). |
+| **Federation Service Tokens (`oscar_fed_...`)** | Scoped, revocable credentials (`Viewer` read-only or `Operator`) minted on the monitored node in **Users & Access (`/users`) -> Federation Tokens** and pasted into **Servers (`/servers?auth=bearer`) -> Add Server -> Authentication Method: Federation Service Token** (`HTTPS`, port `443`) on the monitoring/HQ node so remote OSCAR nodes can federate HTTP and MQTT streams without sharing administrator passwords. |
+| **USB Backups (`/usb-backups`)** | Optional zero-downtime (`0.0 s` portal outage) incremental backup onto an external USB 3.x NVMe SSD (`NTFS` default) managed from **OSCAR Viewer -> USB Backups** or `oscar usb-backup`, supporting `continual` background sync, `occasional` visit sync, safe `eject` (`SAFE_TO_UNPLUG`), laptop delta copy, and `usb-backup restore`. |
+| **Pluggable Extensions (`/extensions`)** | Administrator workspace (**OSCAR Viewer -> Extensions**) for uploading upgrade-safe regional OCR rules/models (`plate-rules.json`, `.onnx`, or `OcrEngine` `.jar`), offline `.pmtiles` vector/raster basemaps, custom spectroscopy libraries/algorithms, enterprise CA `.pem`/`.crt` certificates, agency adjudication policy packs, and EML plugins while keeping shipped built-in defaults active on fresh installs and supporting 1-click reset. |
+| **Hands-On Training Sandbox (`oscar-sandbox`, `:8444`)** | Isolated ephemeral Docker Compose stack (`sudo bash oscar.sh sandbox start` / `.\oscar.bat sandbox start`) reusing the installed OSCAR images on `:8444` with built-in loopback Rapiscan RPM (`127.0.0.1:10099`), RTSP container camera (`127.0.0.1:8554/tutorial-cam`), and ControlByWeb `WebRelay-Quad` (`127.0.0.1:10180`) micro-emulators, 13 guided labs (`Watch · Read · Do · Auto-Verify`) across Operator, Supervisor, and Administrator tracks (including destination-aware `/event-log` & `/health` auto-navigation and Split-Pane `/sensorhub/admin`), `archive.enabled = false`, watermarked exports (`TRAINING SANDBOX — NON-OPERATIONAL`), and complete wipe on `sandbox stop` without touching operational PostgreSQL or Parquet archives. |
+| **RPM Lights & Sound (`webRelayConfig` — WebRelay-Quad)** | Optional per-lane network relay integration (`Enable WebRelay Control = false` by default) for ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`) HTTP/XML modules (`stateFull.xml` / `state.xml`) across a Primary Pillar unit and optional Ancillary Dry-Contact unit. Supports **Automatic (`AUTO`)** occupancy/EML gatekeeping (arming `R1=1, R2=1` during occupancies, suppressing physical lights & sound on `Code 9999: EML Non-Threat` and optionally `Code 9998: Extended Occupancy Gamma Alarm`, pulsing `R3` Gamma Red Light + Audible Siren and/or `R4` Neutron Blue Light on actionable alarms, and failing safe to `0,0,0,0` pass-through when stopped), **Pass-Through (`PASS_THROUGH`)**, **Muted (`MUTED`)**, and live Administrator manual controls in `/sensorhub/admin`, **Status of Health (`/health`)**, and **Lane View (`/lane-view`)**. |
+| **Side-by-Side CAS RPM Edge Proxy (`oscar-rpm-proxy`)** | Optional isolated Docker Compose service (`sudo bash oscar.sh rpm-proxy` / `.\oscar.bat rpm-proxy`) for portals running OSCAR alongside an existing Central Alarm Station (CAS). Fans out `1–50` single-client Rapiscan RPM TCP streams simultaneously at `< 1 ms` latency via Port-Mapped (`11601..11650`) or Ubuntu 24.04 Transparent Virtual-IP `:1600` mode, replays cached `SG1..SG3` / `SN1..SN2` setup frames, keeps CAS connected across OSCAR restarts/upgrades, and propagates physical RPM disconnects to both systems in `<= 4.0 s`. |
 
 ## 2. Trust the OSCAR certificate
 
@@ -121,7 +128,7 @@ Open `https://<oscar-host>/sensorhub/admin` and enter the administrator credenti
 
 ### 3.1 Language
 
-Use the language selector at the top of the administration interface or OSCAR Viewer. English, Spanish, French, and Greek are supported. The choice is shared between the two interfaces and takes effect when the destination interface loads or reloads. This README tab automatically opens the matching localized manual.
+Use the language selector (or **Settings**, marked by the **gear icon**) at the top of the administration interface or OSCAR Viewer. English, Spanish, French, and Greek are supported. The choice is shared between the two interfaces and takes effect when the destination interface loads or reloads. This README tab automatically opens the matching localized manual, and all 31 bundled offline `1080p` `30 fps` video guides include native English (`en`), Spanish (`es`), French (`fr`), and Greek (`el`) subtitle tracks that switch automatically with the operator's selected language.
 
 ### 3.2 Three actions that are easy to confuse
 
@@ -130,6 +137,35 @@ Use the language selector at the top of the administration interface or OSCAR Vi
 - **Save** in the administration header opens a confirmation dialog. Select **Yes** and wait for **SensorHub Configuration Saved**; only then has the complete module configuration been written so it survives a restart.
 
 After any successful setup, use **Apply Changes** where available and then **Save**. An upload-success message proves that the file was accepted; it does not by itself prove that every device can connect or that all changes have been persisted.
+
+### 3.3 Non-IT Users & Access (`/users`), Offline Passkeys, Persistent Sessions & Bulk QR Enrollment
+
+Open **Users & Access** (`/users`, marked by the **person-and-gear icon**) from the OSCAR Viewer navigation drawer (or select your signed-in username in the top bar) to manage accounts without editing files or using the command line:
+
+![OSCAR Users, Passkeys & Access Control](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/36-users-and-passkeys.png)
+
+- **Stay Signed In Until Log Out:** By default (`idleTimeoutSeconds = 0`, `absoluteTimeoutSeconds = 0`), selecting **Keep me signed in until I log out** on `/login` persists a SHA-256 session digest in `/var/lib/oscar/.moduledata/oscar-identity.json` so dedicated gatehouse workstations remain signed in across browser restarts, host reboots, and `oscar upgrade` until explicit **Log Out** or administrator revocation. Shared kiosks can switch to the `30m` idle / `8h` max preset under **Sign-In & SSO Policy**.
+- **Offline Passkeys, LAN Hostnames, Phone-Free Passwords & Octelium Tunnel Independence (`My Account & Passkeys`):** Any signed-in user can register Windows Hello, Touch ID, Face ID, or a USB/NFC YubiKey for 1-tap offline sign-in, or update their local PBKDF2 password (`>= 14` characters) for phone-free facilities. **Changing your OSCAR password does not require changing your Octelium Zero-Trust tunnel password** (and never disrupts `oscar-tunnel`, which authenticates to the Hub using its dedicated ServiceAccount token); keeping separate credentials provides two-layer defense-in-depth, and you only need to rotate an Octelium password if that tunnel credential itself was shared or compromised. While password sign-in works on both domains and raw LAN IPs, browsers require two one-time setup steps for Passkeys on local/LAN workstations: **(1)** open OSCAR via a domain name (`https://oscar.local`, or distinct per-node names such as `https://oscar.ubuntu` and `https://oscar.win` on multi-server LANs, mapped in router Local DNS or client `hosts` files; `oscar init` maps `127.0.0.1` on the server itself automatically), and **(2)** trust `tls/server.crt` (or a site Root CA with `<= 825`-day leaf certificates for macOS/iOS) in the client trust store (`certutil -addstore -f Root` on Windows, `update-ca-certificates` plus NSS `certutil` on Linux, or Keychain `trustRoot` on macOS — see `DEPLOYMENT.md`). Passkeys are domain-scoped (`rpId`), so if you also connect via a public Zero-Trust tunnel URL, register an additional Passkey once on that URL under the same account.
+- **Individual & Bulk Roster Enrollment with 1-Tap QR Startup Invites (`Users & Roles`):** Administrators assign `Administrator`, `Operator`, or read-only `Viewer` roles, optionally restrict `Operator`/`Viewer` accounts to specific **Operational Views** (such as `north-gate`), and can select **Bulk Enroll (CSV / Paste)** to import a CSV or Excel-pasted list (`username, role, display_name, views`). OSCAR creates every account and opens the **Startup Messages & 1-Tap Setup QR Codes** pack containing a ready-to-send text message, printable handout card, single-use `/login/enroll?token=oscar_inv_...` QR code (enabling 1-tap Passkey or password setup directly into the user's assigned gate view), and a readable fallback code for phone-free workstations.
+- **Scoped Federation Service Tokens & Where to Use Them (`Federation Tokens` -> `Servers`):** In **Users & Access -> Federation Tokens**, administrators mint revocable `Viewer` or `Operator` tokens (`oscar_fed_...`) on the site being monitored, then open **Servers** (`/servers?auth=bearer`, marked by the **cloud icon**) on the monitoring/HQ OSCAR Viewer (or click **Open Servers Page (Federation Token Mode)** directly from the token card), enter the remote node's hostname, keep **Use a secure connection** (`HTTPS`, port `443`) checked, and paste the `oscar_fed_...` token into **Federation Service Token**.
+- **Self-Hosted Multi-Site Federation Hub & Centralized SSO (`Sign-In & SSO Policy` + `ORNL/oscar-federation-hub`):** For multi-site deployments needing outbound-only HTTPS remote access and one central user list without cloud IdP complexity, deploy [`ORNL/oscar-federation-hub`](https://github.com/ORNL/oscar-federation-hub) (`./oscar-hub.sh init --domain hub.example.org --with-authentik` and `./oscar-hub.sh add-site <slug> --with-trusted-headers`), connect each OSCAR node with `oscar-remote-access.sh` / `oscar-remote-access.ps1 configure`, and enter the printed OIDC / Trusted Tunnel values (`X-Octelium-User` + `X-Octelium-Groups`, optional private-CA PEM path, and **External SSO Admin Console URL** for a 1-click **Open Federated User Console** shortcut on `/users`) while keeping local offline Passkeys and passwords active on the LAN.
+
+![Bulk User Enrollment & 1-Tap QR Startup Invites](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/37-bulk-enroll-qr-invites.png)
+
+![1-Tap Passkey & Password Account Activation Page](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/38-login-enroll-passkey.png)
+
+![Federation Service Tokens & 1-Click Servers Setup](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/39-federation-tokens-and-servers.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#19, 24.4s): Manage Users, Bulk QR Invites, Offline Passkeys &amp; Federation Tokens</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/19-viewer-users-passkeys-and-access.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/19-viewer-users-passkeys-and-access.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/19-viewer-users-passkeys-and-access.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/19-viewer-users-passkeys-and-access.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/19-viewer-users-passkeys-and-access.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
 
 ## 4. Configure the OSCAR Service Module
 
@@ -224,10 +260,10 @@ historical reconciliation to recreate deleted media. Back up and restore the com
 `videos/retained-media/v1` prefix as one unit; its indexes, checkpoints, queues, manifests, and
 ledgers are application state.
 
-The compact layout first ships in 3.11.0 and does not scan/migrate pre-release prototype
-`.deleted.json` or per-observation marker trees. Test/pre-release systems need a fresh 3.11.0 database
+The compact layout first ships in 3.11.12 and does not scan/migrate pre-release prototype
+`.deleted.json` or per-observation marker trees. Test/pre-release systems need a fresh 3.11.12 database
 and retained-media prefix. To downgrade, restore both from the same coordinated pre-3.11.0 backup;
-never run an older binary against 3.11.0 storage.
+never run an older binary against 3.11.12 storage.
 
 ### Custom disposition codes
 
@@ -244,6 +280,9 @@ Apply the service configuration before submitting `adjudicationCode: 12`. Lanes 
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/04-admin-oscar-service-and-custom-codes.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/04-admin-oscar-service-and-custom-codes.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/04-admin-oscar-service-and-custom-codes.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/04-admin-oscar-service-and-custom-codes.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/04-admin-oscar-service-and-custom-codes.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -252,6 +291,9 @@ Apply the service configuration before submitting `adjudicationCode: 12`. Lanes 
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/07-admin-eml-plugin-setup.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/07-admin-eml-plugin-setup.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/07-admin-eml-plugin-setup.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/07-admin-eml-plugin-setup.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/07-admin-eml-plugin-setup.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -322,6 +364,9 @@ Uploading another valid image replaces the active diagram reference; it does not
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/06-admin-manual-lane-and-site-diagram.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/06-admin-manual-lane-and-site-diagram.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/06-admin-manual-lane-and-site-diagram.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/06-admin-manual-lane-and-site-diagram.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/06-admin-manual-lane-and-site-diagram.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -353,6 +398,9 @@ An uploaded row is skipped when its `UniqueID` already belongs to a loaded Lane 
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/05-admin-lane-spreadsheet-sync.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/05-admin-lane-spreadsheet-sync.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/05-admin-lane-spreadsheet-sync.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/05-admin-lane-spreadsheet-sync.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/05-admin-lane-spreadsheet-sync.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -422,6 +470,15 @@ Lane02,lane02,true,35.8859,-84.2119,north-gate;secondary,Aspect,192.0.2.11,502,1
 
 Replace all example addresses and credentials. Avoid spreadsheet software features that silently reformat identifiers, booleans, or decimal coordinates.
 
+### 6.6 Optional side-by-side CAS Rapiscan RPM Edge Proxy (`oscar-rpm-proxy`)
+
+Portals operating OSCAR side-by-side with an existing Central Alarm Station (CAS) can fan out `1–50` Rapiscan RPM TCP feeds in real time (`< 1 ms` forwarding latency) inside an isolated `oscar-rpm-proxy` container (`sudo bash oscar.sh rpm-proxy` on Ubuntu Server 24.04 or `.\oscar.bat rpm-proxy` on Windows 11 + WSL 2) so OSCAR restarts or upgrades never interrupt the existing CAS. The proxy supports both **Port-Mapped mode** (`11601..11650`) and **Ubuntu 24.04 Transparent Virtual-IP `:1600` mode**, automatic `SG1..SG3` / `SN1..SN2` setup replay to newly connected clients, line-aligned message framing, and `<= 4 s` upstream-gated disconnect detection:
+
+- **Ubuntu Server 24.04:** `sudo bash oscar.sh rpm-proxy configure --from-csv config.csv --emit-oscar-csv oscar-proxied-lanes.csv && sudo bash oscar.sh rpm-proxy start`
+- **Windows 11 + WSL 2:** `.\oscar.bat rpm-proxy configure --from-csv config.csv --emit-oscar-csv oscar-proxied-lanes.csv` followed by `.\oscar.bat rpm-proxy start`
+
+Upload the generated `oscar-proxied-lanes.csv` into OSCAR (**Upload Lane Configuration Spreadsheet (CSV)** -> **Apply Changes** -> global **Save**) so OSCAR connects to the local `oscar-rpm-proxy` listeners while the existing CAS remains uninterrupted.
+
 ## 7. Create a Lane System manually
 
 Manual creation is useful for one lane, unusual hardware, or troubleshooting. Bulk sites should normally use the CSV workflow and then review each lane.
@@ -475,8 +532,22 @@ The available list can change with installed bundles. For ordinary lane setup, s
 | Operational View Keys | Optional list of workstation view keys allowed to display this lane. Add each key separately; use 1–63 lowercase ASCII letters (`a`–`z`), numbers, or hyphens, with no leading or trailing hyphen. Leave empty when the lane should have no scoped-view assignment. |
 | Extended Occupancy Threshold (min) | Duration in minutes (`1`–`1440`, default `1`) before an active occupancy publishes a `Fault - Extended Occupancy` status observation and increments the lane's `Ext-Occ` fault count. When an extended occupancy completes with a gamma-only alarm (no neutron alarm), OSCAR suppresses it from the live Dashboard queue and automatically adjudicates it as **Code 9998: Extended Occupancy Gamma Alarm**. |
 | Vehicle OCR | Optional per-lane OCR settings (`Enable Vehicle OCR`, `Alarms Only`, `Model Directory`, `Read Container Numbers`, `Read License Plates`, `Camera UIDs`, `Frames Per Clip`, `Container Min Confidence`, `Plate Min Confidence`, `Ignore Top Band Fraction`, `Ignore Bottom Band Fraction`, default `enabled = false`). When enabled on a lane, OSCAR runs PP-OCRv3 ONNX recognition asynchronously on a low-priority resource-governed worker, publishes `vehicleOcr` (`PARQUET_PRIMARY`) candidates and date-partitioned crop thumbnails (`ocrCropRetentionDays = 365`, preserved alongside `frame-03.jpg`, media holds, and operator adjudications), discards temporary non-alarm clips immediately when `Alarms Only = false`, and auto-fills **Vehicle ID** during adjudication; disabled lanes register no active OCR worker subscription and incur zero runtime overhead. |
+| RPM Lights & Sound (`webRelayConfig`) | Optional per-lane ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`) settings (`Enable WebRelay Control = false` default, `Operating Mode` `AUTO` / `PASS_THROUGH` / `MUTED`, `Suppress Extended Occupancy Gamma (Code 9998)`, `Primary Host / IP`, `HTTP Port`, optional `Username` / `Password`, `Gamma Pulse Duration (s)`, `Neutron Pulse Duration (s)`, `Poll Interval (s)`, `HTTP Timeout (ms)`, and optional `Ancillary Dry-Contact Unit`). Includes live administrator pulse/latch/silence/pass-through buttons (**Lights & Sound**, marked by the **megaphone speaker icon**) in SensorHub Admin and OSCAR Viewer (`Status of Health` and `Lane View`) and `#WEBRELAY,<laneUid>,<key>,<value>` round-trip preservation in `config.csv`. |
 | Delete Data on Lane Removal | Defaults enabled. If selected, removing the lane deletes its database records. Clear it when decommissioning must preserve historical data. |
 | Data Source Info | Optional inherited metadata shown by some builds; use only when the site's SensorML/data-source model requires it. |
+
+![Per-Lane Physical RPM Lights & Sound Control (WebRelay-Quad)](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/53-lane-webrelay-lights-and-sound.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#29): Configure &amp; Control Per-Lane Physical RPM Lights &amp; Sound (WebRelay-Quad)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/29-lane-webrelay-lights-and-sound.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/29-lane-webrelay-lights-and-sound.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/29-lane-webrelay-lights-and-sound.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/29-lane-webrelay-lights-and-sound.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/29-lane-webrelay-lights-and-sound.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
 
 ### 7.3 Fixed Location tab
 
@@ -561,12 +632,35 @@ For driver-specific details, see the [Rapiscan](https://github.com/ORNL/osh-oakr
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/17-vehicle-ocr-and-adjudication.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/17-vehicle-ocr-and-adjudication.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/17-vehicle-ocr-and-adjudication.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/17-vehicle-ocr-and-adjudication.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/17-vehicle-ocr-and-adjudication.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
 ## 8. Operate the OSCAR Viewer
 
-Open `https://<oscar-host>/`. The dashboard should show lane status, the event table, and the map. When a site diagram is configured, it is the top map image and the initial extent matches its uploaded bounds. OSCAR-generated lane markers remain interactive above the diagram; a pin drawn into the source screenshot is only part of the image.
+Open `https://<oscar-host>/`. The **Dashboard** (`/`, marked by the **four-tile grid icon**) shows lane status, the event table, and the **Map** (`/map` or embedded card, marked by the **map-pin icon**). When a site diagram is configured, it is the top map image and the initial extent matches its uploaded bounds. OSCAR-generated lane markers remain interactive above the diagram; a pin drawn into the source screenshot is only part of the image.
+
+Every OSCAR Viewer console page and top-bar/lane control is paired with a distinct visual icon symbol (and both **Guided Walkthrough**, marked by the **graduation-cap icon**, and **Operator Help (`?`)**, marked by the **circled question-mark (`?`) icon**, include 1-click **Highlight Icon** buttons for **Status of Health** and every other page/tool):
+
+| Page or control | Route / location | Visual icon symbol |
+| --- | --- | --- |
+| **Dashboard** | `/` | Four-tile grid icon |
+| **Events** | `/event-log` | Warning-triangle (`!`) icon |
+| **Status of Health** | `/health` | Heart-pulse monitor icon |
+| **Map** | `/map` | Map-pin icon |
+| **National** | `/national-view` | Connected-nodes network icon |
+| **Report Generator** | `/report` | Bar-chart icon |
+| **Alarm Transfer** | `/alarm-transfer` | QR-scanner icon |
+| **Users & Access** | `/users` | Person-and-gear icon |
+| **USB Backups** | `/usb-backups` | USB-trident icon |
+| **Runtime Extensions** | `/extensions` | Puzzle-piece icon |
+| **Servers** | `/servers` | Cloud icon |
+| **Guided Walkthrough / Training Coach** | Top bar & Help (`?`) | Graduation-cap icon |
+| **Operator Help (`?`)** | Top bar | Circled question-mark (`?`) icon |
+| **Settings** | Top bar / navigation | Gear icon |
+| **Lights & Sound (`WebRelay-Quad`)** | `/health` & `/lane-view` | Megaphone speaker icon |
 
 ![OSCAR Viewer dashboard](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/18-viewer-dashboard.png)
 
@@ -579,7 +673,7 @@ Open `https://<oscar-host>/`. The dashboard should show lane status, the event t
 5. The dashboard alarm table contains alarming occupancies that have not yet been adjudicated. Two categories of automated dispositions are suppressed from the active dashboard alarm queue and browser notifications at publication (`t = 0`):
    - **Extended Occupancy Gamma Alarm (`Code 9998`)**: When a vehicle occupies a lane for at least its configured `extendedOccupancyThresholdMinutes` (`1`–`1440` min, default `1` min), OSCAR publishes `Fault - Extended Occupancy` on `occupancyStatus`. If that extended occupancy completes with a **gamma-only alarm** (`gammaAlarm = true` and `neutronAlarm = false`), OSCAR suppresses it from the live dashboard queue and automatically adjudicates it as **Extended Occupancy Gamma Alarm** (code `9998`, `username = "AUTO"`). Any extended occupancy that includes a **neutron alarm** (`Gamma-Neutron` or `Neutron`) is **never** auto-adjudicated and remains in the active dashboard queue.
    - **EML Non-Threat (`Code 9999`)**: On Rapiscan VM250 lanes with **EML Analysis** enabled and an uploaded EML plugin active, alarms classified by EML as non-threat (`RELEASE`) are suppressed from the dashboard alarm queue and browser notifications, and automatically adjudicated as **EML Non-Threat** (code `9999`) with queryable EML metadata; alarms classified as `INVESTIGATE` (or occurring while no EML plugin is loaded) appear in the dashboard queue as usual.
-   Select a row once to open its preview; select it again to close the preview. The selected status cell is color-coded for Gamma, Neutron, or Gamma & Neutron. Unread Dashboard alarms render in bold with an indicator dot, while read alarms render in normal weight (shared per lane across workstations via `/sensorhub/buckets/adjudication/dashboard-read-state`, strictly on the Dashboard without altering **Events**). Operators can toggle the ephemeral **Unread only** filter (from either the banner or the table toolbar) or narrow the active alarm window using the toolbar presets (`15m`, `1h`, `24h`, `15d` default). Opening an alarm preview or details, adjudicating, or using **Acknowledge Selected** / **Acknowledge All** (scoped strictly to the active Operational View, time window, and table filters) marks those alarms as read; in **Settings**, operators can optionally enable **Unread alarm banner** (reporting the full watermark-scoped unread count across pages, capped at `100+` only when `> 150` post-watermark alarms combine with individual read keys) and/or **Latching alarm audio** (continuous alarm audio that loops while unread Dashboard alarms exist in scope and silences immediately on acknowledgement).
+   Select a row once to open its preview; select it again to close the preview. The selected status cell is color-coded for Gamma, Neutron, or Gamma & Neutron. Unread Dashboard alarms render in bold with an indicator dot, while read alarms render in normal weight (shared per lane across workstations via `/sensorhub/buckets/adjudication/dashboard-read-state`, strictly on the Dashboard without altering **Events**). Operators can toggle the ephemeral **Unread only** filter (from either the banner or the table toolbar) or narrow the active alarm window using the toolbar presets (`15m`, `1h`, `24h`, `15d` default). Opening an alarm preview or details, adjudicating, or using **Acknowledge Selected** / **Acknowledge All** (scoped strictly to the active Operational View, time window, and table filters) marks those alarms as read; in **Settings** (marked by the **gear icon**), operators can optionally enable **Unread alarm banner** (reporting the full watermark-scoped unread count across pages, capped at `100+` only when `> 150` post-watermark alarms combine with individual read keys) and/or **Latching alarm audio** (continuous alarm audio that loops while unread Dashboard alarms exist in scope and silences immediately on acknowledgement).
 6. In the preview, review the CPS/NSIGMA chart tabs, the interactive 5-frame retained-media JPEG filmstrip (`FIRST`, `QUARTER`, `MIDDLE`, `THREE_QUARTERS`, `LAST`), and each available recorded-camera item. Arrow controls move between media items.
 7. Use the expand action to open the full Event Details page. A double-click on a table row also opens Event Details.
 
@@ -588,6 +682,9 @@ Open `https://<oscar-host>/`. The dashboard should show lane status, the event t
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/09-dashboard-monitoring-and-quick-adjudication.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/09-dashboard-monitoring-and-quick-adjudication.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/09-dashboard-monitoring-and-quick-adjudication.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/09-dashboard-monitoring-and-quick-adjudication.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/09-dashboard-monitoring-and-quick-adjudication.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -609,9 +706,10 @@ Submitting creates an adjudication record; it does not alter the original detect
 
 ![Events list](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/27-event-list.png)
 
-The **Events** page is the historical list across configured local and federated nodes. It includes all occupancies, not only active unadjudicated alarms. Each row shows the lane and parent node, occupancy ID, start/end time, maximum gamma and neutron count rates, alarm status, and whether an adjudication exists.
+The **Events** page (`/event-log`, marked by the **warning-triangle (`!`) icon** in the Viewer navigation) is the historical list across configured local and federated nodes. It includes all occupancies, not only active unadjudicated alarms. Each row shows the lane and parent node, occupancy ID, start/end time, maximum gamma and neutron count rates, alarm status, and whether an adjudication exists.
 
 - Use the **Vehicle ID** `<search>` bar (`Equals`, `Contains`, or `Starts With`) to query normalized ISO 6346 container codes and license plates across both operator adjudications and `vehicleOcr` reads on local and federated nodes (ignoring case, spaces, and hyphens), then select **Compare Passes (`N`)** to open **Vehicle Pass Comparison** for side-by-side multi-occupancy analysis, linked adjudication, and 1-click `VEHICLE_INCIDENT` export.
+- Expand **Alarm Category Co-Occurrence (UpSet)** (`Show`) to inspect and filter occupancies by category or exact co-occurrence across the full active time window (`15m`, `1h`, `24h`, or `15d`, accelerated by persistent 4-byte `base_summary_mask` Parquet generation summaries). Populated main categories (`Unknown`, `SNM`, `NORM`, `Medical`, `Industrial`, `Gamma`, `Neutron`) are always listed **first** (`count > 0`) ahead of zero-count (`0`) categories; clicking any populated **Categories** chip filters to all occupancies containing that category (disabled when `0`), clicking any **Combinations** bar filters to that exact intersection, and any rare `SNM` intersections beyond the top 18 columns are rolled into a clickable crimson **`Other SNM`** column so the vertical SNM bars always sum to the exact `SNM` total on the left.
 - Use **Find event by UUID** to paste the durable event identifier from Event Details, a PDF, or an alarm transfer. OSCAR performs an exact observation lookup rather than requiring a filter chain, then opens that event directly. The identifier is OSCAR's public encoded observation ID; it is labeled Event UUID for operators but is not required to have RFC-4122 UUID punctuation.
 - **Columns** shows/hides optional columns; **Filters** opens server-side filters; **Saved Queries** bookmarks reusable filter or Vehicle ID queries in the browser; **Reset Query** clears the active query; **Density** changes row spacing. Filters, counts, pages, and bulk selection apply to the complete matching server-side result set, not only the currently visible page.
 - Build filter groups with **All conditions (AND)** or **Any condition (OR)**, and nest groups when a workflow needs both. Up to 20 rules and three group levels are supported. Node and lane conditions choose the streams to query; occupancy ID, time, gamma/neutron maxima, alarm status, adjudication state, and adjudication code conditions are sent to the server for each applicable lane. Applying a filter returns to page 1.
@@ -622,11 +720,16 @@ The **Events** page is the historical list across configured local and federated
 - Select a row for the preview. Double-click it, or choose the row's **Details** action, to open Event Details.
 - If a federated node or lane is unavailable, its rows/count may be incomplete; correct node connectivity and refresh rather than assuming that zero means no events.
 
+![UpSet Alarm Category Co-Occurrence with Populated-First Category Filters and Other SNM Rollup](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/40-upset-category-filters-and-other-snm.png)
+
 <details class="oscar-video-guide">
-  <summary>Video guide (#12, 18.9s): Filter Event Log by Vehicle ID, Adjudication Code &amp; Event UUID</summary>
+  <summary>Video guide (#12, 27.0s): Filter Event Log by UpSet Categories, Vehicle ID, Adjudication Code &amp; Event UUID</summary>
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/12-event-log-filtering-and-adjudication-codes.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/12-event-log-filtering-and-adjudication-codes.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/12-event-log-filtering-and-adjudication-codes.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/12-event-log-filtering-and-adjudication-codes.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/12-event-log-filtering-and-adjudication-codes.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -656,6 +759,9 @@ Available data depends on detector type, camera health, retention, event age, us
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/13-event-details-adjudication-and-daily-file.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/13-event-details-adjudication-and-daily-file.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/13-event-details-adjudication-and-daily-file.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/13-event-details-adjudication-and-daily-file.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/13-event-details-adjudication-and-daily-file.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -719,7 +825,7 @@ The sampler keeps both endpoints, global minima/maxima, gamma points on both sid
 
 To receive:
 
-1. Open **Alarm Transfer** from the Viewer navigation.
+1. Open **Alarm Transfer** (`/alarm-transfer`, marked by the **QR-scanner icon**) from the Viewer navigation.
 2. Use **Start camera scan**, **Scan QR image**, **Import alarm file**, or paste the `OSCAR-ALARM:1:` transport text. Camera scanning requires browser permission and a secure HTTPS context; image/file import remains available when camera access is prohibited.
 3. OSCAR decompresses the package, enforces size and chart-data limits, verifies its SHA-256 transfer digest, and redraws the downsampled charts.
 4. Confirm the node, lane, Event UUID, occupancy, times, status, and charts, then download or share the received alarm file if authorized. The UUID can locate the original only on an OSCAR system that still retains and authorizes that source observation; importing the package does not create a new server event.
@@ -731,12 +837,15 @@ To receive:
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/14-airgapped-alarm-qr-transfer.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/14-airgapped-alarm-qr-transfer.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/14-airgapped-alarm-qr-transfer.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/14-airgapped-alarm-qr-transfer.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/14-airgapped-alarm-qr-transfer.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
 ### 8.7 Monitor Status of Health
 
-Open **Status of Health** with the heart-monitor icon in the Viewer navigation or go directly to `/health`. The page displays one row for every lane visible in the current scope; `/health?view=<key>` limits it to the assigned operational view.
+Open **Status of Health** (`/health`) with the **heart-pulse monitor icon** in the Viewer navigation (or use **Highlight Icon** inside **Guided Walkthrough** or **Operator Help (`?`)** to spotlight it on screen). The page displays one row for every lane visible in the current scope; `/health?view=<key>` limits it to the assigned operational view, and lanes with WebRelay enabled also expose the **Lights & Sound** action (**megaphone speaker icon**).
 
 - **Connections** reports the RPM and each configured camera as **Online**, **Offline**, or **Waiting**. Waiting means no usable current connection value has arrived and is not counted as healthy.
 - **Fault status** reports gamma high, gamma low, neutron high, tamper, and extended occupancy as **Fault**, **Clear**, or **Unknown**. Missing or failed telemetry stays Unknown and is never counted as healthy or shown as clear.
@@ -754,6 +863,9 @@ After upgrading, confirm that each Lane System publishes `occupancyStatus` and e
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/15-status-of-health-and-site-map.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/15-status-of-health-and-site-map.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/15-status-of-health-and-site-map.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/15-status-of-health-and-site-map.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/15-status-of-health-and-site-map.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -768,6 +880,9 @@ Operational views separate workstation presentation; they are not an authorizati
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/10-operational-views-scoping.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/10-operational-views-scoping.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/10-operational-views-scoping.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/10-operational-views-scoping.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/10-operational-views-scoping.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -786,6 +901,9 @@ If bounded automatic recovery is exhausted, the panel shows **Live video could n
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/11-live-lane-video-and-charts.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/11-live-lane-video-and-charts.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/11-live-lane-video-and-charts.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/11-live-lane-video-and-charts.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/11-live-lane-video-and-charts.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -793,7 +911,7 @@ If bounded automatic recovery is exhausted, the panel shows **Live video could n
 
 ![National statistics](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/30-national-statistics.png)
 
-The **National** page summarizes every configured node in one row per node. Columns are **Node ID**, **Gamma Alarms**, **Neutron Alarms**, **Gamma-Neutron Alarms**, **Occupancies**, **Tamper**, **Gamma Faults**, **Neutron Faults**, and total **Faults**. Use **Columns**, **Filters**, and **Density** to adjust the grid.
+The **National** page (`/national-view`, marked by the **connected-nodes network icon** in the Viewer navigation) summarizes every configured node in one row per node. Columns are **Node ID**, **Gamma Alarms**, **Neutron Alarms**, **Gamma-Neutron Alarms**, **Occupancies**, **Tamper**, **Gamma Faults**, **Neutron Faults**, and total **Faults**. Use **Columns**, **Filters**, and **Density** to adjust the grid.
 
 1. Select **All Time**, **Last 30 Days**, **Last 7 Days**, **Last 24 Hours**, or **Custom Range**.
 2. For a custom range, choose both start and end date/time. The end must not precede the start.
@@ -806,7 +924,7 @@ The Viewer caches the preset ranges for quick switching and refetches them after
 
 ![Report Generator with generated RDS site report](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/31-report-generator.png)
 
-The **Report Generator** asks the selected node's OSCAR Service to generate a fresh report in that node's `reports` bucket (`PDF`, `CSV`, `JSON`, or `Excel (.xlsx)`) and displays either the embedded PDF or an interactive tabular data preview with a direct download action in the **Generated Report** pane.
+The **Report Generator** (`/report`, marked by the **bar-chart icon** in the Viewer navigation) asks the selected node's OSCAR Service to generate a fresh report in that node's `reports` bucket (`PDF`, `CSV`, `JSON`, or `Excel (.xlsx)`) and displays either the embedded PDF or an interactive tabular data preview with a direct download action in the **Generated Report** pane.
 
 1. Select a **Node**.
 2. Select **Report Scope**:
@@ -816,7 +934,7 @@ The **Report Generator** asks the selected node's OSCAR Service to generate a fr
 3. Select **Report Type**:
    - **RDS Site Report (`RDS_SITE`)**: Site-wide executive KPI summary, occupancy and alarm rates, automated disposition breakdown (`EML Suppressed (9999)`, `Extended Occupancy Gamma Alarm (9998)`, and `Operator Review Required`), fault breakdown, storage capacity, and per-lane summary table (with no duplicate data tables).
    - **Lane Report (`LANE`)**: Per-lane operational KPIs, alarm and automated disposition (`9998`/`9999`) rates, fault breakdown, and daily time-series activity for the selected scope.
-   - **Event Report (`EVENT`)**: Choose **Alarms and Occupancies**, **Alarms**, or **State of Health** (`Gamma High`, `Gamma Low`, `Neutron High`, `Tamper`) to generate daily time-series charts and tables.
+   - **Event Report (`EVENT`)**: Choose **Alarms and Occupancies**, **Alarms**, or **State of Health** (`Gamma High`, `Gamma Low`, `Neutron High`, `Tamper`) to generate daily time-series charts, tables, and **UpSet** co-occurrence intersection matrices (which list populated categories first and roll any rare `SNM Present` intersections beyond the 18th column into a crimson **`Other SNM`** column so vertical SNM bars always equal the exact `SNM` set total on the left).
    - **Adjudication Report (`ADJUDICATION`)**: Starts with the summed **All Selected Lanes (`ALL_LANES`)** **Disposition** and **Isotope Results** summary tables across all lanes in scope, followed by individual **Disposition** and **Isotope Results** sections for each selected lane.
    - **Adjudication Details Extract (`ADJUDICATION_DETAILS`)**: Full line-by-line audit extract of individual adjudication submissions (`Submission Time`, `Lane`, `Username`, `Occupancy Count`, `Adjudication Code`, `Feedback`, `Secondary InspectionStatus`, `Isotopes`, `Vehicle ID`, `File Paths`, and `Occupancy ID`).
    - **Vehicle Incident Report (`VEHICLE_INCIDENT`)**: Consolidated multi-pass dossier for a normalized Vehicle ID (ISO 6346 container or license plate across operator adjudications and `vehicleOcr` reads, including optional federated remote node passes), combining incident KPIs, chronological transit comparison (confirmation re-scans and gross-counting to RS350 spectroscopic secondary transits), overlaid relative-time gamma/neutron radiation profile charts, EML and WebID spectroscopic findings, retained keyframes and OCR crops, and complete adjudication history.
@@ -834,6 +952,9 @@ Every report request generates a fresh file and overwrites any earlier file with
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/16-national-statistics-and-reports.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/16-national-statistics-and-reports.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/16-national-statistics-and-reports.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/16-national-statistics-and-reports.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/16-national-statistics-and-reports.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -841,19 +962,19 @@ Every report request generates a fresh file and overwrites any earlier file with
 
 ![Node federation](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/32-node-federation.png)
 
-The **Nodes** page lets one Viewer query multiple OSCAR/OpenSensorHub nodes. The local browser-derived node is the default and cannot be deleted. Remote nodes can be added, edited, or deleted.
+The **Servers / Nodes** page (`/servers`, marked by the **cloud icon** in the Viewer navigation) lets one Viewer query multiple OSCAR/OpenSensorHub nodes. The local browser-derived node is the default and cannot be deleted. Remote nodes can be added, edited, or deleted.
 
 ### 11.1 Add or edit a node
 
 1. Enter a unique **Name** and the node **Address** (hostname or IP, without `http://` or `https://`).
-2. Enter **Port**; the initial value is `8282`. Use the actual reverse-proxy or SensorHub port.
+2. Enter **Port** (`443` when connecting over the standard HTTPS gateway or in Federation Token mode; `8282` when connecting directly to an unproxied SensorHub HTTP listener).
 3. Enter the **Connected Systems API Endpoint**; the default is `/api`. This is appended to the fixed SensorHub root `/sensorhub`.
-4. Enter **Username** and **Password** authorized to read the remote node.
-5. Enable **Use a secure connection** for HTTPS/WSS/MQTTS. Use it whenever the remote endpoint supports TLS; the address/certificate name must match.
-6. Authentication mode:
-   - Leave **Basic-only node** clear for the preferred session-capable mode. The credentials establish an opaque HttpOnly session cookie and the password is discarded immediately after authentication.
-   - Enable **Basic-only node** only when the remote node has no session-login endpoint. Credentials remain in memory for requests until this page/app is reloaded or closed.
-7. Select **Add Node** or **Save**. OSCAR first tests the complete Connected Systems endpoint. An unreachable or unauthorized node is not saved. **Cancel** abandons edits.
+4. Enable **Use a secure connection** for HTTPS/WSS/MQTTS. Use it whenever the remote endpoint supports TLS; the address/certificate name must match.
+5. Select **Authentication Method** (or click **Use Federation Token (`oscar_fed_...`)** at the top of the form, or open `/servers?auth=bearer` directly from **Users & Access -> Federation Tokens**):
+   - **Interactive Browser Session (Cookie / Passkey / SSO)** (default): enter **Username** and **Password** once to establish an opaque `HttpOnly` session cookie; the Viewer discards any entered password immediately after authentication.
+   - **Federation Service Token (`oscar_fed_...`)** (recommended for unattended National View & Multi-Pass Vehicle Search federation): mint a revocable `Viewer` or `Operator` token on the remote node under **Users & Access -> Federation Tokens** and paste it into **Federation Service Token** (pasting an `oscar_fed_...` token also switches the form into Federation Token + HTTPS `443` mode automatically); authenticates both HTTP `Bearer` requests and HiveMQ WebSocket MQTT (`svc-fed-<shortId>`) without sharing human passwords.
+   - **Basic-only node**: use only when connecting to a legacy OpenSensorHub server without session or token endpoints; credentials remain in memory until reload.
+6. Select **Add Node** or **Save**. OSCAR first tests the complete Connected Systems endpoint and displays an authentication mode badge (`Browser Session`, `Federation Token`, or `HTTP Basic`) on each configured node card. An unreachable or unauthorized node is not saved. **Cancel** abandons edits.
 
 Saved node configuration includes the name, network endpoints, TLS/authentication mode, and map metadata. Usernames and passwords are deliberately excluded from browser storage, including when older saved entries are reloaded. A session cookie is managed by the remote server; Basic-only credentials must be re-entered after reload.
 
@@ -872,12 +993,47 @@ Duplicate names and duplicate address/port pairs are rejected. **Edit** changes 
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/08-viewer-signin-language-and-nodes.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/08-viewer-signin-language-and-nodes.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/08-viewer-signin-language-and-nodes.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/08-viewer-signin-language-and-nodes.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/08-viewer-signin-language-and-nodes.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+### 11.3 Multi-node vehicle search, consolidated incident reports &amp; centralized user revocation
+
+Once one or more remote portals are connected via `oscar_fed_...` Federation Service Tokens, **Events -> Compare Passes** correlates normalized ISO 6346 container IDs and license plates across all reachable nodes simultaneously, and **Report Generator -> Vehicle Incident Report (`VEHICLE_INCIDENT`)** (with **Include correlated passes from federated nodes** checked) produces a single consolidated `PDF`, `CSV`, `JSON`, or `Excel (.xlsx)` report stamping each crossing with its originating node name and lane. When offboarding an operator or viewer on a centralized [`ORNL/oscar-federation-hub`](https://github.com/ORNL/oscar-federation-hub) deployment, delete the user in Authentik (**Directory -> Users -> Delete**), allow `oscar-hub-sync.timer` (or `./oscar-hub.sh sync-users`) to purge the `managed-by: authentik-sync` user from Octelium automatically, and delete any cached user row in OSCAR **Users &amp; Access -> Users &amp; Roles**.
+
+![Multi-Node Vehicle Search & Comparison](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/41-multi-node-vehicle-search.png)
+
+![Consolidated Multi-Node Vehicle Incident Report](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/42-multi-node-incident-report.png)
+
+![Centralized SSO User Offboarding & Revocation](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/43-sso-user-revocation.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#20, 28.4s): Federate Multi-Site Nodes, Search Vehicles Across Portals &amp; Generate Reports</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/20-multi-node-federation-vehicle-search-and-report.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/20-multi-node-federation-vehicle-search-and-report.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/20-multi-node-federation-vehicle-search-and-report.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/20-multi-node-federation-vehicle-search-and-report.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/20-multi-node-federation-vehicle-search-and-report.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#21, 24.0s): Onboard Authentik SSO Passkey Users &amp; Revoke Access Across All Layers</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/21-federated-sso-passkey-onboarding-and-revocation.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/21-federated-sso-passkey-onboarding-and-revocation.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/21-federated-sso-passkey-onboarding-and-revocation.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/21-federated-sso-passkey-onboarding-and-revocation.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/21-federated-sso-passkey-onboarding-and-revocation.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
 ## 12. Data retention and storage behavior
 
-The standard 3.11.0 profile uses the tiered PostgreSQL + Apache Parquet architecture in `PARQUET_PRIMARY`
+The standard 3.11.12 profile uses the tiered PostgreSQL + Apache Parquet architecture in `PARQUET_PRIMARY`
 mode (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Static singleton configuration streams (`sensorLocation`,
 `adjudicationCodes`, `siteInfo`) remain in PostgreSQL `ONLY oscar.obs`, while all 22 allowlisted operational
 and evidentiary outputs (`gammaCounts`, `gammaThreshold`, `neutronCounts`, `setupGamma`, `setupNeutron`,
@@ -939,7 +1095,7 @@ dry-run/purge workflows, plus `backup` and `backup-verify` only in `single` mode
 encryption key separately and retain an off-host copy if site policy requires another failure
 domain. Never delete cataloged archive/media files directly. A pre-3.11.0 `upgrade` preserves its old
 database and configuration and does not create the full storage profile or enable PostgreSQL
-checksums; initialize a fresh 3.11.0 deployment or use a separately validated production migration.
+checksums; initialize a fresh 3.11.12 deployment or use a separately validated production migration.
 The packaged `documentation/` storage guides are the authoritative runbooks.
 
 Use the release launcher for deployment-wide `stop` and `restart`. It stops the gateway first,
@@ -956,6 +1112,9 @@ records-destruction requirements.
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/01-deployment-init-and-credentials.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/01-deployment-init-and-credentials.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/01-deployment-init-and-credentials.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/01-deployment-init-and-credentials.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/01-deployment-init-and-credentials.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -964,6 +1123,9 @@ records-destruction requirements.
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/02-clean-directory-upgrade.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/02-clean-directory-upgrade.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/02-clean-directory-upgrade.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/02-clean-directory-upgrade.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/02-clean-directory-upgrade.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -972,6 +1134,73 @@ records-destruction requirements.
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/03-archive-and-snapshot-backup.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/03-archive-and-snapshot-backup.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/03-archive-and-snapshot-backup.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/03-archive-and-snapshot-backup.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/03-archive-and-snapshot-backup.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+Open **USB Backups** (`/usb-backups`, marked by the **USB-trident icon**) to inspect Continual and Occasional USB NVMe backup drives and trigger safe field eject, and open **Runtime Extensions** (`/extensions`, marked by the **puzzle-piece icon**) to hot-swap pluggable OCR packs and offline regional `.pmtiles` basemaps rendered on **Map** (`/map`, marked by the **map-pin icon**).
+
+![Continual &amp; Occasional USB NVMe Backups Manager](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/45-usb-backups-manager.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#24, 16.7s): Manage Continual &amp; Occasional USB NVMe Backups &amp; Safe Field Eject</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/24-continual-and-occasional-usb-backups.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/24-continual-and-occasional-usb-backups.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/24-continual-and-occasional-usb-backups.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/24-continual-and-occasional-usb-backups.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/24-continual-and-occasional-usb-backups.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+![Pluggable Runtime Extensions &amp; Regional Packs Hub](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/46-runtime-extensions-hub.png)
+
+![Air-Gapped Offline PMTiles Regional Basemap on Map View](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/47-offline-pmtiles-basemap.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#25, 20.7s): Swap Pluggable OCR Packs &amp; Air-Gapped Regional .pmtiles Basemaps</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/25-pluggable-runtime-extensions-and-pmtiles.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/25-pluggable-runtime-extensions-and-pmtiles.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#26, 15.6s): Stage Ubuntu 24.04 Off-Site &amp; Cut Over to Air-Gapped Portal Subnets</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/26-ubuntu-hotel-staging-and-airgapped-cutover.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/26-ubuntu-hotel-staging-and-airgapped-cutover.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+### Cargo Non-Intrusive Inspection (WCO UFF 2.0 &amp; 3.0) Share &amp; 16-Bit Radiograph Inspection
+
+Cargo UFF share integration ships **disabled by default** (`enabled = false`) so standalone RPM portals see zero extra UI controls, zero background threads, and zero network polls. Operators can always inspect individual local `.uff` files (`up to 200 MB`) on demand via **Upload Files** in **Secondary Inspection** (which automatically extracts any embedded `.n42` spectrum into WebID and populates untouched **Vehicle ID** fields).
+
+For commercial portals operating alongside X-ray NII scanners (`UFF 2.0` or `UFF 3.0.0`), an administrator can open **Runtime Extensions** (`/extensions`, marked by the **puzzle-piece icon**) **-> Cargo NII (WCO UFF)**, connect a read-only SMBv2/SMBv3 share (such as `\\nas.port.local\oscar-uff`, encrypted at rest with AES-256-GCM and redacted in support bundles), select **Test Connection**, and select **Save &amp; Apply**. Operators can then correlate scans automatically by container/plate (including **1-character fuzzy OCR matching** `OCR ±1`), browse by scanner lane and alarm window (`Browse Cargo UFF`), look up unlabelled **Tier-1** scans by pasting a UFF UUID or `.uff` filename/UNC path into **Events** (`/event-log`, marked by the **warning-triangle (`!`) icon**), inspect 16-bit `uint16` TIFF radiographs with **HEMD** effective atomic-number (`Z_eff`) bands aligned longitudinally with the RPM gamma/neutron count profile, and link scans to adjudications without downloading multi-megabyte archives from the NAS.
+
+![Cargo NII Read-Only SMB Share Configuration in Runtime Extensions](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/48-cargo-uff-smb-share-extension.png)
+
+![Cargo UFF Share Browser and 1-Character Fuzzy OCR Correlation](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/50-cargo-uff-smb-picker-and-fuzzy-ocr.png)
+
+![16-Bit Cargo X-Ray Radiograph, HEMD Material Overlay, and RPM Strip Alignment](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/49-cargo-uff-16bit-xray-inspector.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#27, 24.5s): Connect Cargo UFF SMB Shares, Search by UUID &amp; Inspect 16-Bit Radiographs</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/27-cargo-uff-smb-and-xray-inspection.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/27-cargo-uff-smb-and-xray-inspection.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -989,7 +1218,7 @@ records-destruction requirements.
 - [ ] Node ID is unique and stable.
 - [ ] Database ID, Web ID root, statistics interval, and Auto Start match site policy.
 - [ ] Video and pressure-retention settings were reviewed before enabling cleanup.
-- [ ] A fresh 3.11.0 database/configuration or an approved migration was used; archive status and integrity verification pass.
+- [ ] A fresh 3.11.12 database/configuration or an approved migration was used; archive status and integrity verification pass.
 - [ ] Backup mode is recorded. Disabled mode creates no OSCAR-managed backup; if `single` is enabled, its current snapshot verifies, its external key is escrowed separately, and an isolated restore drill has passed.
 - [ ] A sample lane publishes a journal-backed daily CSV/manifest; retained events show five JPEGs while legacy events still play.
 - [ ] Bucket Storage Service and OSCAR Service Module are started.
@@ -1022,6 +1251,64 @@ records-destruction requirements.
 - [ ] The unscoped URL shows all lanes, and each approved `?view=<key>` or `/view/<key>` URL shows only its assigned lanes across Dashboard, Events, reports, alarm transfer, and Status of Health.
 - [ ] Every federated node was rechecked after a browser reload; no credential was found in browser storage.
 
+### Guided walkthrough refresher (`:443`) and ephemeral hands-on training sandbox (`:8444`)
+
+Any signed-in user can click **Guided Walkthrough** (marked by the **graduation-cap icon** in the top bar, or inside **Help (`?`)**, marked by the **circled question-mark (`?`) icon**) at any time on the live operational console (`:443`) to open the side-by-side **Read-Only Refresher Mode** — browsing all **13 role-based labs** (**Operator**, **Supervisor & Analyst**, and **System Administrator**), watching all **31 bundled offline `1080p` `30 fps` video guides** (with native English `en`, Spanish `es`, French `fr`, and Greek `el` subtitle tracks that switch automatically with the selected UI language), reviewing annotated screenshots, and using 1-click **Highlight Icon** buttons to spotlight **Status of Health** (heart-pulse monitor icon) or any other console page/tool on screen without injecting fake alarms or altering operational records.
+
+To practice injecting simulated alarms, uploading sample files, or editing lanes safely before modifying live sensors, launch the isolated **Hands-On Training Sandbox (`oscar-sandbox`)** on HTTPS port `8444` (in 1 click from **Guided Walkthrough** / **Help (`?`)** when `sudo bash oscar.sh sandbox enable-ui-bridge` is enabled on Ubuntu, or via CLI; idempotent `start` is open to all signed-in users while early `stop`/`reset` requires **Administrator**):
+
+- **Ubuntu Server 24.04:** `sudo bash oscar.sh sandbox start` (stop and flush with `sudo bash oscar.sh sandbox stop`).
+- **Windows 11 + WSL 2:** `.\oscar.bat sandbox start` (stop and flush with `.\oscar.bat sandbox stop`).
+
+The sandbox reuses the installed OSCAR images with disposable volumes (`oscar_sandbox_state`, `oscar_sandbox_pg`), one-way read-only credential/Passkey seeding (sign in on `https://<host>:8444` with existing OSCAR credentials; sandbox edits never write back to `:443`), `>= 3.5 GiB` free-RAM preflight, `archive.enabled = false` (`0` `.parquet` files written), an automatic `120 min` (2-hour) TTL shutdown with a live countdown and expiration timestamp that completely wipes all practice data on expiry (`< 2 s`), `TRAINING SANDBOX — NON-OPERATIONAL` watermarks on every exported file, and built-in loopback Rapiscan (`127.0.0.1:10099`), RTSP container camera (`127.0.0.1:8554/tutorial-cam`), and ControlByWeb `WebRelay-Quad` (`127.0.0.1:10180`) micro-emulators across **13 guided labs** (automatically opening **Events (`/event-log`)** with the **`Adjudication Code`** column visible when injecting `Code 9999` NORM, `Code 9998` Extended Occupancy, or `Clean Pass`, automatically opening **Status of Health (`/health`)** for faults and Lab `3.5` WebRelay staging, and providing **Split-Pane `/sensorhub/admin`**) plus a downloadable 1-page PDF Completion Record (export before the auto-shutdown timer ends).
+
+![Hands-On Training Sandbox Coach and Operator Lab](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/51-training-sandbox-coach-and-operator-lab.png)
+
+![Split-Pane SensorHub Admin and Training Coach](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/52-training-sandbox-admin-split-pane.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#28): Practice Safely in the Ephemeral Hands-On Training Sandbox &amp; Guided Academy (:8444)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/28-hands-on-training-sandbox.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/28-hands-on-training-sandbox.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/28-hands-on-training-sandbox.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/28-hands-on-training-sandbox.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/28-hands-on-training-sandbox.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+### 13.3 Zero-login GitHub & air-gapped system update and bare-metal Autoinstall USB Creator
+
+Administrators can update OSCAR directly from **OSCAR Viewer -> Users & Access (`/users?tab=update`) -> System Update** (or via `sudo bash oscar.sh update check|apply` on Ubuntu 24.04 and `.\oscar.bat update check|apply` on Windows 11) **without any GitHub login, OAuth account, or Personal Access Token**. OSCAR resolves official `ORNL/oscar` releases anonymously, verifies the expected SHA-256 digest before unpacking into a clean sibling directory, preserves `.env`, `secrets/`, `tls/`, and Docker volumes, and automatically rolls back if container startup or HTTPS `/healthz` checks fail. On air-gapped portals without internet access, administrators can upload `oscar-<version>.zip` directly in the same panel.
+
+![Zero-Login GitHub & Offline System Update](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/54-zero-login-github-system-update.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#30): Update OSCAR From the GUI Without a GitHub Login (GitHub &amp; Offline .zip)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/30-zero-login-github-system-update.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/30-zero-login-github-system-update.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/30-zero-login-github-system-update.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/30-zero-login-github-system-update.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/30-zero-login-github-system-update.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
+For new bare-metal Ubuntu Server 24.04 LTS appliances, download the compact standalone **`oscar-3.11.12-autoinstall-usb-creator.zip`** (`~53 KiB`) alongside `ubuntu-24.04.x-live-server-amd64.iso` and `oscar-3.11.12-ubuntu-x86_64-offline-full.zip` without unpacking the offline bundle first. Launch the **Desktop GUI** (`create-autoinstall-usb.bat` on Windows 11 or `sudo bash create-autoinstall-usb.sh --gui` on Ubuntu), **Interactive Terminal TUI** (`-Tui` / `--tui`), or **Scriptable CLI** to build a UEFI Secure-Boot installer USB with native `$6$` SHA-512 Linux password hashing, optional 12+ character LUKS2 full-disk encryption, `--require-sudo-password`, `--ssh-keys-only`, and **Turnkey Site Pre-Configuration**—pre-staging a PBKDF2-hashed initial OSCAR web `admin` password (`14+` characters, zero plaintext on USB), `lanes.csv` / `config.json`, and unattended first-boot OSCAR initialization (`-AutoInitOscar` / `--auto-init-oscar`) so on arrival at the site you only open `https://<hostname>/`, register site operators, and upload `.pmtiles` or the site background diagram while keeping internal OS and `OSCAR_BACKUP` disks strictly protected.
+
+![Bare-Metal Ubuntu 24.04 Offline Autoinstall USB Creator](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/55-bare-metal-autoinstall-usb-creator.png)
+
+<details class="oscar-video-guide">
+  <summary>Video guide (#31): Build an Air-Gapped Ubuntu 24.04 Autoinstall USB Drive (GUI, TUI &amp; CLI)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/31-bare-metal-autoinstall-usb-creator.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/31-bare-metal-autoinstall-usb-creator.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/31-bare-metal-autoinstall-usb-creator.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/31-bare-metal-autoinstall-usb-creator.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/31-bare-metal-autoinstall-usb-creator.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
 ## 14. Troubleshooting
 
 | Symptom | Checks and corrective action |
@@ -1034,7 +1321,7 @@ records-destruction requirements.
 | OSM tiles show 403/blocked | Do not point production traffic directly at volunteer OSM tiles in violation of tile policy. Use the deployment's approved OSM provider/proxy or select Esri while the tile-service configuration is corrected. |
 | CSV rejected | Compare the exact header/order, camera groups of six with sequential indexes, cell count on every row, numeric fields, and plain unquoted empty cells. Remove commas from values. |
 | CSV says success but a lane is missing | Check for an existing loaded lane with the same UniqueID, a name longer than 12 characters, device-child initialization errors, and whether asynchronous loading has finished. |
-| **Sensors** is empty after restart following CSV upload | The upload created in-memory modules, but the complete configuration was not persisted. Upload again if necessary, wait for every lane and child to appear, select the global **Save**, restart OSCAR, and verify **Sensors** again. If a 3.11.0 node still loses the lanes, check OSCAR logs and verify that `/var/lib/oscar/config.json` is owner-writable. |
+| **Sensors** is empty after restart following CSV upload | The upload created in-memory modules, but the complete configuration was not persisted. Upload again if necessary, wait for every lane and child to appear, select the global **Save**, restart OSCAR, and verify **Sensors** again. If a 3.11.12 node still loses the lanes, check OSCAR logs and verify that `/var/lib/oscar/config.json` is owner-writable. |
 | Scoped operational view is empty or rejects its key | Confirm the lane's **Operational View Keys** contains the exact lowercase key, apply and globally save the configuration, restart the lane if required, and use `?view=<key>` or `/view/<key>`. A blank assignment never matches a scoped view. |
 | RPM does not start | Verify host reachability, exact TCP port, firewall, Aspect range, and device availability. Review the child driver status/error, not only the parent lane. |
 | Camera does not start | Verify RTSP reachability and credentials, omit `rtsp://` from host, include a needed port once, confirm Axis codec or Custom path, and test the generated endpoint from the OSCAR host. |
@@ -1054,7 +1341,7 @@ records-destruction requirements.
 | Changes disappear after restart | Apply the module form, use the administration header's global Save, confirm Yes, and wait for the saved notification before restarting. |
 
 When collecting support data, export a redacted troubleshooting support bundle (`.zip`):
-- **From the OSCAR Viewer (when the UI is reachable):** Select **Help (`?`)** in the top navigation bar and select **Export Support Bundle** (also available under **Troubleshooting & FAQ**). OSCAR packages recent browser warnings/errors, failed or slow API requests, module/lane states, JVM and storage summaries, redacted configuration, and rolling server logs (`oscar-support-<UTC>.zip`), or downloads a client-only bundle (`oscar-client-support-<UTC>.zip`) if the server cannot be reached.
+- **From the OSCAR Viewer (when the UI is reachable):** Select **Help (`?`)** (marked by the **circled question-mark (`?`) icon** in the top navigation bar, which also provides 1-click **Highlight Icon** buttons for **Status of Health** and every console page/tool) and select **Export Support Bundle** (also available under **Troubleshooting & FAQ**). OSCAR packages recent browser warnings/errors, failed or slow API requests, module/lane states, JVM and storage summaries, redacted configuration, and rolling server logs (`oscar-support-<UTC>.zip`), or downloads a client-only bundle (`oscar-client-support-<UTC>.zip`) if the server cannot be reached.
 - **From the host server CLI (when OSCAR is degraded or not booting):** Run `sudo bash oscar.sh support-bundle` on Ubuntu or `.\oscar.bat support-bundle` on Windows (optional `--tail`/`-Tail` and `--output`/`-Destination`) to collect host/Docker state, container logs, TLS certificate metadata, and read-only `oscar_oscar_state` logs/configuration into `oscar-host-support-<UTC>.zip`. Passwords, tokens, session cookies, email addresses, `secrets/*`, and TLS private keys (`tls/server.key`) are automatically redacted or excluded; review site policy before sharing any bundle externally.
 
 ![Operator Quick Guide and redacted support bundle export](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/34-viewer-help-support-bundle.png)
@@ -1064,6 +1351,9 @@ When collecting support data, export a redacted troubleshooting support bundle (
   <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
     <source src="/video-guides/videos/18-operator-help-and-support-bundle.mp4" type="video/mp4">
     <track kind="captions" src="/video-guides/captions/18-operator-help-and-support-bundle.vtt" srclang="en" label="English" default>
+    <track kind="captions" src="/video-guides/captions/es/18-operator-help-and-support-bundle.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/18-operator-help-and-support-bundle.vtt" srclang="fr" label="Français">
+    <track kind="captions" src="/video-guides/captions/el/18-operator-help-and-support-bundle.vtt" srclang="el" label="Ελληνικά">
   </video>
 </details>
 
@@ -1073,10 +1363,17 @@ When collecting support data, export a redacted troubleshooting support bundle (
 - [OSCAR video-guides index](https://github.com/ORNL/oscar/blob/main/docs/VIDEO_GUIDES.md)
 - [OSCAR release Quick Start](https://github.com/ORNL/oscar/blob/main/dist/release/QUICKSTART.md)
 - [OSCAR Deployment Guide](https://github.com/ORNL/oscar/blob/main/dist/release/DEPLOYMENT.md)
+- [Ubuntu Off-Site Staging & Air-Gapped Setup Guide](https://github.com/ORNL/oscar/blob/main/docs/UBUNTU_FIELD_SETUP_GUIDE.md)
+- [Continual & Occasional USB NVMe Backup Guide](https://github.com/ORNL/oscar/blob/main/docs/CONTINUAL_AND_USB_BACKUP_GUIDE.md)
+- [Pluggable Runtime Extensions & Offline Maps Guide](https://github.com/ORNL/oscar/blob/main/docs/PLUGGABLE_EXTENSIONS_GUIDE.md)
+- [Cargo Non-Intrusive Inspection (WCO UFF 2.0 & 3.0) Guide](https://github.com/ORNL/oscar/blob/main/docs/CARGO_UFF_INTEGRATION.md)
+- [Hands-On Training Sandbox & Guided Academy Guide](https://github.com/ORNL/oscar/blob/main/docs/TRAINING_SANDBOX_GUIDE.md)
+- [Per-Lane Physical RPM Lights & Sound (`WebRelay-Quad`) Guide](https://github.com/ORNL/oscar/blob/main/docs/LANE_WEBRELAY_GUIDE.md)
+- [Side-by-Side CAS Rapiscan RPM Edge Proxy (`oscar-rpm-proxy`) Guide](https://github.com/ORNL/oscar/blob/main/docs/RPM_EDGE_PROXY_GUIDE.md)
 - [OSCAR translation-system guide](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)
 - [Lane System module](https://github.com/ORNL/osh-oakridge-modules/tree/main/sensors/sensorhub-system-lane)
 - [OSCAR Service module](https://github.com/ORNL/osh-oakridge-modules/tree/main/services/sensorhub-service-oscar)
 
 ---
 
-Document baseline: OSCAR 3.11.0 source behavior, reviewed 2026-10-18. If a later release changes fields or workflows, update the English canonical manual and all three translations together.
+Document baseline: OSCAR 3.11.12 source behavior, reviewed 2026-10-18. If a later release changes fields or workflows, update the English canonical manual and all three translations together.

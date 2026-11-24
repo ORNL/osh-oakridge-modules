@@ -32,6 +32,7 @@ public final class EmlRuntimeRegistry {
     private final Object installLock = new Object();
     private final CopyOnWriteArrayList<Consumer<EmlRuntimeStatus>> listeners = new CopyOnWriteArrayList<>();
     private volatile EmlLoadedRuntime activeRuntime;
+    private volatile EmlAlarmAssessmentAlgorithm activeBuiltInAlgorithm;
     private volatile EmlRuntimeStatus currentStatus = EmlRuntimeStatus.notLoaded("");
 
     EmlRuntimeRegistry() {}
@@ -43,7 +44,7 @@ public final class EmlRuntimeRegistry {
     }
 
     public boolean isLoaded() {
-        return activeRuntime != null && currentStatus.loaded();
+        return (activeRuntime != null || activeBuiltInAlgorithm != null) && currentStatus.loaded();
     }
 
     public EmlRuntimeStatus getStatus() {
@@ -107,6 +108,8 @@ public final class EmlRuntimeRegistry {
             }
 
             EmlLoadedRuntime retired = activeRuntime;
+            EmlAlarmAssessmentAlgorithm retiredBuiltIn = activeBuiltInAlgorithm;
+            activeBuiltInAlgorithm = null;
             activeRuntime = nextRuntime;
             currentStatus = nextRuntime.getStatus();
             logger.info("Activated EML runtime plugin '{}' (version={}, model={}, sha256={})",
@@ -118,6 +121,43 @@ public final class EmlRuntimeRegistry {
             if (retired != null) {
                 retired.close();
             }
+            if (retiredBuiltIn != null) {
+                retiredBuiltIn.close();
+            }
+            notifyListeners(currentStatus);
+            return currentStatus;
+        }
+    }
+
+    /**
+     * Installs an in-memory {@link EmlAlarmAssessmentAlgorithm} (used by the ephemeral
+     * Hands-On Training Sandbox when no external EML plugin archive has been uploaded).
+     * Any subsequent {@link #installFromArchive(String, Path)} supersedes this instance.
+     */
+    public EmlRuntimeStatus installInMemoryAlgorithm(String fileName, EmlAlarmAssessmentAlgorithm algorithm) {
+        if (algorithm == null) {
+            throw new IllegalArgumentException("algorithm must not be null");
+        }
+        synchronized (installLock) {
+            EmlLoadedRuntime retired = activeRuntime;
+            EmlAlarmAssessmentAlgorithm retiredBuiltIn = activeBuiltInAlgorithm;
+            activeRuntime = null;
+            activeBuiltInAlgorithm = algorithm;
+            currentStatus = new EmlRuntimeStatus(
+                    true,
+                    fileName != null ? fileName : "sandbox-eml-assessor",
+                    "0000000000000000000000000000000000000000000000000000000000000000",
+                    algorithm.getVersionId(),
+                    algorithm.getCollimatedModelId(),
+                    algorithm.getUncollimatedModelId(),
+                    java.time.Instant.now(),
+                    "");
+            if (retired != null) {
+                retired.close();
+            }
+            if (retiredBuiltIn != null) {
+                retiredBuiltIn.close();
+            }
             notifyListeners(currentStatus);
             return currentStatus;
         }
@@ -125,18 +165,27 @@ public final class EmlRuntimeRegistry {
 
     public EmlEvaluationResult evaluate(EmlLaneParameters params, Stream<String> occupancyLines) throws Exception {
         EmlLoadedRuntime runtime = activeRuntime;
-        if (runtime == null)
-            return null;
-        return runtime.evaluate(params, occupancyLines);
+        if (runtime != null) {
+            return runtime.evaluate(params, occupancyLines);
+        }
+        EmlAlarmAssessmentAlgorithm builtIn = activeBuiltInAlgorithm;
+        if (builtIn != null) {
+            return builtIn.evaluate(params, occupancyLines);
+        }
+        return null;
     }
 
     public void unload() {
         synchronized (installLock) {
             EmlLoadedRuntime retired = activeRuntime;
+            EmlAlarmAssessmentAlgorithm retiredBuiltIn = activeBuiltInAlgorithm;
             activeRuntime = null;
+            activeBuiltInAlgorithm = null;
             currentStatus = EmlRuntimeStatus.notLoaded("");
             if (retired != null)
                 retired.close();
+            if (retiredBuiltIn != null)
+                retiredBuiltIn.close();
             notifyListeners(currentStatus);
         }
     }

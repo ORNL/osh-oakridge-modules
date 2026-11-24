@@ -4,14 +4,14 @@ OpenSensorHub sensor, lane, adjudication, retained-media, and daily-journal modu
 
 ## OSCAR operator documentation
 
-The complete OSCAR 3.11.0 administration and operations manual is available in every supported language:
+The complete OSCAR 3.11.12 administration and operations manual is available in every supported language:
 
 - [English](services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README.md)
 - [Español](services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_es.md)
 - [Français](services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_fr.md)
 - [Ελληνικά](services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_el.md)
 
-The administration UI selects the matching manual in the OSCAR Service Module's README tab. Training screenshots used by all four manuals are maintained under [`docs/oscar-operator-manual/images`](docs/oscar-operator-manual/images), and concise 1080p workflow screen-recording guides with captions and sequential step blocks are published in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides).
+The administration UI selects the matching manual in the OSCAR Service Module's README tab. Training screenshots used by all four manuals are maintained under [`docs/oscar-operator-manual/images`](docs/oscar-operator-manual/images), and all 29 bundled offline `1080p` `30 fps` workflow screen-recording guides with native English (`en`), Spanish (`es`), French (`fr`), and Greek (`el`) subtitle tracks are published in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides).
 
 The versioned five-JPEG retention contract, crash-safety rules, and Viewer API are documented in
 [`docs/retained-media-v1.md`](docs/retained-media-v1.md).
@@ -20,10 +20,11 @@ The durable RPM journal, immutable legacy daily-file format, recovery procedure,
 and operator checks are documented in
 [`docs/daily-file-journal-v1.md`](docs/daily-file-journal-v1.md).
 
-OSCAR 3.11.0 uses the tiered PostgreSQL/Parquet database, required direct daily-file journal, and
+OSCAR 3.11.12 uses the tiered PostgreSQL/Parquet database, required direct daily-file journal, and
 exact-five JPEG retained-media implementation in this repository. Deployment-level archive,
-retention-hold, portable-export, coordinated-backup, restore, and deletion commands are documented
-in the matching 3.11.0 [ORNL/oscar](https://github.com/ORNL/oscar) release under `documentation/`; operators must use
+retention-hold, portable-export, coordinated-backup, restore, deletion, and optional side-by-side
+CAS Rapiscan RPM Edge Proxy (`oscar-rpm-proxy`) commands are documented
+in the matching 3.11.12 [ORNL/oscar](https://github.com/ORNL/oscar) release under `documentation/`; operators must use
 those supported launchers instead of deleting cataloged files or database rows directly.
 
 ## Tests
@@ -41,7 +42,7 @@ Use only an authorized test RPM or emulator. The optional settings are `OSCAR_WE
 
 ### External hardware tests
 
-The default Gradle suite also skips only the driver and lane integration tests that require an external RPM or Axis/Sony camera. Self-contained lane, FFmpeg file, lifecycle, reconnect, HLS, timestamp, and transcoding tests remain enabled. Run the RPM tests against an authorized test device or emulator with:
+The default Gradle suite also skips only the driver and lane integration tests that require an external RPM or Axis/Sony camera. Self-contained Rapiscan, Aspect, RS-350, Kromek D3S, Kromek D5, lane, FFmpeg file, lifecycle, reconnect, HLS, timestamp, and transcoding tests remain enabled. Run the RPM tests against an authorized test device or emulator with:
 
 ```sh
 OSCAR_RUN_RPM_HARDWARE_TESTS=true \

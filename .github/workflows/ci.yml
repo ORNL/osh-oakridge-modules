@@ -25,14 +25,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Resolve matching ORNL/oscar branch
+        id: oscar_ref
+        run: |
+          candidate="${{ github.head_ref || github.ref_name }}"
+          if [ -n "$candidate" ] && git ls-remote --exit-code --heads https://github.com/ORNL/oscar.git "refs/heads/$candidate" >/dev/null 2>&1; then
+            echo "ref=$candidate" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout ORNL/oscar build root
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ORNL/oscar
+          ref: ${{ steps.oscar_ref.outputs.ref }}
           submodules: recursive
 
       - name: Overlay tested osh-oakridge-modules revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: include/osh-oakridge-modules
 
@@ -40,7 +51,7 @@ jobs:
         run: node tools/validate-release-metadata.js
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: zulu
@@ -52,7 +63,8 @@ jobs:
             :sensorhub-webui-oscar:test \
             :sensorhub-service-bucket:test \
             :sensorhub-service-dailyfile-journal:test \
-            :sensorhub-system-lane:test
+            :sensorhub-system-lane:test \
+            :sensorhub-security-basic-session:test
 
           ./gradlew --no-parallel \
             :sensorhub-utils-rad:test \
@@ -63,18 +75,19 @@ jobs:
 
           ./gradlew --no-parallel \
             :sensorhub-driver-aspect:test \
-            --tests com.botts.impl.sensor.aspect.MessageHandlerJournalTest \
+            :sensorhub-driver-rs350:test \
+            :sensorhub-driver-kromek-d3s:test \
+            :sensorhub-driver-kromek-d5:test \
+            :sensorhub-driver-rapiscan:test
+
+          ./gradlew --no-parallel \
             :sensorhub-driver-ffmpeg:test \
             --tests org.sensorhub.impl.sensor.ffmpeg.controls.FileControlPublicationTest \
             --tests org.sensorhub.impl.sensor.ffmpeg.MediaMtxSidecarManagerTest \
             --tests org.sensorhub.impl.sensor.ffmpeg.FFMPEGSensorReconnectTest \
             --tests org.sensorhub.impl.sensor.ffmpeg.controls.hls.HlsStreamHandlerTest \
             --tests org.sensorhub.impl.sensor.ffmpeg.outputs.FileOutputTimestampNormalizerTest \
-            --tests org.sensorhub.mpegts.MpegTsProcessorTranscodeTimingTest \
-            :sensorhub-driver-rapiscan:test \
-            --tests com.botts.impl.sensor.rapiscan.MessageHandlerJournalTest \
-            :sensorhub-driver-rs350:test \
-            --tests com.botts.impl.sensor.rs350.MessageHandlerJournalTest
+            --tests org.sensorhub.mpegts.MpegTsProcessorTranscodeTimingTest
 
       - name: Compile all OSCAR Java modules
         run: ./gradlew assemble -x osgi

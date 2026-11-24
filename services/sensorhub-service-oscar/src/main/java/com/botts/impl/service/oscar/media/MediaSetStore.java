@@ -1138,6 +1138,10 @@ public final class MediaSetStore {
         validateManifestSource(manifest);
     }
 
+    public void verifyPublishedAssetsOnly(MediaManifest manifest) throws IOException {
+        validateManifestAssetsExist(manifest);
+    }
+
     public void verifyPublishedAsset(MediaManifest.Asset asset) throws IOException {
         verifyAsset(asset);
     }

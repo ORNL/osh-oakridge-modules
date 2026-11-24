@@ -777,9 +777,9 @@ public final class ReportDataAggregator {
             specByCode.put(builtin.code(), builtin);
         }
 
-        // Include administrator-configured custom disposition codes (> 11)
-        if (module != null && module.getConfiguration() != null && module.getConfiguration().customAdjudicationCodes != null) {
-            List<AdjudicationCodeConfig> customSorted = new ArrayList<>(module.getConfiguration().customAdjudicationCodes);
+        // Include administrator-configured and policy-pack custom disposition codes (> 11)
+        if (module != null) {
+            List<AdjudicationCodeConfig> customSorted = new ArrayList<>(module.getEffectiveCustomAdjudicationCodes());
             customSorted.removeIf(Objects::isNull);
             customSorted.sort(Comparator.comparingInt(c -> c.code));
             for (AdjudicationCodeConfig custom : customSorted) {
@@ -1723,8 +1723,19 @@ public final class ReportDataAggregator {
             sortedSetIndices.add(i);
         }
         sortedSetIndices.sort((a, b) -> {
+            boolean aPop = setTotals[a] > 0L;
+            boolean bPop = setTotals[b] > 0L;
+            if (aPop != bPop) {
+                return aPop ? -1 : 1;
+            }
             int cmp = Long.compare(setTotals[b], setTotals[a]);
-            return cmp != 0 ? cmp : Integer.compare(a, b);
+            if (cmp != 0) {
+                return cmp;
+            }
+            if ((a == 5) != (b == 5)) {
+                return a == 5 ? -1 : 1;
+            }
+            return Integer.compare(a, b);
         });
 
         List<UpSetSetTotal> orderedSets = new ArrayList<>(UPSET_CANONICAL_SETS.size());
@@ -1779,7 +1790,15 @@ public final class ReportDataAggregator {
         jw.endArray();
         jw.name("intersections").beginArray();
         for (UpSetIntersection inter : safe.intersections()) {
+            int mask = 0;
+            for (String s : inter.activeSets()) {
+                int bitIdx = UPSET_CANONICAL_SETS.indexOf(s);
+                if (bitIdx >= 0) {
+                    mask |= (1 << bitIdx);
+                }
+            }
             jw.beginObject();
+            jw.name("mask").value(mask);
             jw.name("sets").beginArray();
             for (String s : inter.activeSets()) {
                 jw.value(s);

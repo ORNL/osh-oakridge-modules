@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.sensorhub.impl.utils.rad.model.WebIdAnalysis;
+import org.sensorhub.impl.utils.rad.security.DynamicTrustManagerRegistry;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -22,12 +24,35 @@ import java.util.UUID;
 
 public class WebIdClient {
 
-    private final HttpClient httpClient;
+    private volatile HttpClient httpClient;
+    private volatile long sslGeneration = -1L;
     private final String apiRoot;
 
     public WebIdClient(String apiRoot) {
         this.apiRoot = apiRoot.endsWith("/") ? apiRoot : apiRoot + "/";
-        this.httpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
+        this.httpClient = buildHttpClient();
+        this.sslGeneration = DynamicTrustManagerRegistry.getGeneration();
+    }
+
+    private HttpClient client() {
+        long gen = DynamicTrustManagerRegistry.getGeneration();
+        if (httpClient == null || gen != sslGeneration) {
+            synchronized (this) {
+                if (httpClient == null || gen != sslGeneration) {
+                    httpClient = buildHttpClient();
+                    sslGeneration = gen;
+                }
+            }
+        }
+        return httpClient;
+    }
+
+    private static HttpClient buildHttpClient() {
+        return HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(10))
+                .sslContext(DynamicTrustManagerRegistry.getActiveSslContext())
+                .build();
     }
 
     public boolean isReachable() {
@@ -45,7 +70,7 @@ public class WebIdClient {
                 .GET()
                 .build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client().send(request, HttpResponse.BodyHandlers.ofString());
 
         JsonObject json = JsonParser.parseString(response.body()).getAsJsonObject();
 
@@ -100,7 +125,7 @@ public class WebIdClient {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client().send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
             throw new WebIdAnalysisException("Analysis request failed with HTTP status " + response.statusCode(),

@@ -2,14 +2,14 @@
 
 ## Administrator and operator manual
 
-The detailed OSCAR 3.11.0 manual is maintained beside `OSCARServiceConfig`, where the administration UI can select it using the active language:
+The detailed OSCAR 3.11.12 manual is maintained beside `OSCARServiceConfig`, where the administration UI can select it using the active language:
 
 - [English](com/botts/impl/service/oscar/i18n/README.md)
 - [Español](com/botts/impl/service/oscar/i18n/README_es.md)
 - [Français](com/botts/impl/service/oscar/i18n/README_fr.md)
 - [Ελληνικά](com/botts/impl/service/oscar/i18n/README_el.md)
 
-Keep those four files synchronized whenever configuration or operator workflows change. Short single-task workflow video guides with synchronized captions are maintained in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides).
+Keep those four files synchronized whenever configuration or operator workflows change. All 29 bundled offline `1080p` `30 fps` workflow video guides with native English (`en`), Spanish (`es`), French (`fr`), and Greek (`el`) subtitle tracks that switch automatically with the active UI language are maintained in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides).
 
 ## Purpose
 The purpose of this module is to handle the following aspects of OSCAR (3.0+)
@@ -26,7 +26,7 @@ The purpose of this module is to handle the following aspects of OSCAR (3.0+)
   - Trigger and target filesystem usage
   - Check period, minimum object age, and monitored storage path
 
-OSCAR 3.11.0 retains exactly five verified JPEG frames per eligible aging camera clip and keeps
+OSCAR 3.11.12 retains exactly five verified JPEG frames per eligible aging camera clip and keeps
 legacy video playback for events without the new retained-media representation. High-volume
 detector observations are owned by the tiered database lifecycle, while the required direct
 daily-file journal publishes immutable legacy CSVs independently of database retention. Use the
@@ -40,7 +40,7 @@ threshold above 1.2 million evenly distributed occupancies/hour while retaining 
 inode bounds. Pressure-deletion state uses an exact, file-locked compact
 index rather than one permanent JSON tombstone per camera set. Back up the complete
 `videos/retained-media/v1` prefix; its indexes and checkpoints prevent intentionally deleted media
-from being reconstructed during reconciliation. The 3.11.0 compact layout requires fresh state for
+from being reconstructed during reconciliation. The 3.11.12 compact layout requires fresh state for
 pre-release/test deployments; do not reuse prototype `.deleted.json` or per-observation marker
 trees. Downgrade only by restoring the database and this complete prefix from the same coordinated
 pre-3.11.0 backup.

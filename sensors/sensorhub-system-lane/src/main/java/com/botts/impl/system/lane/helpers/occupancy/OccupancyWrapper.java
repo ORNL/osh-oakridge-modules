@@ -499,6 +499,13 @@ public class OccupancyWrapper {
     }
 
     private Duration getExtendedOccupancyThreshold() {
+        if ("true".equalsIgnoreCase(System.getenv("OSCAR_SANDBOX_MODE"))
+                || java.lang.Boolean.getBoolean("oscar.sandbox.mode")) {
+            java.lang.Integer sandboxOverrideSec = java.lang.Integer.getInteger("oscar.sandbox.extendedOccupancySeconds");
+            if (sandboxOverrideSec != null && sandboxOverrideSec >= 2 && sandboxOverrideSec <= 300) {
+                return Duration.ofSeconds(sandboxOverrideSec);
+            }
+        }
         return Duration.ofMinutes(Math.max(
                 LaneConfig.MIN_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES,
                 extendedOccupancyThresholdMinutes));

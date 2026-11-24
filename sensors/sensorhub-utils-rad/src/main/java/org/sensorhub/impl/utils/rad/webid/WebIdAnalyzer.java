@@ -181,6 +181,13 @@ public class WebIdAnalyzer {
         // Always publish local N42 spectrum & device alarm report first
         publishLocalN42Report(webIdContext);
 
+        SpectroscopyRuntimeRegistry specRegistry = SpectroscopyRuntimeRegistry.forHub(hub);
+        if (specRegistry.isOverrideModeActive()) {
+            logger.info("Custom spectroscopy extension active in override mode; evaluating locally for {}",
+                    webIdContext.getForegroundFileName());
+            return processCustomSpectroscopyAnalysis(webIdContext, specRegistry);
+        }
+
         WebIdAnalysis analysis = null;
         boolean reachable = webIdClient != null && webIdClient.isReachable();
         logger.info("WebID reachability check: client={}, reachable={}", webIdClient != null ? "present" : "null", reachable);
@@ -190,7 +197,54 @@ public class WebIdAnalyzer {
             logger.info("WebID unreachable; local N42 report published for (objectKey={}, foregroundFileName={})",
                     webIdContext.getObjectKey(), webIdContext.getForegroundFileName());
         }
+
+        if ((analysis == null || analysis.hasError()) && specRegistry.isCustomLoaded()) {
+            logger.info("Falling back to custom spectroscopy extension '{}' for {}",
+                    specRegistry.getStatus().algorithmId(), webIdContext.getForegroundFileName());
+            WebIdAnalysis customResult = processCustomSpectroscopyAnalysis(webIdContext, specRegistry);
+            if (customResult != null) {
+                analysis = customResult;
+            }
+        }
         return analysis;
+    }
+
+    private WebIdAnalysis processCustomSpectroscopyAnalysis(
+            WebIdRequestContext webIdContext,
+            SpectroscopyRuntimeRegistry specRegistry
+    ) {
+        try {
+            if (webIdContext == null || webIdContext.foregroundData == null) {
+                return null;
+            }
+            String fgName = webIdContext.hasForegroundFileName()
+                    ? webIdContext.getForegroundFileName()
+                    : webIdContext.getObjectKey();
+            String enrichedXml = null;
+            if (!isRadDataQrCode(webIdContext.foregroundData)) {
+                try {
+                    enrichedXml = toEnrichedN42Xml(webIdContext.foregroundData, fgName);
+                } catch (Throwable ignored) {
+                }
+            }
+            SpectroscopyAnalysisInput input = new SpectroscopyAnalysisInput(
+                    webIdContext.foregroundData,
+                    fgName,
+                    webIdContext.backgroundData,
+                    webIdContext.getBackgroundFileName(),
+                    enrichedXml,
+                    webIdContext.drf,
+                    webIdContext.synthesizeBackground
+            );
+            WebIdAnalysis analysis = specRegistry.evaluate(input);
+            if (analysis == null) {
+                return null;
+            }
+            return persistAndLinkWebIdAnalysis(webIdContext, analysis);
+        } catch (Exception e) {
+            logger.error("Custom spectroscopy extension analysis failed", e);
+            return null;
+        }
     }
 
     private WebIdAnalysis processWebIdAnalysis(WebIdRequestContext webIdContext) {
@@ -208,90 +262,93 @@ public class WebIdAnalyzer {
             if (analysis == null) {
                 return null;
             }
-
-            analysis.setSampleTime(Instant.now());
-            analysis.setOccupancyObsId(webIdContext.occupancyObsId != null ? webIdContext.occupancyObsId : "");
-
-            // Insert WebId observation into lane database
-            String encodedWebIdObsId = null;
-            if (webIdContext.laneUid != null && !webIdContext.laneUid.isBlank() && hub != null && obsIdEncoder != null) {
-                try {
-                    var laneDb = hub.getSystemDriverRegistry().getDatabase(webIdContext.laneUid);
-                    if (laneDb == null) {
-                        logger.error("No database found for lane UID: {}", webIdContext.laneUid);
-                        return analysis;
-                    }
-
-                    var obsStore = laneDb.getObservationStore();
-                    var dsKeys = obsStore.getDataStreams().selectKeys(new DataStreamFilter.Builder()
-                            .withSystems()
-                            .withUniqueIDs(webIdContext.laneUid)
-                            .done()
-                            .withOutputNames("webIdAnalysis")
-                            .build()).toList();
-
-                    if (dsKeys.isEmpty()) {
-                        logger.error("No webIdAnalysis datastream found for lane: {}", webIdContext.laneUid);
-                        return analysis;
-                    }
-
-                    var dsId = dsKeys.get(0).getInternalID();
-                    DataBlock webIdDataBlock = WebIdAnalysis.fromWebIdAnalysis(analysis);
-
-                    var txnHandler = new SystemDatabaseTransactionHandler(hub.getEventBus(), laneDb);
-                    var obsId = txnHandler.getDataStreamHandler(dsId).addObs(webIdDataBlock);
-
-                    encodedWebIdObsId = obsIdEncoder.encodeID(obsId);
-                    logger.info("WebId analysis observation stored with ID: {}", encodedWebIdObsId);
-                } catch (Exception e) {
-                    logger.error("Failed to insert WebId observation into lane database", e);
-                }
-            }
-
-            // Attach WebId obs ID to occupancy observation
-            if (encodedWebIdObsId != null
-                    && webIdContext.occupancyObsId != null
-                    && !webIdContext.occupancyObsId.isBlank()
-                    && webIdContext.laneUid != null
-                    && hub != null
-                    && obsIdEncoder != null) {
-                try {
-                    BigId decodedOccObsId = obsIdEncoder.decodeID(webIdContext.occupancyObsId);
-                    var laneDb = hub.getSystemDriverRegistry().getDatabase(webIdContext.laneUid);
-                    if (laneDb == null) {
-                        logger.error("No database found for lane UID when updating occupancy: {}", webIdContext.laneUid);
-                        return analysis;
-                    }
-
-                    var obsStore = laneDb.getObservationStore();
-                    var obs = obsStore.get(decodedOccObsId);
-                    if (obs == null) {
-                        logger.error("Occupancy observation not found for ID: {}", webIdContext.occupancyObsId);
-                        return analysis;
-                    }
-
-                    var dsInfo = obsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
-                    var occupancyRecord = dsInfo != null ? dsInfo.getRecordStructure() : null;
-
-                    var occupancy = OccupancyExtended.readOccupancy(occupancyRecord, obs.getResult());
-                    occupancy.addWebIdObsId(encodedWebIdObsId);
-
-                    DataBlock newOccupancyResult = OccupancyExtended.writeOccupancy(occupancyRecord, occupancy);
-                    obs.getResult().setUnderlyingObject(newOccupancyResult.getUnderlyingObject());
-                    obs.getResult().updateAtomCount();
-
-                    obsStore.put(decodedOccObsId, obs);
-                    logger.info("Occupancy observation {} updated with WebId obs ID: {}", webIdContext.occupancyObsId, encodedWebIdObsId);
-                } catch (Exception e) {
-                    logger.error("Failed to update occupancy observation with WebId obs ID", e);
-                }
-            }
-
-            return analysis;
+            return persistAndLinkWebIdAnalysis(webIdContext, analysis);
         } catch (Exception e) {
             logger.error("WebId analysis processing failed", e);
             return null;
         }
+    }
+
+    private WebIdAnalysis persistAndLinkWebIdAnalysis(WebIdRequestContext webIdContext, WebIdAnalysis analysis) {
+        analysis.setSampleTime(Instant.now());
+        analysis.setOccupancyObsId(webIdContext.occupancyObsId != null ? webIdContext.occupancyObsId : "");
+
+        // Insert WebId observation into lane database
+        String encodedWebIdObsId = null;
+        if (webIdContext.laneUid != null && !webIdContext.laneUid.isBlank() && hub != null && obsIdEncoder != null) {
+            try {
+                var laneDb = hub.getSystemDriverRegistry().getDatabase(webIdContext.laneUid);
+                if (laneDb == null) {
+                    logger.error("No database found for lane UID: {}", webIdContext.laneUid);
+                    return analysis;
+                }
+
+                var obsStore = laneDb.getObservationStore();
+                var dsKeys = obsStore.getDataStreams().selectKeys(new DataStreamFilter.Builder()
+                        .withSystems()
+                        .withUniqueIDs(webIdContext.laneUid)
+                        .done()
+                        .withOutputNames("webIdAnalysis")
+                        .build()).toList();
+
+                if (dsKeys.isEmpty()) {
+                    logger.error("No webIdAnalysis datastream found for lane: {}", webIdContext.laneUid);
+                    return analysis;
+                }
+
+                var dsId = dsKeys.get(0).getInternalID();
+                DataBlock webIdDataBlock = WebIdAnalysis.fromWebIdAnalysis(analysis);
+
+                var txnHandler = new SystemDatabaseTransactionHandler(hub.getEventBus(), laneDb);
+                var obsId = txnHandler.getDataStreamHandler(dsId).addObs(webIdDataBlock);
+
+                encodedWebIdObsId = obsIdEncoder.encodeID(obsId);
+                logger.info("WebId analysis observation stored with ID: {}", encodedWebIdObsId);
+            } catch (Exception e) {
+                logger.error("Failed to insert WebId observation into lane database", e);
+            }
+        }
+
+        // Attach WebId obs ID to occupancy observation
+        if (encodedWebIdObsId != null
+                && webIdContext.occupancyObsId != null
+                && !webIdContext.occupancyObsId.isBlank()
+                && webIdContext.laneUid != null
+                && hub != null
+                && obsIdEncoder != null) {
+            try {
+                BigId decodedOccObsId = obsIdEncoder.decodeID(webIdContext.occupancyObsId);
+                var laneDb = hub.getSystemDriverRegistry().getDatabase(webIdContext.laneUid);
+                if (laneDb == null) {
+                    logger.error("No database found for lane UID when updating occupancy: {}", webIdContext.laneUid);
+                    return analysis;
+                }
+
+                var obsStore = laneDb.getObservationStore();
+                var obs = obsStore.get(decodedOccObsId);
+                if (obs == null) {
+                    logger.error("Occupancy observation not found for ID: {}", webIdContext.occupancyObsId);
+                    return analysis;
+                }
+
+                var dsInfo = obsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
+                var occupancyRecord = dsInfo != null ? dsInfo.getRecordStructure() : null;
+
+                var occupancy = OccupancyExtended.readOccupancy(occupancyRecord, obs.getResult());
+                occupancy.addWebIdObsId(encodedWebIdObsId);
+
+                DataBlock newOccupancyResult = OccupancyExtended.writeOccupancy(occupancyRecord, occupancy);
+                obs.getResult().setUnderlyingObject(newOccupancyResult.getUnderlyingObject());
+                obs.getResult().updateAtomCount();
+
+                obsStore.put(decodedOccObsId, obs);
+                logger.info("Occupancy observation {} updated with WebId obs ID: {}", webIdContext.occupancyObsId, encodedWebIdObsId);
+            } catch (Exception e) {
+                logger.error("Failed to update occupancy observation with WebId obs ID", e);
+            }
+        }
+
+        return analysis;
     }
 
     private WebIdAnalysis analyzeWithSmartFallback(

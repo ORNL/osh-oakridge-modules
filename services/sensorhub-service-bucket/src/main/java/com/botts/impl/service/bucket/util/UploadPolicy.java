@@ -8,7 +8,7 @@ import java.util.Set;
 
 public final class UploadPolicy {
 
-    public static final long DEFAULT_MAX_FILE_SIZE_MB = 100;
+    public static final long DEFAULT_MAX_FILE_SIZE_MB = 200;
     public static final long DEFAULT_MAX_FILE_SIZE_BYTES = maxFileSizeBytes(DEFAULT_MAX_FILE_SIZE_MB);
 
     private static final Set<String> BLOCKED_EXTENSIONS = Set.of(
