@@ -8,7 +8,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import net.opengis.swe.v20.DataChoice;
 import net.opengis.swe.v20.Category;
 import org.sensorhub.api.command.CommandData;
-import org.sensorhub.api.common.BigId;
 import org.sensorhub.api.common.SensorHubException;
 import org.sensorhub.api.sensor.SensorException;
 import org.sensorhub.api.system.ISystemDriver;
@@ -193,7 +192,9 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
                 var choice = (DataChoice) command.getComponent(0);
                 choice.setSelectedItem(FileControl.CMD_CLOSE_FILE);
                 choice.getComponent(FileControl.CMD_CLOSE_FILE).getData().setBooleanValue(false);
-                this.fileControl.submitCommand(new CommandData.Builder().withCommandStream(BigId.NONE).withId(BigId.NONE).withParams(command.getData()).build()).join();
+                // Direct-to-driver helper: the Builder rejects BigId.NONE as a command stream ID,
+                // which used to throw here and skip closing the file on every module stop.
+                this.fileControl.submitCommand(new CommandData(1L, command.getData())).join();
             }
             if (hlsControl != null) {
                 hlsControl.prepareForceStop();
@@ -201,7 +202,7 @@ public abstract class FFMPEGSensorBase<FFMPEGconfigType extends FFMPEGConfig> ex
                 command.renewDataBlock();
                 var cat = (Category) command.getComponent(0);
                 cat.setValue(HLSControl.CMD_END_STREAM);
-                hlsControl.submitCommand(new CommandData.Builder().withCommandStream(BigId.NONE).withId(BigId.NONE).withParams(command.getData()).build()).join();
+                hlsControl.submitCommand(new CommandData(1L, command.getData())).join();
             }
 
         } catch (Exception e) { logger.error("Error stopping video output", e); }

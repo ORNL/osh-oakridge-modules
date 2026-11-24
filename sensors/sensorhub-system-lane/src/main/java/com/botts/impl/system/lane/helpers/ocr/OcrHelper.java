@@ -95,6 +95,7 @@ public final class OcrHelper implements AutoCloseable {
     private volatile IObsStore occupancyObsStore;
     private volatile Flow.Subscription occupancySub;
     private volatile Thread startupThread;
+    private volatile boolean subscriptionRequested;
 
     public OcrHelper(LaneSystem laneSystem,
                      IDataProducerModule<?> occupancyProducer,
@@ -201,6 +202,7 @@ public final class OcrHelper implements AutoCloseable {
                         logger.info("Started asynchronous Vehicle OCR subscription on lane {}",
                                 laneSystem.getUniqueIdentifier());
                     });
+            subscriptionRequested = true;
         } catch (Throwable t) {
             logger.error("Failed to subscribe Vehicle OCR to occupancy events on lane {}",
                     laneSystem.getUniqueIdentifier(), t);
@@ -557,6 +559,14 @@ public final class OcrHelper implements AutoCloseable {
                 cfg.plateMinConfidence,
                 cfg.ignoreTopFraction,
                 cfg.ignoreBottomFraction);
+    }
+
+    /**
+     * Whether this helper is subscribed or still waiting for its occupancy producer. False when
+     * it gave up: the producer was in error or not started within the wait, or it had no UID yet.
+     */
+    public boolean isAttachedOrStarting() {
+        return laneActive.get() && (subscriptionRequested || startupThread != null);
     }
 
     public void stop() {

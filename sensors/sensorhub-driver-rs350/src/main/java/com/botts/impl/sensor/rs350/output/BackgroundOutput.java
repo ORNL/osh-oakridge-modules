@@ -20,6 +20,7 @@ public class BackgroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
 
 
     protected DataRecord dataStruct;
+    protected DataRecord liveDataStruct;
     protected DataEncoding dataEncoding;
 
     public BackgroundOutput(RS350Sensor parentSensor) {
@@ -52,20 +53,19 @@ public class BackgroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
                 .addField(neutronGrossCount.getName(), neutronGrossCount)
                 .build();
 
+        liveDataStruct = dataStruct.copy();
         dataEncoding = new TextEncodingImpl(",", "\n");
     }
 
     public void onNewMessage(RS350Message message) {
-        dataStruct.clearData();
-        DataBlock dataBlock;
-
-        if (latestRecord == null) {
-            dataBlock = dataStruct.createDataBlock();
-            dataBlock.updateAtomCount();
-            dataStruct.setData(dataBlock);
-        } else {
-            dataBlock = latestRecord.renew();
-        }
+        // Build the record on a dedicated live DataRecord instance initialized once so
+        // getRecordDescription() keeps its pristine variable-array template without
+        // deep-cloning the SWE component tree on every 1 Hz measurement.
+        DataRecord workingStruct = liveDataStruct != null ? liveDataStruct : dataStruct.copy();
+        workingStruct.clearData();
+        DataBlock dataBlock = workingStruct.createDataBlock();
+        dataBlock.updateAtomCount();
+        workingStruct.setData(dataBlock);
 
         latestRecordTime = System.currentTimeMillis() / 1000;
 
@@ -76,7 +76,7 @@ public class BackgroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
         int linearSpectrumSize = message.getRs350BackgroundMeasurement().getLinEnCalSpectrum().size();
 
         dataBlock.setIntValue(index++, linearSpectrumSize);
-        var linearSpectrumArray = ((DataArrayImpl)dataStruct.getComponent("linearSpectrum"));
+        var linearSpectrumArray = ((DataArrayImpl)workingStruct.getComponent("linearSpectrum"));
         linearSpectrumArray.updateSize();
         dataBlock.updateAtomCount();
         for (int i = 0; i < linearSpectrumSize; i++) {
@@ -86,7 +86,7 @@ public class BackgroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
         int compressedSpectrumSize = message.getRs350BackgroundMeasurement().getCmpEnCalSpectrum().size();
 
         dataBlock.setIntValue(index++, compressedSpectrumSize);
-        var compressedSpectrumArray = ((DataArrayImpl)dataStruct.getComponent("compressedSpectrum"));
+        var compressedSpectrumArray = ((DataArrayImpl)workingStruct.getComponent("compressedSpectrum"));
         compressedSpectrumArray.updateSize();
         dataBlock.updateAtomCount();
         for (int i = 0; i < compressedSpectrumSize; i++) {
@@ -95,6 +95,7 @@ public class BackgroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
 
         dataBlock.setDoubleValue(index++, message.getRs350BackgroundMeasurement().getGammaGrossCount());
         dataBlock.setDoubleValue(index, message.getRs350BackgroundMeasurement().getNeutronGrossCount());
+        latestRecord = dataBlock;
 
         eventHandler.publish(new DataEvent(latestRecordTime, BackgroundOutput.this, dataBlock));
     }

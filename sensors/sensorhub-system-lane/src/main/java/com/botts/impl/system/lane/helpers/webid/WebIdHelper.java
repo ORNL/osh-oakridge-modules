@@ -52,6 +52,7 @@ public class WebIdHelper {
     IDataProducerModule<?> occupancyProducer;
     Flow.Subscription webIdSub, occupancySub;
     Thread startupThread;
+    private volatile boolean subscriptionsRequested;
 
     volatile BigId lastWebIdBigId = null;
     volatile ObsData lastWebIdBlock = null;
@@ -117,6 +118,7 @@ public class WebIdHelper {
                         subscription.request(Long.MAX_VALUE);
                         logger.info("Started subscription to " + OCCUPANCY_NAME);
                     });
+            subscriptionsRequested = true;
 
         } catch (Exception e) {
             logger.error("Failed to create WebId/Occupancy subscription", e);
@@ -288,6 +290,15 @@ public class WebIdHelper {
             clearOccupancy();
             logger.info("Correlated WebId and Occupancy");
         }
+    }
+
+    /**
+     * Whether this helper is subscribed or still waiting for its occupancy producer. False once
+     * the startup wait has given up without subscribing (the producer was not started in time).
+     */
+    public boolean isAttachedOrStarting() {
+        Thread t = startupThread;
+        return subscriptionsRequested || (t != null && t.isAlive());
     }
 
     public void stop() {

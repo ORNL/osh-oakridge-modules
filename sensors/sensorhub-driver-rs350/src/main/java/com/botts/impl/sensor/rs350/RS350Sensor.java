@@ -32,11 +32,17 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
     ConnectionStatusOutput connectionStatusOutput;
 
     RobustConnection connection;
-    MessageHandler messageHandler;
+    // Read and replaced from the heartbeat thread while doStop() may be
+    // clearing it, so both need to be visible across threads.
+    volatile MessageHandler messageHandler;
     DailyFileJournalConnection dailyFileJournal;
     InputStream msgIn;
-    private boolean isRunning;
+    private volatile boolean isRunning;
     private Thread tcpConnectionThread;
+    /** Paces connection rebuild attempts while the detector stays silent. */
+    private long lastReconnectAttemptMs;
+    /** Guards swapping commProvider/messageHandler without holding this monitor across TCP connect timeouts. */
+    private final Object connectionSwapLock = new Object();
 
     @Override
     protected void doInit() throws SensorHubException {
@@ -85,19 +91,23 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
         connection = new RobustIPConnection(this, config.commSettings.connection, "RS-350") {
             @Override
             public boolean tryConnect() throws IOException {
-
+                ICommProvider<?> candidate = null;
                 try {
                     var moduleReg = getParentHub().getModuleRegistry();
-
-                    commProvider = (ICommProvider<?>) moduleReg.loadSubModule(config.commSettings, true);
-
-                    commProvider.start();
-
-                    if(!commProvider.isStarted()) throw new SensorHubException("Comm Provider failed to start. Check communication settings.");
-
+                    candidate = (ICommProvider<?>) moduleReg.loadSubModule(config.commSettings, true);
+                    candidate.start();
+                    if (!candidate.isStarted())
+                        throw new SensorHubException("Comm Provider failed to start. Check communication settings.");
+                    commProvider = candidate;
                     return true;
-
                 } catch (Exception e) {
+                    if (candidate != null) {
+                        try {
+                            if (candidate.isStarted())
+                                candidate.stop();
+                        } catch (Exception ignored) {
+                        }
+                    }
                     reportError("Cannot connect to RS350 ", e , true);
                     return false;
                 }
@@ -116,6 +126,16 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
             throw new SensorException("Error while initializing communications ", e);
         }
 
+        initMessageHandler();
+    }
+
+    /**
+     * Build the message handler over the current input stream and wire it to
+     * the enabled outputs. Also used when rebuilding a dropped connection, so
+     * a reconnected detector feeds the same outputs (and the same daily-file
+     * journal) as at startup.
+     */
+    private void initMessageHandler() {
         WebIdAnalyzer webIdAnalyzer = null;
         try {
             var oscarServiceModule = getParentHub().getModuleRegistry().getModuleByType(IWebIdProvider.class);
@@ -154,14 +174,10 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
     @Override
     protected void doStop() throws SensorHubException {
         isRunning = false;
-        MessageHandler activeHandler = messageHandler;
-        if (activeHandler != null)
-            activeHandler.requestStop();
-        if(tcpConnectionThread != null) {
+        if (tcpConnectionThread != null) {
             tcpConnectionThread.interrupt();
             tcpConnectionThread = null;
         }
-
         if (connection != null) {
             try {
                 connection.cancel();
@@ -170,15 +186,24 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
             }
         }
 
-        if (commProvider != null) {
+        MessageHandler activeHandler;
+        ICommProvider<?> activeComm;
+        synchronized (connectionSwapLock) {
+            activeHandler = messageHandler;
+            messageHandler = null;
+            activeComm = commProvider;
+            commProvider = null;
+        }
+        if (activeHandler != null)
+            activeHandler.requestStop();
+
+        if (activeComm != null) {
             try {
-                if (commProvider.isStarted()) {
-                    commProvider.stop();
+                if (activeComm.isStarted()) {
+                    activeComm.stop();
                 }
             } catch (Exception e) {
                 logger.error("Error stopping comm module", e);
-            } finally {
-                commProvider = null;
             }
         }
 
@@ -242,11 +267,99 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
         return connection.isConnected();
     }
 
-    public void checkConnection(){
-        // if connection is lost then reconnect in here !!!
-        if(!isConnected()){
-            reportStatus("RS350 connection lost. Trying to reconnect...");
-            connection.reconnect();
+    public void checkConnection() {
+        // Triggered by DATA silence, never by connection.isConnected(): the
+        // RobustConnection flag is set once on the first successful connect
+        // and is only cleared by cancel()/reconnect(), so it stays true after
+        // the detector disappears and this branch could never fire.
+        long now = System.currentTimeMillis();
+        if (now - lastReconnectAttemptMs < config.commSettings.connection.reconnectPeriod)
+            return;
+        lastReconnectAttemptMs = now;
+
+        reportStatus("RS-350 has gone silent, rebuilding the connection...");
+        if (reestablishConnection())
+            reportStatus("RS-350 connection re-established");
+    }
+
+    /**
+     * Replace the dead comm provider and message pipeline in place, so a
+     * detector that comes back starts feeding the outputs again on its own.
+     * <p>
+     * The stream and its reader cannot be reused: the reader thread exits the
+     * moment the socket reports EOF, and a Java thread cannot be restarted, so
+     * both the InputStream and the MessageHandler are rebuilt. This is done
+     * without RobustConnection.reconnect(), which stops and starts the whole
+     * module and gives up after reconnectAttempts — an outage longer than
+     * reconnectAttempts * reconnectPeriod would leave the module in ERROR with
+     * no heartbeat left to retry. Rebuilding here keeps the module STARTED and
+     * the heartbeat retries indefinitely, once per reconnectPeriod.
+     * <p>
+     * The daily-file journal is lane-scoped and stays open across rebuilds;
+     * only doStop() closes it.
+     *
+     * @return true when the detector is connected and a new reader is running
+     */
+    private boolean reestablishConnection() {
+        MessageHandler oldHandler;
+        ICommProvider<?> oldComm;
+        synchronized (connectionSwapLock) {
+            if (!isRunning)
+                return false;
+            oldHandler = messageHandler;
+            messageHandler = null;
+            oldComm = commProvider;
+            commProvider = null;
+        }
+
+        if (oldHandler != null)
+            oldHandler.requestStop();
+
+        if (oldComm != null) {
+            try {
+                if (oldComm.isStarted())
+                    oldComm.stop();
+            } catch (Exception e) {
+                logger.debug("Error stopping stale comm provider", e);
+            }
+        }
+
+        if (oldHandler != null) {
+            try {
+                oldHandler.awaitSourceStopped();
+                oldHandler.awaitAncillaryStopped();
+            } catch (IOException e) {
+                // keep going: the old workers are interrupted and hold a dead
+                // socket; a lingering one must not keep the lane dark
+                logger.warn("Stale RS-350 message handler did not stop cleanly", e);
+            }
+        }
+
+        // Connect outside connectionSwapLock so a TCP SYN timeout on an offline
+        // detector never blocks doStop() or Admin UI module stops.
+        try {
+            if (!isRunning || !connection.tryConnect())
+                return false;
+
+            synchronized (connectionSwapLock) {
+                if (!isRunning) {
+                    ICommProvider<?> lateComm = commProvider;
+                    commProvider = null;
+                    if (lateComm != null && lateComm.isStarted()) {
+                        try {
+                            lateComm.stop();
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    return false;
+                }
+                msgIn = new BufferedInputStream(commProvider.getInputStream());
+                initMessageHandler();
+                return true;
+            }
+        } catch (Exception e) {
+            logger.debug("RS-350 reconnect attempt failed", e);
+            return false;
         }
     }
 
@@ -254,7 +367,11 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
     public void heartbeat() {
 
         while (isRunning) {
-            if(messageHandler.getTimeSinceLastMessage() < config.commSettings.connection.reconnectPeriod) {
+            MessageHandler handler = messageHandler;
+            // No handler means a rebuild is in flight: treat that as silence.
+            long silentMs = (handler == null) ? Long.MAX_VALUE : handler.getTimeSinceLastMessage();
+
+            if (silentMs < config.commSettings.connection.reconnectPeriod) {
 
                 this.connectionStatusOutput.onNewMessage(true);
             }
