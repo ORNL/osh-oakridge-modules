@@ -462,21 +462,17 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         }
         adjudicationControl.setObsStore(obsStore);
 
-        if (emlAutoAdjudicationHelper != null) {
-            emlAutoAdjudicationHelper.stop();
-            emlAutoAdjudicationHelper = null;
-        }
-        if (occupancyProducer != null) {
+        if (occupancyProducer != null && !(occupancyProducer instanceof Rs350OccupancyProcessModule)) {
             emlAutoAdjudicationHelper = new EmlAutoAdjudicationHelper(this, occupancyProducer, obsStore);
         }
 
         if (webIdHelper != null) {
             webIdHelper.stop();
-        }
-        if (WEBID_SENSORS.contains(existingRPMModule.getClass())) {
-            webIdHelper = new WebIdHelper(this, occupancyProducer);
-        } else {
             webIdHelper = null;
+        }
+        if (WEBID_SENSORS.contains(existingRPMModule.getClass())
+                && !(occupancyProducer instanceof Rs350OccupancyProcessModule)) {
+            webIdHelper = new WebIdHelper(this, occupancyProducer);
         }
 
         if (ocrHelper != null) {
@@ -646,6 +642,14 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                     if (event.getNewState() == ModuleEvent.ModuleState.STARTED) {
                         if (occupancyWrapper != null)
                             occupancyWrapper.start();
+                        if (emlAutoAdjudicationHelper == null) {
+                            var db = getParentHub().getSystemDriverRegistry().getDatabase(getUniqueIdentifier());
+                            if (db != null && db.getObservationStore() != null)
+                                emlAutoAdjudicationHelper = new EmlAutoAdjudicationHelper(this, occupancyProducer, db.getObservationStore());
+                        }
+                        if (webIdHelper == null && WEBID_SENSORS.contains(existingRPMModule.getClass())) {
+                            webIdHelper = new WebIdHelper(this, occupancyProducer);
+                        }
                         refreshWebRelayRuntime();
                     } else if (event.getNewState() == ModuleEvent.ModuleState.STOPPING) {
                         if (occupancyWrapper != null)
@@ -674,14 +678,14 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                     var state = event.getNewState();
 
                     if (state == ModuleEvent.ModuleState.STARTED) {
-                        if (occupancyProducer != existingRPMModule) {
+                        if (occupancyProducer instanceof Rs350OccupancyProcessModule rs350Process) {
                             try {
-                                if (occupancyProducer instanceof Rs350OccupancyProcessModule rs350Process) {
-                                    rs350Process.getConfiguration().systemUID = existingRPMModule.getUniqueIdentifier();
-                                }
-                                occupancyProducer.init();
+                                rs350Process.getConfiguration().systemUID = existingRPMModule.getUniqueIdentifier();
+                                rs350Process.init();
+                                rs350Process.waitForState(ModuleEvent.ModuleState.INITIALIZED, 10000);
+                                rs350Process.start();
                             } catch (SensorHubException ex) {
-                                throw new RuntimeException(ex);
+                                getLogger().error("Cannot start RS350 occupancy process module", ex);
                             }
                         }
                         if (occupancyWrapper != null)
@@ -792,7 +796,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
 
             rs350Config.serialNumber = getConfiguration().uniqueID;
             rs350Config.moduleClass = Rs350OccupancyProcessModule.class.getCanonicalName();
-            rs350Config.autoStart = true;
+            rs350Config.autoStart = false;
 
             config = rs350Config;
         }
