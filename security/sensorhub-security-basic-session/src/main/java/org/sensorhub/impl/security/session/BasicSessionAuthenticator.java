@@ -513,7 +513,7 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             return Authentication.SEND_FAILURE;
         }
 
-        String username = credentials.substring(0, separator);
+        String username = identityStore.resolveUsername(credentials.substring(0, separator));
         String password = credentials.substring(separator + 1);
         String remoteIp = clientIp(request);
 
@@ -600,6 +600,7 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             renderLogin(response, true, null, redirectTarget, lang);
             return;
         }
+        username = identityStore.resolveUsername(username);
 
         String remoteIp = clientIp(request);
         if (identityStore.isRateLimited(remoteIp, username)) {
@@ -1034,7 +1035,7 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
         out.put("userVerification", "preferred");
 
         if (usernameHint != null && !usernameHint.isBlank()) {
-            UserProfileRecord user = identityStore.getProfile(usernameHint.trim());
+            UserProfileRecord user = identityStore.getProfile(identityStore.resolveUsername(usernameHint.trim()));
             if (user != null && user.enabled && user.passkeys != null && !user.passkeys.isEmpty()) {
                 List<Map<String, Object>> allowList = new ArrayList<>();
                 for (PasskeyRecord pk : user.passkeys) {

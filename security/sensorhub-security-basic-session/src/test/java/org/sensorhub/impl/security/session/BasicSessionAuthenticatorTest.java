@@ -823,6 +823,51 @@ public class BasicSessionAuthenticatorTest
     }
 
 
+    @Test
+    public void signsInWithAnyLetterCaseAndRefusesCaseOnlyDuplicates() throws Exception
+    {
+        Path storePath = tempFolder.newFile("oscar-username-case.json").toPath();
+        Files.deleteIfExists(storePath);
+        InMemoryUserRegistry registry = new InMemoryUserRegistry();
+        registry.addAdmin("admin", "StrongAdminPassword!23");
+        BasicSessionAuthenticator auth = createAuthenticator(storePath, registry);
+        Cookie[] adminCookies = {signIn(auth, "admin", "StrongAdminPassword!23")};
+
+        ResponseCapture created = new ResponseCapture();
+        auth.validateRequest(createJsonRequest("POST", "/sensorhub/session/admin/users",
+            "{\"username\":\"Mike\",\"role\":\"operator\",\"password\":\"MikesPassword!42\",\"mustChangePassword\":false}",
+            adminCookies, "oscar.local"), created.proxy(), true);
+        assertEquals(201, created.status);
+
+        for (String typed : List.of("mike", "MIKE", "Mike")) {
+            ResponseCapture login = new ResponseCapture();
+            auth.validateRequest(createRequest("POST", "/login",
+                Map.of("username", typed, "password", "MikesPassword!42", "continue", "/"),
+                null, Map.of("Host", "oscar.local")), login.proxy(), true);
+            assertEquals("Sign-in as '" + typed + "'", 302, login.status);
+            assertEquals("/", login.redirectLocation);
+            Cookie session = new Cookie("OSCAR_SESSION", extractCookieValue(login.setCookies.get(0), "OSCAR_SESSION"));
+
+            ResponseCapture whoAmI = new ResponseCapture();
+            auth.validateRequest(createRequest("GET", "/sensorhub/session", Map.of(),
+                new Cookie[] {session}, Map.of("Host", "oscar.local")), whoAmI.proxy(), true);
+            assertEquals("Mike", JsonParser.parseString(whoAmI.bodyUtf8()).getAsJsonObject().get("username").getAsString());
+        }
+
+        ResponseCapture wrongPassword = new ResponseCapture();
+        auth.validateRequest(createRequest("POST", "/login",
+            Map.of("username", "mike", "password", "NotMikesPassword!42"),
+            null, Map.of("Host", "oscar.local")), wrongPassword.proxy(), true);
+        assertEquals(401, wrongPassword.status);
+
+        ResponseCapture duplicate = new ResponseCapture();
+        auth.validateRequest(createJsonRequest("POST", "/sensorhub/session/admin/users",
+            "{\"username\":\"mike\",\"role\":\"viewer\"}", adminCookies, "oscar.local"), duplicate.proxy(), true);
+        assertEquals(400, duplicate.status);
+        assertTrue(duplicate.bodyUtf8().contains("User already exists: Mike"));
+    }
+
+
     private static Cookie signIn(BasicSessionAuthenticator auth, String username, String password) throws Exception
     {
         ResponseCapture login = new ResponseCapture();
