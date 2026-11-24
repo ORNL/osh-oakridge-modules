@@ -93,6 +93,25 @@ public class ApplicationReadinessTest {
     }
 
     @Test
+    public void memberTheLaneIsRecoveringSettlesWhileItsAttemptIsStarting() {
+        IModule<?> reconnectingRpm = module(true, new AtomicReference<>(ModuleState.STARTING));
+        AtomicBoolean dispatchComplete = new AtomicBoolean(true);
+        java.util.Set<Object> recovering = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        IModule<?> lane = proxy(true, new AtomicReference<>(ModuleState.STARTED), new AtomicReference<>(),
+                () -> Map.of("rpm", (ISystemDriver) reconnectingRpm), dispatchComplete, recovering);
+
+        assertFalse("a STARTING member the lane is not retrying is still in flight",
+                ApplicationReadiness.allAutoStartModuleTreesSettled(List.of(lane)));
+
+        recovering.add(reconnectingRpm);
+        assertTrue(ApplicationReadiness.allAutoStartModuleTreesSettled(List.of(lane)));
+
+        dispatchComplete.set(false);
+        assertFalse("recovery never bypasses the lane's own dispatch boundary",
+                ApplicationReadiness.allAutoStartModuleTreesSettled(List.of(lane)));
+    }
+
+    @Test
     public void stoppedTopLevelModuleStillBlocksReadiness() {
         IModule<?> service = module(true, new AtomicReference<>(ModuleState.STOPPED));
 
@@ -195,6 +214,15 @@ public class ApplicationReadinessTest {
                                     AtomicReference<Throwable> error,
                                     java.util.function.Supplier<Map<String, ? extends ISystemDriver>> members,
                                     AtomicBoolean dispatchComplete) {
+        return proxy(autoStart, state, error, members, dispatchComplete, java.util.Set.of());
+    }
+
+    private static IModule<?> proxy(boolean autoStart,
+                                    AtomicReference<ModuleState> state,
+                                    AtomicReference<Throwable> error,
+                                    java.util.function.Supplier<Map<String, ? extends ISystemDriver>> members,
+                                    AtomicBoolean dispatchComplete,
+                                    java.util.Set<Object> recovering) {
         ModuleConfig config = new ModuleConfig();
         config.autoStart = autoStart;
         Class<?>[] interfaces = members == null
@@ -211,6 +239,7 @@ public class ApplicationReadinessTest {
                     case "getCurrentError" -> error.get();
                     case "getMembers" -> members.get();
                     case "isAutoStartDispatchComplete" -> dispatchComplete.get();
+                    case "isMemberUnderRecovery" -> recovering.contains(arguments[0]);
                     case "getName", "getDescription", "getLocalID", "getUniqueIdentifier" -> "fixture";
                     case "isStarted", "isEnabled" -> state.get() == ModuleState.STARTED;
                     case "hashCode" -> System.identityHashCode(proxy);

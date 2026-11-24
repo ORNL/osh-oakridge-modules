@@ -22,4 +22,13 @@ package com.botts.impl.system.lane;
  */
 public interface IAutoStartDispatchStatus {
     boolean isAutoStartDispatchComplete();
+
+    /**
+     * True while the lane itself is retrying this failed member (see RpmRecoverySupervisor).
+     * Its STARTING state is then a reconnect attempt, not a start still in flight, so readiness
+     * should treat it like a member that settled offline.
+     */
+    default boolean isMemberUnderRecovery(Object member) {
+        return false;
+    }
 }
