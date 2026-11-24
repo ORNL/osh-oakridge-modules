@@ -35,6 +35,7 @@ import com.botts.impl.system.lane.helpers.webid.WebIdHelper;
 import com.botts.impl.system.lane.helpers.webrelay.LaneWebRelayController;
 import org.sensorhub.impl.utils.rad.output.N42Output;
 import com.botts.impl.system.lane.config.*;
+import com.botts.impl.system.lane.helpers.occupancy.OccupancyProcessStarter;
 import com.botts.impl.system.lane.helpers.occupancy.OccupancyWrapper;
 import com.botts.impl.system.lane.helpers.occupancy.OccupancyStatusOutput;
 import org.sensorhub.api.common.SensorHubException;
@@ -709,6 +710,10 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                             } catch (SensorHubException ex) {
                                 throw new RuntimeException(ex);
                             }
+                            // A detector that comes up after the lane's auto-start pass leaves
+                            // the process initialized but never started.
+                            OccupancyProcessStarter.startIfStranded(occupancyProducer, isStarted(),
+                                    autoStartDispatchComplete, threadPool, getLogger());
                         }
                         if (occupancyWrapper != null)
                             occupancyWrapper.setRpmSensor((IDataProducerModule<?>) occupancyProducer);
