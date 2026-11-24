@@ -206,10 +206,12 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
     }
 
     private DataBlock createResultData(Adjudication adjudication, String username) {
-        resultStructure.clearData();
-        DataBlock dataBlock = resultStructure.createDataBlock();
+        // build the result on a copy so the registered template returned by
+        // getResultDescription() keeps its pristine variable-array sizes
+        DataComponent resultCopy = resultStructure.copy();
+        DataBlock dataBlock = resultCopy.createDataBlock();
         dataBlock.updateAtomCount();
-        resultStructure.setData(dataBlock);
+        resultCopy.setData(dataBlock);
 
         int index = 0;
 
@@ -220,7 +222,7 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
         int isotopeCount =  adjudication.getIsotopes().size();
         dataBlock.setIntValue(index++, isotopeCount);
 
-        var isotopesArray =((DataArrayImpl) resultStructure.getComponent("isotopes"));
+        var isotopesArray =((DataArrayImpl) resultCopy.getComponent("isotopes"));
         isotopesArray.updateSize();
         dataBlock.updateAtomCount();
 
@@ -232,7 +234,7 @@ public class AdjudicationControl extends AbstractSensorControl<LaneSystem> imple
         int filePathCount = adjudication.getFilePaths().size();
         dataBlock.setIntValue(index++, filePathCount);
 
-        var filePathsArray =((DataArrayImpl) resultStructure.getComponent("filePaths"));
+        var filePathsArray =((DataArrayImpl) resultCopy.getComponent("filePaths"));
         filePathsArray.updateSize();
         dataBlock.updateAtomCount();
 

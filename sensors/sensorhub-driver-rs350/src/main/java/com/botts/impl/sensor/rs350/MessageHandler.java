@@ -54,7 +54,6 @@ public class MessageHandler {
 
     private final String messageDelimiter;
 
-    private long timeSinceLastMessage;
 
 
     public interface StatusListener {
@@ -100,9 +99,9 @@ public class MessageHandler {
         @Override
         public void run() {
             try {
+
                 ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                 lastMessageReceivedMillis = System.currentTimeMillis();
-                timeSinceLastMessage = 0;
 
                 while (isProcessing.get()) {
                     int character = msgIn.read();
@@ -131,6 +130,8 @@ public class MessageHandler {
                             break;
                         }
 
+                        // A complete message off the wire is the only proof the detector is
+                        // still talking: RS350Sensor's heartbeat reports this as isConnected.
                         lastMessageReceivedMillis = System.currentTimeMillis();
                         String rawPayload = buffer.toString(StandardCharsets.UTF_8);
                         String n42Message = journalBeforeParsing(rawPayload, Instant.now(),
@@ -247,6 +248,10 @@ public class MessageHandler {
             }
         }
 
+        // Stamp before the reader starts: a detector that never sends a byte
+        // must age out from module start, not from the epoch.
+        lastMessageReceivedMillis = System.currentTimeMillis();
+
         this.messageReader.start();
         this.messageNotifier.start();
     }
@@ -362,6 +367,7 @@ public class MessageHandler {
         }
     }
 
+    /** Milliseconds since the detector last delivered a message. */
     public long getTimeSinceLastMessage() {
         return Math.max(0L, System.currentTimeMillis() - lastMessageReceivedMillis);
     }

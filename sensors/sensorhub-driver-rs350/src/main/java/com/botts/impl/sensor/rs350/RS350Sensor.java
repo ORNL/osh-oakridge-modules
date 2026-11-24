@@ -32,11 +32,15 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
     ConnectionStatusOutput connectionStatusOutput;
 
     RobustConnection connection;
-    MessageHandler messageHandler;
+    // Read and replaced from the heartbeat thread while doStop() may be
+    // clearing it, so both need to be visible across threads.
+    volatile MessageHandler messageHandler;
     DailyFileJournalConnection dailyFileJournal;
     InputStream msgIn;
-    private boolean isRunning;
+    private volatile boolean isRunning;
     private Thread tcpConnectionThread;
+    /** Paces connection rebuild attempts while the detector stays silent. */
+    private long lastReconnectAttemptMs;
 
     @Override
     protected void doInit() throws SensorHubException {
@@ -116,6 +120,16 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
             throw new SensorException("Error while initializing communications ", e);
         }
 
+        initMessageHandler();
+    }
+
+    /**
+     * Build the message handler over the current input stream and wire it to
+     * the enabled outputs. Also used when rebuilding a dropped connection, so
+     * a reconnected detector feeds the same outputs (and the same daily-file
+     * journal) as at startup.
+     */
+    private void initMessageHandler() {
         WebIdAnalyzer webIdAnalyzer = null;
         try {
             var oscarServiceModule = getParentHub().getModuleRegistry().getModuleByType(IWebIdProvider.class);
@@ -152,7 +166,9 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
     }
 
     @Override
-    protected void doStop() throws SensorHubException {
+    protected synchronized void doStop() throws SensorHubException {
+        // synchronized against reestablishConnection(): a rebuild must not be
+        // swapping in a new comm provider while we are tearing one down.
         isRunning = false;
         MessageHandler activeHandler = messageHandler;
         if (activeHandler != null)
@@ -242,11 +258,81 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
         return connection.isConnected();
     }
 
-    public void checkConnection(){
-        // if connection is lost then reconnect in here !!!
-        if(!isConnected()){
-            reportStatus("RS350 connection lost. Trying to reconnect...");
-            connection.reconnect();
+    public void checkConnection() {
+        // Triggered by DATA silence, never by connection.isConnected(): the
+        // RobustConnection flag is set once on the first successful connect
+        // and is only cleared by cancel()/reconnect(), so it stays true after
+        // the detector disappears and this branch could never fire.
+        long now = System.currentTimeMillis();
+        if (now - lastReconnectAttemptMs < config.commSettings.connection.reconnectPeriod)
+            return;
+        lastReconnectAttemptMs = now;
+
+        reportStatus("RS-350 has gone silent, rebuilding the connection...");
+        if (reestablishConnection())
+            reportStatus("RS-350 connection re-established");
+    }
+
+    /**
+     * Replace the dead comm provider and message pipeline in place, so a
+     * detector that comes back starts feeding the outputs again on its own.
+     * <p>
+     * The stream and its reader cannot be reused: the reader thread exits the
+     * moment the socket reports EOF, and a Java thread cannot be restarted, so
+     * both the InputStream and the MessageHandler are rebuilt. This is done
+     * without RobustConnection.reconnect(), which stops and starts the whole
+     * module and gives up after reconnectAttempts — an outage longer than
+     * reconnectAttempts * reconnectPeriod would leave the module in ERROR with
+     * no heartbeat left to retry. Rebuilding here keeps the module STARTED and
+     * the heartbeat retries indefinitely, once per reconnectPeriod.
+     * <p>
+     * The daily-file journal is lane-scoped and stays open across rebuilds;
+     * only doStop() closes it.
+     *
+     * @return true when the detector is connected and a new reader is running
+     */
+    private synchronized boolean reestablishConnection() {
+        if (!isRunning)
+            return false;
+
+        MessageHandler oldHandler = messageHandler;
+        messageHandler = null;
+        if (oldHandler != null)
+            oldHandler.requestStop();
+
+        if (commProvider != null) {
+            try {
+                if (commProvider.isStarted())
+                    commProvider.stop();
+            } catch (Exception e) {
+                logger.debug("Error stopping stale comm provider", e);
+            } finally {
+                commProvider = null;
+            }
+        }
+
+        if (oldHandler != null) {
+            try {
+                oldHandler.awaitSourceStopped();
+                oldHandler.awaitAncillaryStopped();
+            } catch (IOException e) {
+                // keep going: the old workers are interrupted and hold a dead
+                // socket; a lingering one must not keep the lane dark
+                logger.warn("Stale RS-350 message handler did not stop cleanly", e);
+            }
+        }
+
+        try {
+            // One attempt only — the heartbeat is the retry loop.
+            if (!connection.tryConnect())
+                return false;
+
+            msgIn = new BufferedInputStream(commProvider.getInputStream());
+            initMessageHandler();
+            return true;
+        } catch (Exception e) {
+            logger.debug("RS-350 reconnect attempt failed", e);
+            return false;
         }
     }
 
@@ -254,7 +340,11 @@ public class RS350Sensor extends AbstractSensorModule<RS350Config> {
     public void heartbeat() {
 
         while (isRunning) {
-            if(messageHandler.getTimeSinceLastMessage() < config.commSettings.connection.reconnectPeriod) {
+            MessageHandler handler = messageHandler;
+            // No handler means a rebuild is in flight: treat that as silence.
+            long silentMs = (handler == null) ? Long.MAX_VALUE : handler.getTimeSinceLastMessage();
+
+            if (silentMs < config.commSettings.connection.reconnectPeriod) {
 
                 this.connectionStatusOutput.onNewMessage(true);
             }

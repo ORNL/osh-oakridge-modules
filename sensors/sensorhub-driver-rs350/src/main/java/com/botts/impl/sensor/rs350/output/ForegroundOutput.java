@@ -63,16 +63,12 @@ public class ForegroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
 
 
     public void onNewMessage(RS350Message message) {
-        dataStruct.clearData();
-        DataBlock dataBlock;
-
-        if (latestRecord == null) {
-            dataBlock = dataStruct.createDataBlock();
-            dataBlock.updateAtomCount();
-            dataStruct.setData(dataBlock);
-        } else {
-            dataBlock = latestRecord.renew();
-        }
+        // build the record on a copy so the registered template returned by
+        // getRecordDescription() keeps its pristine variable-array sizes
+        DataComponent structCopy = dataStruct.copy();
+        DataBlock dataBlock = structCopy.createDataBlock();
+        dataBlock.updateAtomCount();
+        structCopy.setData(dataBlock);
 
         latestRecordTime = System.currentTimeMillis() / 1000;
 
@@ -83,7 +79,7 @@ public class ForegroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
         int linearSpectrumSize = message.getRs350ForegroundMeasurement().getLinEnCalSpectrum().size();
 
         dataBlock.setIntValue(index++, linearSpectrumSize);
-        var linearSpectrumArray = ((DataArrayImpl)dataStruct.getComponent("linearSpectrum"));
+        var linearSpectrumArray = ((DataArrayImpl)structCopy.getComponent("linearSpectrum"));
         linearSpectrumArray.updateSize();
         dataBlock.updateAtomCount();
         for (int i = 0; i < linearSpectrumSize; i++) {
@@ -93,7 +89,7 @@ public class ForegroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
         int compressedSpectrumSize = message.getRs350ForegroundMeasurement().getCmpEnCalSpectrum().size();
 
         dataBlock.setIntValue(index++, compressedSpectrumSize);
-        var compressedSpectrumArray = ((DataArrayImpl)dataStruct.getComponent("compressedSpectrum"));
+        var compressedSpectrumArray = ((DataArrayImpl)structCopy.getComponent("compressedSpectrum"));
         compressedSpectrumArray.updateSize();
         dataBlock.updateAtomCount();
         for (int i = 0; i < compressedSpectrumSize; i++) {
