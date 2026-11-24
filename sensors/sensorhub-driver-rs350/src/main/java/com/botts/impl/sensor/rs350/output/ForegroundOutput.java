@@ -22,6 +22,7 @@ public class ForegroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
     private static final Logger logger = LoggerFactory.getLogger(ForegroundOutput.class);
 
     protected DataRecord dataStruct;
+    protected DataRecord liveDataStruct;
     protected DataEncoding dataEncoding;
 
     public ForegroundOutput(RS350Sensor parentSensor) {
@@ -57,18 +58,21 @@ public class ForegroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
                 .addField(doseRate.getName(), doseRate)
                 .build();
 
+        liveDataStruct = dataStruct.copy();
         dataEncoding = new TextEncodingImpl(",", "\n");
 
     }
 
 
     public void onNewMessage(RS350Message message) {
-        // build the record on a copy so the registered template returned by
-        // getRecordDescription() keeps its pristine variable-array sizes
-        DataComponent structCopy = dataStruct.copy();
-        DataBlock dataBlock = structCopy.createDataBlock();
+        // Build the record on a dedicated live DataRecord instance initialized once so
+        // getRecordDescription() keeps its pristine variable-array template without
+        // deep-cloning the SWE component tree on every 1 Hz measurement.
+        DataRecord workingStruct = liveDataStruct != null ? liveDataStruct : dataStruct.copy();
+        workingStruct.clearData();
+        DataBlock dataBlock = workingStruct.createDataBlock();
         dataBlock.updateAtomCount();
-        structCopy.setData(dataBlock);
+        workingStruct.setData(dataBlock);
 
         latestRecordTime = System.currentTimeMillis() / 1000;
 
@@ -79,7 +83,7 @@ public class ForegroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
         int linearSpectrumSize = message.getRs350ForegroundMeasurement().getLinEnCalSpectrum().size();
 
         dataBlock.setIntValue(index++, linearSpectrumSize);
-        var linearSpectrumArray = ((DataArrayImpl)structCopy.getComponent("linearSpectrum"));
+        var linearSpectrumArray = ((DataArrayImpl)workingStruct.getComponent("linearSpectrum"));
         linearSpectrumArray.updateSize();
         dataBlock.updateAtomCount();
         for (int i = 0; i < linearSpectrumSize; i++) {
@@ -89,7 +93,7 @@ public class ForegroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
         int compressedSpectrumSize = message.getRs350ForegroundMeasurement().getCmpEnCalSpectrum().size();
 
         dataBlock.setIntValue(index++, compressedSpectrumSize);
-        var compressedSpectrumArray = ((DataArrayImpl)structCopy.getComponent("compressedSpectrum"));
+        var compressedSpectrumArray = ((DataArrayImpl)workingStruct.getComponent("compressedSpectrum"));
         compressedSpectrumArray.updateSize();
         dataBlock.updateAtomCount();
         for (int i = 0; i < compressedSpectrumSize; i++) {
@@ -99,6 +103,7 @@ public class ForegroundOutput extends AbstractSensorOutput<RS350Sensor> implemen
         dataBlock.setDoubleValue(index++, message.getRs350ForegroundMeasurement().getGammaGrossCount());
         dataBlock.setDoubleValue(index++, message.getRs350ForegroundMeasurement().getNeutronGrossCount());
         dataBlock.setDoubleValue(index, message.getRs350ForegroundMeasurement().getDoseRate());
+        latestRecord = dataBlock;
 
         eventHandler.publish(new DataEvent(latestRecordTime, ForegroundOutput.this, dataBlock));
 

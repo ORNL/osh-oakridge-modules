@@ -150,4 +150,41 @@ public class OccupancyProcessStarterTest {
         assertFalse(OccupancyProcessStarter.startIfStranded(null, true, true, DIRECT, LOG));
         assertFalse(OccupancyProcessStarter.startIfStranded(process, true, true, null, LOG));
     }
+
+    @Test
+    public void waitsForAsyncInitializationBeforeStarting() throws Exception {
+        java.util.concurrent.CountDownLatch allowInitCompletion = new java.util.concurrent.CountDownLatch(1);
+        FakeOccupancyProcess asyncProcess = new FakeOccupancyProcess() {
+            {
+                initAsync = true;
+            }
+
+            @Override
+            protected void doInit() {
+                Thread initWorker = new Thread(() -> {
+                    try {
+                        allowInitCompletion.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                        setState(ModuleState.INITIALIZED);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }, "fake-async-occupancy-init");
+                initWorker.setDaemon(true);
+                initWorker.start();
+            }
+        };
+        asyncProcess.init();
+        assertEquals(ModuleState.INITIALIZING, asyncProcess.getCurrentState());
+
+        java.util.concurrent.ExecutorService lanePool = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            assertTrue(OccupancyProcessStarter.startIfStranded(asyncProcess, true, true, lanePool, LOG));
+            allowInitCompletion.countDown();
+            assertTrue(asyncProcess.waitForState(ModuleState.STARTED, 5_000));
+            assertEquals(ModuleState.STARTED, asyncProcess.getCurrentState());
+            assertEquals(1, asyncProcess.startCalls);
+        } finally {
+            lanePool.shutdownNow();
+        }
+    }
 }

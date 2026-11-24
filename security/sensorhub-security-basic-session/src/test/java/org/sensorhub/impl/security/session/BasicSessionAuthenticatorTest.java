@@ -188,7 +188,7 @@ public class BasicSessionAuthenticatorTest
             "/sensorhub/session",
             Map.of(),
             new Cookie[] {new Cookie("OSCAR_SESSION", sessionToken)},
-            Map.of("Host", "oscar.local"));
+            Map.of("Host", "portal.example.test"));
         auth2.validateRequest(sessReq, sessResp.proxy(), true);
         assertEquals(200, sessResp.status);
         JsonObject sessJson = JsonParser.parseString(sessResp.bodyUtf8()).getAsJsonObject();
@@ -213,7 +213,7 @@ public class BasicSessionAuthenticatorTest
             "/sensorhub/session",
             Map.of(),
             new Cookie[] {new Cookie("OSCAR_SESSION", sessionToken)},
-            Map.of("Host", "oscar.local"));
+            Map.of("Host", "portal.example.test"));
         auth2.validateRequest(afterLogoutReq, afterLogoutResp.proxy(), true);
         assertEquals(401, afterLogoutResp.status);
     }
@@ -236,7 +236,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "POST", "/login",
             Map.of("username", "admin", "password", "StrongAdminPassword!23"),
-            null, Map.of("Host", "oscar.local")), loginResp.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), loginResp.proxy(), true);
         Cookie sessionCookie = new Cookie("OSCAR_SESSION",
             extractCookieValue(loginResp.setCookies.get(0), "OSCAR_SESSION"));
 
@@ -244,11 +244,11 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture regOptsResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "POST", "/sensorhub/session/account/passkeys/options", "{}",
-            new Cookie[] {sessionCookie}, "oscar.local"), regOptsResp.proxy(), true);
+            new Cookie[] {sessionCookie}, "portal.example.test"), regOptsResp.proxy(), true);
         assertEquals(200, regOptsResp.status);
         JsonObject regOpts = JsonParser.parseString(regOptsResp.bodyUtf8()).getAsJsonObject();
         String regChallenge = regOpts.get("challenge").getAsString();
-        assertEquals("oscar.local", regOpts.getAsJsonObject("rp").get("id").getAsString());
+        assertEquals("portal.example.test", regOpts.getAsJsonObject("rp").get("id").getAsString());
         assertTrue(PasswordHasher.isValidUnpaddedBase64Url(
             regOpts.getAsJsonObject("user").get("id").getAsString()));
 
@@ -260,10 +260,10 @@ public class BasicSessionAuthenticatorTest
         String credId = PasswordHasher.encodeBase64Url(credIdBytes);
         byte[] coseKey = WebAuthnCodecTest.buildEc2CosePublicKey((ECPublicKey) kp.getPublic());
         byte[] regAuthData = WebAuthnCodecTest.buildAuthData(
-            "oscar.local", (byte) 0x45, 1L, new byte[16], credIdBytes, coseKey);
+            "portal.example.test", (byte) 0x45, 1L, new byte[16], credIdBytes, coseKey);
         byte[] attObj = WebAuthnCodecTest.buildAttestationObject(regAuthData);
         String regClientJson = "{\"type\":\"webauthn.create\",\"challenge\":\"" + regChallenge
-            + "\",\"origin\":\"https://oscar.local\"}";
+            + "\",\"origin\":\"https://portal.example.test\"}";
 
         String regBody = "{\"challenge\":\"" + regChallenge + "\",\"name\":\"Shift Supervisor Key\","
             + "\"credential\":{\"id\":\"" + credId + "\",\"type\":\"public-key\",\"response\":{"
@@ -274,7 +274,7 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture regVerifyResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "POST", "/sensorhub/session/account/passkeys/verify", regBody,
-            new Cookie[] {sessionCookie}, "oscar.local"), regVerifyResp.proxy(), true);
+            new Cookie[] {sessionCookie}, "portal.example.test"), regVerifyResp.proxy(), true);
         assertEquals(200, regVerifyResp.status);
         JsonObject pkList = JsonParser.parseString(regVerifyResp.bodyUtf8()).getAsJsonObject();
         assertEquals(1, pkList.getAsJsonArray("passkeys").size());
@@ -285,14 +285,14 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture authOptsResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "POST", "/login/webauthn/options", "{\"continue\":\"/event-log\",\"keepSignedIn\":true}",
-            null, "oscar.local"), authOptsResp.proxy(), true);
+            null, "portal.example.test"), authOptsResp.proxy(), true);
         assertEquals(200, authOptsResp.status);
         String authChallenge = JsonParser.parseString(authOptsResp.bodyUtf8())
             .getAsJsonObject().get("challenge").getAsString();
 
         byte[] authClientBytes = ("{\"type\":\"webauthn.get\",\"challenge\":\"" + authChallenge
-            + "\",\"origin\":\"https://oscar.local\"}").getBytes(StandardCharsets.UTF_8);
-        byte[] authData = WebAuthnCodecTest.buildAuthData("oscar.local", (byte) 0x05, 2L, null, null, null);
+            + "\",\"origin\":\"https://portal.example.test\"}").getBytes(StandardCharsets.UTF_8);
+        byte[] authData = WebAuthnCodecTest.buildAuthData("portal.example.test", (byte) 0x05, 2L, null, null, null);
         byte[] clientHash = PasswordHasher.sha256(authClientBytes);
         byte[] signed = new byte[authData.length + clientHash.length];
         System.arraycopy(authData, 0, signed, 0, authData.length);
@@ -310,7 +310,7 @@ public class BasicSessionAuthenticatorTest
 
         ResponseCapture loginVerifyResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
-            "POST", "/login/webauthn/verify", loginVerifyBody, null, "oscar.local"),
+            "POST", "/login/webauthn/verify", loginVerifyBody, null, "portal.example.test"),
             loginVerifyResp.proxy(), true);
         assertEquals(200, loginVerifyResp.status);
         JsonObject loginVerifyJson = JsonParser.parseString(loginVerifyResp.bodyUtf8()).getAsJsonObject();
@@ -322,12 +322,12 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture delResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "DELETE", "/sensorhub/session/account/passkeys/" + credId, "",
-            new Cookie[] {sessionCookie}, "oscar.local"), delResp.proxy(), true);
+            new Cookie[] {sessionCookie}, "portal.example.test"), delResp.proxy(), true);
         assertEquals(200, delResp.status);
 
         ResponseCapture authOpts2 = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
-            "POST", "/login/webauthn/options", "{}", null, "oscar.local"),
+            "POST", "/login/webauthn/options", "{}", null, "portal.example.test"),
             authOpts2.proxy(), true);
         String challenge2 = JsonParser.parseString(authOpts2.bodyUtf8())
             .getAsJsonObject().get("challenge").getAsString();
@@ -335,7 +335,7 @@ public class BasicSessionAuthenticatorTest
 
         ResponseCapture deletedResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
-            "POST", "/login/webauthn/verify", deletedVerifyBody, null, "oscar.local"),
+            "POST", "/login/webauthn/verify", deletedVerifyBody, null, "portal.example.test"),
             deletedResp.proxy(), true);
         assertEquals(404, deletedResp.status);
         assertTrue(deletedResp.bodyUtf8().contains("\"unknownCredential\":true"));
@@ -359,7 +359,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "POST", "/login",
             Map.of("username", "admin", "password", "StrongAdminPassword!23"),
-            null, Map.of("Host", "oscar.local")), adminLogin.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), adminLogin.proxy(), true);
         Cookie adminCookie = new Cookie("OSCAR_SESSION",
             extractCookieValue(adminLogin.setCookies.get(0), "OSCAR_SESSION"));
 
@@ -367,7 +367,7 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture selfDelete = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "DELETE", "/sensorhub/session/admin/users/admin", "",
-            new Cookie[] {adminCookie}, "oscar.local"), selfDelete.proxy(), true);
+            new Cookie[] {adminCookie}, "portal.example.test"), selfDelete.proxy(), true);
         assertEquals(400, selfDelete.status);
 
         // Create a gate-scoped Operator with auto-generated temporary password
@@ -375,7 +375,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createJsonRequest(
             "POST", "/sensorhub/session/admin/users",
             "{\"username\":\"gate_op\",\"displayName\":\"East Gate Operator\",\"role\":\"operator\",\"allowedViews\":[\"east-gate\"]}",
-            new Cookie[] {adminCookie}, "oscar.local"), createOpResp.proxy(), true);
+            new Cookie[] {adminCookie}, "portal.example.test"), createOpResp.proxy(), true);
         assertEquals(201, createOpResp.status);
         JsonObject createdPayload = JsonParser.parseString(createOpResp.bodyUtf8()).getAsJsonObject();
         String tempPassword = createdPayload.get("temporaryPassword").getAsString();
@@ -386,7 +386,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "POST", "/login",
             Map.of("username", "gate_op", "password", tempPassword),
-            null, Map.of("Host", "oscar.local")), opLogin.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), opLogin.proxy(), true);
         assertTrue(opLogin.redirectLocation.startsWith("/login/password-change"));
         Cookie opCookie = new Cookie("OSCAR_SESSION",
             extractCookieValue(opLogin.setCookies.get(0), "OSCAR_SESSION"));
@@ -396,21 +396,21 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "POST", "/login/password-change",
             Map.of("newPassword", "OperatorPermanent!99", "confirmPassword", "OperatorPermanent!99", "continue", "/"),
-            new Cookie[] {opCookie}, Map.of("Host", "oscar.local")), pwChange.proxy(), true);
+            new Cookie[] {opCookie}, Map.of("Host", "portal.example.test")), pwChange.proxy(), true);
         assertEquals("/", pwChange.redirectLocation);
 
         // Operator cannot access /admin/overview (403 Forbidden)
         ResponseCapture opForbidden = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "GET", "/sensorhub/session/admin/overview", "",
-            new Cookie[] {opCookie}, "oscar.local"), opForbidden.proxy(), true);
+            new Cookie[] {opCookie}, "portal.example.test"), opForbidden.proxy(), true);
         assertEquals(403, opForbidden.status);
 
         // Operator /session reflects role=operator, canAdjudicate=true, allowedViews=["east-gate"]
         ResponseCapture opSess = new ResponseCapture();
         auth.validateRequest(createRequest(
             "GET", "/sensorhub/session", Map.of(),
-            new Cookie[] {opCookie}, Map.of("Host", "oscar.local")), opSess.proxy(), true);
+            new Cookie[] {opCookie}, Map.of("Host", "portal.example.test")), opSess.proxy(), true);
         JsonObject opSessJson = JsonParser.parseString(opSess.bodyUtf8()).getAsJsonObject();
         assertEquals("operator", opSessJson.get("primaryRole").getAsString());
         assertFalse(opSessJson.get("isAdmin").getAsBoolean());
@@ -422,7 +422,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createJsonRequest(
             "POST", "/sensorhub/session/admin/federation-tokens",
             "{\"label\":\"HQ National View\",\"role\":\"viewer\",\"expiresInDays\":90}",
-            new Cookie[] {adminCookie}, "oscar.local"), fedCreate.proxy(), true);
+            new Cookie[] {adminCookie}, "portal.example.test"), fedCreate.proxy(), true);
         assertEquals(201, fedCreate.status);
         JsonObject fedJson = JsonParser.parseString(fedCreate.bodyUtf8()).getAsJsonObject();
         String rawBearer = fedJson.get("token").getAsString();
@@ -441,7 +441,7 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture revokeResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "DELETE", "/sensorhub/session/admin/federation-tokens/" + tokenId, "",
-            new Cookie[] {adminCookie}, "oscar.local"), revokeResp.proxy(), true);
+            new Cookie[] {adminCookie}, "portal.example.test"), revokeResp.proxy(), true);
         assertEquals(200, revokeResp.status);
 
         ResponseCapture revokedBearerResp = new ResponseCapture();
@@ -485,7 +485,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "POST", "/login",
             Map.of("username", "admin", "password", "StrongAdminPassword!23"),
-            null, Map.of("Host", "oscar.local")), adminLogin.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), adminLogin.proxy(), true);
         Cookie adminCookie = new Cookie("OSCAR_SESSION",
             extractCookieValue(adminLogin.setCookies.get(0), "OSCAR_SESSION"));
 
@@ -500,7 +500,7 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture bulkResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "POST", "/sensorhub/session/admin/users/bulk", bulkJson,
-            new Cookie[] {adminCookie}, "oscar.local"), bulkResp.proxy(), true);
+            new Cookie[] {adminCookie}, "portal.example.test"), bulkResp.proxy(), true);
         assertEquals(200, bulkResp.status);
 
         JsonObject bulkPayload = JsonParser.parseString(bulkResp.bodyUtf8()).getAsJsonObject();
@@ -522,7 +522,7 @@ public class BasicSessionAuthenticatorTest
             ResponseCapture getEnroll = new ResponseCapture();
             auth.validateRequest(createRequest(
                 "GET", "/login/enroll", Map.of("token", mariaInviteToken),
-                null, Map.of("Host", "oscar.local")), getEnroll.proxy(), true);
+                null, Map.of("Host", "portal.example.test")), getEnroll.proxy(), true);
             assertEquals(200, getEnroll.status);
             assertTrue(getEnroll.bodyUtf8().contains("Maria Gatehouse"));
             assertTrue(getEnroll.bodyUtf8().contains("enroll-passkey-btn"));
@@ -537,7 +537,7 @@ public class BasicSessionAuthenticatorTest
                 "newPassword", "MariaPersonalPass!2026",
                 "confirmPassword", "MariaPersonalPass!2026",
                 "keepSignedIn", "true"),
-            null, Map.of("Host", "oscar.local")), postEnroll.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), postEnroll.proxy(), true);
         assertEquals(302, postEnroll.status);
         assertEquals("/?view=north-gate", postEnroll.redirectLocation);
         Cookie mariaCookie = new Cookie("OSCAR_SESSION",
@@ -547,7 +547,7 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture mariaSess = new ResponseCapture();
         auth.validateRequest(createRequest(
             "GET", "/sensorhub/session", Map.of(),
-            new Cookie[] {mariaCookie}, Map.of("Host", "oscar.local")), mariaSess.proxy(), true);
+            new Cookie[] {mariaCookie}, Map.of("Host", "portal.example.test")), mariaSess.proxy(), true);
         JsonObject mariaSessJson = JsonParser.parseString(mariaSess.bodyUtf8()).getAsJsonObject();
         assertEquals("maria.gatehouse", mariaSessJson.get("username").getAsString());
         assertFalse(mariaSessJson.get("mustChangePassword").getAsBoolean());
@@ -556,7 +556,7 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture replayEnroll = new ResponseCapture();
         auth.validateRequest(createRequest(
             "GET", "/login/enroll", Map.of("token", mariaInviteToken),
-            null, Map.of("Host", "oscar.local")), replayEnroll.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), replayEnroll.proxy(), true);
         assertEquals(410, replayEnroll.status);
     }
 
@@ -582,7 +582,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "GET", "/sensorhub/session", Map.of(), null,
             Map.of(
-                "Host", "oscar.local",
+                "Host", "portal.example.test",
                 "X-Oscar-Tunnel-Secret", "TunnelSharedSecretKey_123456",
                 "X-Octelium-User", "hub.operator",
                 "X-Octelium-Groups", "[\"oscar-operators\",\"remote-staff\"]")),
@@ -598,7 +598,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "GET", "/sensorhub/session", Map.of(), null,
             Map.of(
-                "Host", "oscar.local",
+                "Host", "portal.example.test",
                 "X-Oscar-Tunnel-Secret", "TunnelSharedSecretKey_123456",
                 "X-Octelium-User", "hub.operator",
                 "X-Octelium-Groups", "oscar-admins, remote-staff")),
@@ -613,7 +613,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "GET", "/sensorhub/session", Map.of(), null,
             Map.of(
-                "Host", "oscar.local",
+                "Host", "portal.example.test",
                 "X-Oscar-Tunnel-Secret", "TunnelSharedSecretKey_123456",
                 "X-Octelium-User", "admin",
                 "X-Octelium-Groups", "unmapped-group")),
@@ -688,7 +688,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "POST", "/login",
             Map.of("username", "admin", "password", "StrongAdminPass!2026"),
-            null, Map.of("Host", "oscar.local")), adminLogin.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), adminLogin.proxy(), true);
         Cookie adminCookie = new Cookie("OSCAR_SESSION",
             extractCookieValue(adminLogin.setCookies.get(0), "OSCAR_SESSION"));
 
@@ -697,21 +697,21 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createRequest(
             "POST", "/login",
             Map.of("username", "gate.op", "password", "GateOpPass!2026"),
-            null, Map.of("Host", "oscar.local")), opLogin.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), opLogin.proxy(), true);
         Cookie opCookie = new Cookie("OSCAR_SESSION",
             extractCookieValue(opLogin.setCookies.get(0), "OSCAR_SESSION"));
 
         ResponseCapture forbiddenResp = new ResponseCapture();
         auth.validateRequest(createRequest(
             "GET", "/sensorhub/session/admin/usb-backup/status", Map.of(),
-            new Cookie[] {opCookie}, Map.of("Host", "oscar.local")), forbiddenResp.proxy(), true);
+            new Cookie[] {opCookie}, Map.of("Host", "portal.example.test")), forbiddenResp.proxy(), true);
         assertEquals(403, forbiddenResp.status);
 
         // Unconfigured initial fallback status
         ResponseCapture initialStatus = new ResponseCapture();
         auth.validateRequest(createRequest(
             "GET", "/sensorhub/session/admin/usb-backup/status", Map.of(),
-            new Cookie[] {adminCookie}, Map.of("Host", "oscar.local")), initialStatus.proxy(), true);
+            new Cookie[] {adminCookie}, Map.of("Host", "portal.example.test")), initialStatus.proxy(), true);
         assertEquals(200, initialStatus.status);
         JsonObject initJson = JsonParser.parseString(initialStatus.bodyUtf8()).getAsJsonObject();
         assertEquals("UNCONFIGURED", initJson.get("driveState").getAsString());
@@ -721,14 +721,14 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createJsonRequest(
             "POST", "/sensorhub/session/admin/usb-backup/action",
             "{\"action\":\"prepare-drive\",\"device\":\"/dev/sda; rm -rf /\",\"confirm\":\"FORMAT\"}",
-            new Cookie[] {adminCookie}, "oscar.local"), badDevResp.proxy(), true);
+            new Cookie[] {adminCookie}, "portal.example.test"), badDevResp.proxy(), true);
         assertEquals(400, badDevResp.status);
 
         ResponseCapture missingConfirmResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "POST", "/sensorhub/session/admin/usb-backup/action",
             "{\"action\":\"prepare-drive\",\"device\":\"/dev/sda\",\"confirm\":\"yes\"}",
-            new Cookie[] {adminCookie}, "oscar.local"), missingConfirmResp.proxy(), true);
+            new Cookie[] {adminCookie}, "portal.example.test"), missingConfirmResp.proxy(), true);
         assertEquals(400, missingConfirmResp.status);
 
         // Valid eject action writes schema-validated request.json for host agent
@@ -736,7 +736,7 @@ public class BasicSessionAuthenticatorTest
         auth.validateRequest(createJsonRequest(
             "POST", "/sensorhub/session/admin/usb-backup/action",
             "{\"action\":\"eject\",\"noSync\":false}",
-            new Cookie[] {adminCookie}, "oscar.local"), ejectResp.proxy(), true);
+            new Cookie[] {adminCookie}, "portal.example.test"), ejectResp.proxy(), true);
         assertEquals(200, ejectResp.status);
         Path controlDir = tempDir.resolve("usb-backup-control");
         Path reqFile = controlDir.resolve("request.json");
@@ -767,7 +767,7 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture keyResp = new ResponseCapture();
         auth.validateRequest(createJsonRequest(
             "POST", "/sensorhub/session/admin/usb-backup/backup-key", "{}",
-            new Cookie[] {adminCookie}, "oscar.local"), keyResp.proxy(), true);
+            new Cookie[] {adminCookie}, "portal.example.test"), keyResp.proxy(), true);
         fakeHostAgent.join(3000L);
         assertEquals(200, keyResp.status);
         assertEquals("TEST_AES_HMAC_BACKUP_KEY_12345\n", keyResp.bodyUtf8());
@@ -790,13 +790,13 @@ public class BasicSessionAuthenticatorTest
 
         ResponseCapture created = new ResponseCapture();
         auth.validateRequest(createJsonRequest("POST", "/sensorhub/session/admin/users",
-            "{\"username\":\"Mike\",\"role\":\"operator\"}", adminCookies, "oscar.local"), created.proxy(), true);
+            "{\"username\":\"Mike\",\"role\":\"operator\"}", adminCookies, "portal.example.test"), created.proxy(), true);
         assertEquals(201, created.status);
 
         // On a live node the /sensorhub servlet context and the root file server both run this
         // authenticator for /sensorhub/session requests, so the same request arrives twice.
         HttpServletRequest inviteRequest = createJsonRequest("POST", "/sensorhub/session/admin/users/Mike/invite",
-            "{\"inviteExpiresInHours\":168}", adminCookies, "oscar.local");
+            "{\"inviteExpiresInHours\":168}", adminCookies, "portal.example.test");
         ResponseCapture invite = new ResponseCapture();
         assertEquals(Authentication.SEND_CONTINUE, auth.validateRequest(inviteRequest, invite.proxy(), true));
         ResponseCapture inviteAgain = new ResponseCapture();
@@ -807,7 +807,7 @@ public class BasicSessionAuthenticatorTest
         assertEquals("The QR invite shown to the admin must open the enrollment page", 200, openEnrollPage(auth, inviteToken));
 
         HttpServletRequest resetRequest = createJsonRequest("POST", "/sensorhub/session/admin/users/Mike/reset-password",
-            "{\"mustChangePassword\":true}", adminCookies, "oscar.local");
+            "{\"mustChangePassword\":true}", adminCookies, "portal.example.test");
         ResponseCapture reset = new ResponseCapture();
         auth.validateRequest(resetRequest, reset.proxy(), true);
         auth.validateRequest(resetRequest, new ResponseCapture().proxy(), true);
@@ -817,7 +817,7 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture login = new ResponseCapture();
         auth.validateRequest(createRequest("POST", "/login",
             Map.of("username", "Mike", "password", resetJson.get("temporaryPassword").getAsString()),
-            null, Map.of("Host", "oscar.local")), login.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), login.proxy(), true);
         assertEquals("The temporary password shown after a reset must work", 302, login.status);
         assertTrue(login.redirectLocation.startsWith("/login/password-change"));
     }
@@ -836,33 +836,33 @@ public class BasicSessionAuthenticatorTest
         ResponseCapture created = new ResponseCapture();
         auth.validateRequest(createJsonRequest("POST", "/sensorhub/session/admin/users",
             "{\"username\":\"Mike\",\"role\":\"operator\",\"password\":\"MikesPassword!42\",\"mustChangePassword\":false}",
-            adminCookies, "oscar.local"), created.proxy(), true);
+            adminCookies, "portal.example.test"), created.proxy(), true);
         assertEquals(201, created.status);
 
         for (String typed : List.of("mike", "MIKE", "Mike")) {
             ResponseCapture login = new ResponseCapture();
             auth.validateRequest(createRequest("POST", "/login",
                 Map.of("username", typed, "password", "MikesPassword!42", "continue", "/"),
-                null, Map.of("Host", "oscar.local")), login.proxy(), true);
+                null, Map.of("Host", "portal.example.test")), login.proxy(), true);
             assertEquals("Sign-in as '" + typed + "'", 302, login.status);
             assertEquals("/", login.redirectLocation);
             Cookie session = new Cookie("OSCAR_SESSION", extractCookieValue(login.setCookies.get(0), "OSCAR_SESSION"));
 
             ResponseCapture whoAmI = new ResponseCapture();
             auth.validateRequest(createRequest("GET", "/sensorhub/session", Map.of(),
-                new Cookie[] {session}, Map.of("Host", "oscar.local")), whoAmI.proxy(), true);
+                new Cookie[] {session}, Map.of("Host", "portal.example.test")), whoAmI.proxy(), true);
             assertEquals("Mike", JsonParser.parseString(whoAmI.bodyUtf8()).getAsJsonObject().get("username").getAsString());
         }
 
         ResponseCapture wrongPassword = new ResponseCapture();
         auth.validateRequest(createRequest("POST", "/login",
             Map.of("username", "mike", "password", "NotMikesPassword!42"),
-            null, Map.of("Host", "oscar.local")), wrongPassword.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), wrongPassword.proxy(), true);
         assertEquals(401, wrongPassword.status);
 
         ResponseCapture duplicate = new ResponseCapture();
         auth.validateRequest(createJsonRequest("POST", "/sensorhub/session/admin/users",
-            "{\"username\":\"mike\",\"role\":\"viewer\"}", adminCookies, "oscar.local"), duplicate.proxy(), true);
+            "{\"username\":\"mike\",\"role\":\"viewer\"}", adminCookies, "portal.example.test"), duplicate.proxy(), true);
         assertEquals(400, duplicate.status);
         assertTrue(duplicate.bodyUtf8().contains("User already exists: Mike"));
     }
@@ -872,7 +872,7 @@ public class BasicSessionAuthenticatorTest
     {
         ResponseCapture login = new ResponseCapture();
         auth.validateRequest(createRequest("POST", "/login", Map.of("username", username, "password", password),
-            null, Map.of("Host", "oscar.local")), login.proxy(), true);
+            null, Map.of("Host", "portal.example.test")), login.proxy(), true);
         return new Cookie("OSCAR_SESSION", extractCookieValue(login.setCookies.get(0), "OSCAR_SESSION"));
     }
 
@@ -881,7 +881,7 @@ public class BasicSessionAuthenticatorTest
     {
         ResponseCapture page = new ResponseCapture();
         auth.validateRequest(createRequest("GET", "/login/enroll", Map.of("token", inviteToken),
-            null, Map.of("Host", "oscar.local", "Accept", "text/html")), page.proxy(), true);
+            null, Map.of("Host", "portal.example.test", "Accept", "text/html")), page.proxy(), true);
         return page.status;
     }
 
@@ -1017,7 +1017,7 @@ public class BasicSessionAuthenticatorTest
                     case "getScheme":
                         return "https";
                     case "getServerName":
-                        return headers.getOrDefault("Host", "oscar.local");
+                        return headers.getOrDefault("Host", "portal.example.test");
                     case "getServerPort":
                         return 443;
                     case "getRemoteAddr":

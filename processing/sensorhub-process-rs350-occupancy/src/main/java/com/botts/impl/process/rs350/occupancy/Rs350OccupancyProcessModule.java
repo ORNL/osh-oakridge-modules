@@ -21,43 +21,33 @@ import net.opengis.swe.v20.AbstractSWEIdentifiable;
 import net.opengis.swe.v20.DataComponent;
 import net.opengis.swe.v20.DataEncoding;
 import org.sensorhub.api.ISensorHub;
-import org.sensorhub.api.command.ICommandReceiver;
 import org.sensorhub.api.common.SensorHubException;
-import org.sensorhub.api.data.IDataProducer;
 import org.sensorhub.api.data.IDataStreamInfo;
-import org.sensorhub.api.datastore.command.CommandStreamFilter;
 import org.sensorhub.api.datastore.obs.DataStreamFilter;
 import org.sensorhub.api.datastore.system.SystemFilter;
-import org.sensorhub.api.event.Event;
 import org.sensorhub.api.module.ModuleEvent;
 import org.sensorhub.api.processing.OSHProcessInfo;
 import org.sensorhub.api.processing.ProcessingException;
 import org.sensorhub.api.utils.OshAsserts;
-import org.sensorhub.impl.module.ModuleRegistry;
 import org.sensorhub.impl.processing.AbstractProcessModule;
 import com.botts.impl.process.rs350.occupancy.helpers.ProcessHelper;
 import com.botts.impl.process.rs350.occupancy.helpers.DataOutputInterface;
 import org.sensorhub.impl.utils.rad.output.OccupancyOutput;
-import org.sensorhub.utils.Async;
 import org.vast.process.ProcessException;
 import org.vast.sensorML.*;
 
 import java.io.*;
 import java.util.*;
-import java.util.concurrent.Flow;
-import java.util.concurrent.TimeoutException;
 
 // Based on SMLProcessImpl
 public class Rs350OccupancyProcessModule extends AbstractProcessModule<Rs350OccupancyProcessConfig> {
 
     protected SMLUtils smlUtils;
     public AggregateProcessImpl wrapperProcess;
-    protected int errorCount = 0;
     protected boolean useThreads = true;
     String processUniqueID;
     Rs350OutputToOccupancy alarmProcess;
     String parentSystemUID = null;
-    Flow.Subscription subscription = null;
 
     /**
      * Standalone processing module to be recognized by OSH module provider, accessible in the OSH Admin UI.
@@ -88,17 +78,6 @@ public class Rs350OccupancyProcessModule extends AbstractProcessModule<Rs350Occu
             parentSystemUID = getParentSystemUID();
         }
 
-        // Listen for system events on all modules
-        if (subscription == null)
-            getParentHub().getEventBus().newSubscription()
-                // TODO: Ideally should only listen to single module, but we would need to change config or programmatically find the lane module
-                .withTopicID(ModuleRegistry.EVENT_GROUP_ID)
-                .consume(this::handleEvent)
-                .thenAccept(s -> {
-                    subscription = s;
-                    s.request(Long.MAX_VALUE);
-                });
-
         try {
             processUniqueID = OSHProcessInfo.URI_PREFIX +  "rs350-occupancy:" + config.serialNumber;
             OshAsserts.checkValidUID(processUniqueID);
@@ -113,54 +92,6 @@ public class Rs350OccupancyProcessModule extends AbstractProcessModule<Rs350Occu
         } catch (ProcessException e) {
             throw new ProcessingException("Processing error", e);
         }
-    }
-
-    private void handleEvent(Event e) {
-        if (e instanceof ModuleEvent event) {
-            // Subsystem has been added to our parent system containing RPM and other data sources
-            if (event.getModule() instanceof IDataProducer driver && Objects.equals(driver.getParentSystemUID(), parentSystemUID)
-            && event.getType().equals(ModuleEvent.Type.STATE_CHANGED)
-            && event.getNewState().equals(ModuleEvent.ModuleState.STARTED)
-            && this.isStarted()) {
-                try {
-                    Async.waitForCondition(() -> checkSystemDriverFinishedRegistration(driver.getUniqueIdentifier(), driver), 500, 10000);
-                    new Thread(() -> {
-                        boolean isStarting = true;
-                        while (isStarting) {
-                            try {
-                                this.init();
-                                boolean isInitialized = waitForState(ModuleEvent.ModuleState.INITIALIZED, 10000);
-                                if (!isInitialized)
-                                    continue;
-                                this.start();
-                                isStarting = false;
-                            } catch (SensorHubException ex) {
-                                getLogger().info("Failed restart, trying again to restart module...");
-                            }
-                        }
-                    }).start();
-                } catch (TimeoutException ex) {
-                    throw new RuntimeException(ex);
-                }
-            }
-        }
-    }
-
-    private boolean checkSystemDriverFinishedRegistration(String systemUID, IDataProducer driver) {
-        var dsFilter = new DataStreamFilter.Builder().withSystems(new SystemFilter.Builder().withUniqueIDs(systemUID).build()).build();
-        var numDataStreams = getParentHub().getDatabaseRegistry().getFederatedDatabase().getDataStreamStore().countMatchingEntries(dsFilter);
-        var numDriverOutputs = driver.getOutputs().size();
-
-        boolean outputsMatch = numDriverOutputs == numDataStreams;
-
-        if (driver instanceof ICommandReceiver commandReceiver) {
-            var csFilter = new CommandStreamFilter.Builder().withSystems(new SystemFilter.Builder().withUniqueIDs(systemUID).build()).build();
-            var numControlStreams = getParentHub().getDatabaseRegistry().getFederatedDatabase().getCommandStreamStore().countMatchingEntries(csFilter);
-            var numDriverInputs = commandReceiver.getCommandInputs().size();
-            return outputsMatch && numControlStreams == numDriverInputs;
-        }
-
-        return outputsMatch;
     }
 
     /**
@@ -307,8 +238,6 @@ public class Rs350OccupancyProcessModule extends AbstractProcessModule<Rs350Occu
     @Override
     protected void doStart() throws SensorHubException
     {
-        errorCount = 0;
-
         if (wrapperProcess == null)
             throw new ProcessingException("No valid processing chain provided");
 
@@ -334,15 +263,5 @@ public class Rs350OccupancyProcessModule extends AbstractProcessModule<Rs350Occu
     {
         if (wrapperProcess != null && wrapperProcess.isExecutable())
             wrapperProcess.stop();
-    }
-
-    @Override
-    public void cleanup() {
-        super.cleanup();
-
-        if (subscription != null) {
-            subscription.cancel();
-            subscription = null;
-        }
     }
 }

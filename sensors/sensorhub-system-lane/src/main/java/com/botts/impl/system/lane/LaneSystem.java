@@ -453,6 +453,13 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         if (existingRPMModule instanceof RS350Sensor rs350Module) {
             var processConfig = createOccupancyProcessConfig(rs350Module);
             occupancyProducer = (IDataProducerModule<?>) registerSubmodule(processConfig);
+            if (rs350Module.getCurrentState() == ModuleEvent.ModuleState.STARTED
+                    && occupancyProducer instanceof Rs350OccupancyProcessModule rs350Process) {
+                rs350Process.getConfiguration().systemUID = rs350Module.getUniqueIdentifier();
+                occupancyProducer.init();
+                OccupancyProcessStarter.startIfStranded(occupancyProducer, isStarted(),
+                        autoStartDispatchComplete, threadPool, getLogger());
+            }
         } else {
             occupancyProducer = existingRPMModule;
         }
@@ -506,12 +513,15 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     }
 
     /**
-     * Portal lanes, whose RPM is the occupancy producer and has a UID from init, so the EML helper
-     * subscribes at lane start. On RS-350/D5 lanes the occupancy process has no UID yet when the
-     * helper is created, so it never subscribes; re-attaching would newly enable it there.
+     * Whether {@link EmlAutoAdjudicationHelper} should be (re-)attached once the occupancy
+     * producer has initialized its UID (including RS-350 occupancy processes, whose UID is
+     * assigned asynchronously during {@code doInit()} so extended-occupancy auto-adjudication
+     * can bind once the process reaches {@code STARTED}).
      */
     private boolean emlReattachExpected() {
-        return occupancyProducer != null && occupancyProducer == existingRPMModule;
+        return occupancyProducer != null
+                && occupancyProducer.getUniqueIdentifier() != null
+                && !occupancyProducer.getUniqueIdentifier().isBlank();
     }
 
     private boolean webIdExpected() {

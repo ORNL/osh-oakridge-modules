@@ -41,15 +41,20 @@ public final class OccupancyProcessStarter {
             return false;
         if (process.getConfiguration() == null || !process.getConfiguration().autoStart)
             return false;
-        if (process.getCurrentState() != ModuleState.INITIALIZED)
+        ModuleState initialState = process.getCurrentState();
+        if (initialState != ModuleState.INITIALIZED && initialState != ModuleState.INITIALIZING)
             return false;
 
         try {
             executor.execute(() -> {
-                // Something else (an operator, a lane restart) may have started or stopped it.
-                if (process.getCurrentState() != ModuleState.INITIALIZED)
-                    return;
                 try {
+                    // Process modules with initAsync=true return from init() in INITIALIZING;
+                    // wait off the EventBus thread before dispatching start().
+                    if (process.getCurrentState() == ModuleState.INITIALIZING)
+                        process.waitForState(ModuleState.INITIALIZED, 10_000);
+                    // Something else (an operator, a lane restart) may have started or stopped it.
+                    if (process.getCurrentState() != ModuleState.INITIALIZED)
+                        return;
                     logger.info("Starting occupancy process {} after its detector came up", process.getName());
                     process.start();
                 } catch (SensorHubException | RuntimeException e) {
