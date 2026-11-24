@@ -112,7 +112,7 @@ public final class SystemUpdateHostBridge {
                 }
             }
         }
-        return "3.11.12";
+        return "3.11.13";
     }
 
     public boolean isGuiUpdateEnabledByEnv() {
@@ -258,7 +258,7 @@ public final class SystemUpdateHostBridge {
             String username) throws IOException {
         assertOperationalUpgradeAllowed();
         if (targetVersion == null || !SystemUpdateReleaseChecker.isValidSemVer(targetVersion.trim())) {
-            throw new IllegalArgumentException("A valid semantic version (for example 3.11.12) is required.");
+            throw new IllegalArgumentException("A valid semantic version (for example 3.11.13) is required.");
         }
         String cleanVer = targetVersion.trim();
         if (!SystemUpdateReleaseChecker.isInPlaceCompatible311Plus(cleanVer)) {
