@@ -71,9 +71,11 @@ Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/mai
 | **Jetons de service de fédération (`oscar_fed_...`)** | Identifiants révocables à privilège minimal (`Lecteur` ou `Opérateur`) créés dans **Utilisateurs et accès (`/users`)** pour fédérer les flux HTTP et MQTT sans partager de mots de passe administrateur. |
 | **Sauvegardes USB (`/usb-backups`)** | Sauvegarde incrémentale optionnelle sans interruption (`0,0 s`) sur SSD NVMe USB 3.x externe (`NTFS` par défaut) gérée depuis **OSCAR Viewer -> Sauvegardes USB** ou `oscar usb-backup`, avec modes `continual` ou `occasional`, éjection sécurisée (`SAFE_TO_UNPLUG`) et restauration `usb-backup restore`. |
 | **Extensions enfichables (`/extensions`)** | Espace d'administration (**OSCAR Viewer -> Extensions**) permettant de téléverser des règles/modèles OCR régionaux (`plate-rules.json`, `.onnx` ou `.jar` `OcrEngine`), des fonds de carte hors ligne `.pmtiles`, des bibliothèques de spectroscopie, des certificats d'AC d'entreprise (`.pem`/`.crt`), des packs de politiques d'adjudication et des modules EML préservés lors d'`oscar upgrade`, avec retour en un clic aux valeurs fournies par défaut. |
-| **Bac à sable de formation pratique (`oscar-sandbox`, `:8444`)** | Pile Docker Compose éphémère isolée (`sudo bash oscar.sh sandbox start` / `.\oscar.bat sandbox start`) réutilisant les images OSCAR installées sur `:8444` avec micro-émulateurs locaux Rapiscan RPM (`127.0.0.1:10099`), caméra RTSP conteneur (`127.0.0.1:8554/tutorial-cam`) et `WebRelay-Quad` (`127.0.0.1:10180`), 13 ateliers guidés (`Regarder · Lire · Pratiquer · Auto-vérifier`) pour Opérateur, Superviseur et Administrateur (avec ouverture automatique de `/event-log` et `/health` selon le scénario et vue scindée `/sensorhub/admin`), `archive.enabled = false`, filigrane `TRAINING SANDBOX — NON-OPERATIONAL` et purge complète via `sandbox stop` sans toucher à PostgreSQL ni aux archives Parquet. |
+| **Bac à sable de formation pratique (`oscar-sandbox`, `:8444`)** | Pile Docker Compose éphémère isolée (`sudo bash oscar.sh sandbox start` / `.\oscar.bat sandbox start`) réutilisant les images OSCAR installées sur `:8444` avec micro-émulateurs locaux Rapiscan RPM (`127.0.0.1:10099`), sac à dos mobile RS-350 (`127.0.0.1:10110`), caméra RTSP conteneur (`127.0.0.1:8554/tutorial-cam`) et `WebRelay-Quad` (`127.0.0.1:10180`), 15 ateliers guidés (`Regarder · Lire · Pratiquer · Auto-vérifier`) pour Opérateur, Superviseur et Administrateur (avec ouverture automatique de `/event-log` et `/health` selon le scénario, création de tableaux personnalisés dans `/dashboards` et vue scindée `/sensorhub/admin`), `archive.enabled = false`, filigrane `TRAINING SANDBOX — NON-OPERATIONAL` et purge complète via `sandbox stop` sans toucher à PostgreSQL ni aux archives Parquet. |
 | **Feux et sirène du RPM (`webRelayConfig` — WebRelay-Quad)** | Intégration réseau facultative par voie (`Activer le contrôle WebRelay = false` par défaut) pour modules ControlByWeb WebRelay-Quad (`X-WR-4R3-E` / `X-410`) via HTTP/XML (`stateFull.xml` / `state.xml`) sur unité primaire et unité auxiliaire facultative à contacts secs. Prend en charge le mode **Automatique (`AUTO`)** (armement `R1=1, R2=1` pendant l'occupation, suppression des feux et de la sirène pour `Code 9999: EML Non-Threat` et en option `Code 9998: Extended Occupancy Gamma Alarm`, impulsion `R3` feu rouge gamma + sirène et/ou `R4` feu bleu neutron sur alarme réelle, retour de sécurité `0,0,0,0` à l'arrêt), **Passage direct (`PASS_THROUGH`)**, **Muet (`MUTED`)** et les commandes manuelles administrateur dans `/sensorhub/admin`, **État de santé (`/health`)** et **Vue de voie (`/lane-view`)**. |
 | **Proxy de périphérie RPM en parallèle avec une CAS (`oscar-rpm-proxy`)** | Service Docker Compose isolé facultatif (`sudo bash oscar.sh rpm-proxy` / `.\oscar.bat rpm-proxy`) pour exploiter OSCAR en parallèle d'une station centrale d'alarmes (CAS) existante. Diffuse `1–50` flux TCP Rapiscan RPM en temps réel (`< 1 ms`) en mode ports mappés (`11601..11650`) ou IP virtuelle transparente `:1600` sous Ubuntu 24.04, rejoue les trames `SG1..SG3` / `SN1..SN2`, maintient la CAS connectée lors des redémarrages/mises à niveau d'OSCAR et propage les déconnexions physiques du RPM en `<= 4,0 s`. |
+| **Tableaux personnalisés (`/dashboards`)** | Espace de travail multi-widgets optionnel accessible depuis **Tableaux personnalisés** (icône de mosaïque avec `+`) dans le menu latéral gauche sans modifier les vues canoniques d'OSCAR (`/`, `/event-log`, `/event-details`, `/lane-view`, `/health`, `/map`, `/national-view`, `/report`). Propose des **Modèles de départ** (**Mur multi-voies**, **Vue alarmes et carte**, **Vue d'ensemble statistique**, **Tableau de bord** et **Tableau vierge**), l'isolation des dispositions par opérateur et par **Vue opérationnelle**, l'import/export JSON validé (`<= 512 KiB`), un état de lecture isolé par table d'événements, la surveillance sonore globale des alarmes sur toutes les routes et des garde-fous pour 50 voies (`<= 4` widgets vidéo en direct et `<= 6` graphiques de comptage par page ; actualisation statistique automatique `>= 60 s` via compteurs de résumé `phenomenonTime` PostgreSQL avec `POOL <= 2`). |
+| **Système de détecteur mobile (`MobileDetectorSystem`)** | Module dédié dans SensorHub Admin (`http://sensorml.com/ont/swe/system/MobileDetectorLane`, formulaire `MobileDetectorConfigForm`) pour les détecteurs portables **sac à dos RS-350** (`STX..ETX` ANSI N42.42, spectres à 1 024 canaux + `WebID`) et **Kromek D5** (protocole RFC 1055 SLIP, spectres à 4 096 canaux). Active automatiquement la sortie GPS `location` tout en séparant les portiques fixes RS-350/D5 (`enableLocationOutput = false`) et en masquant les options de caméras, d'OCR véhicules, d'Occupation prolongée (`Code 9998`) et de WebRelay ; archive `location`, `alarm`, `KromekDetectorRadiometricsV1Report` et `KromekSerialRadiometricStatusReport` parmi les 26 flux `PARQUET_PRIMARY` ; maintient l'état en ligne sans GPS en intérieur (`foregroundReport` / état radiométrique D5) ; et affiche les traces GPS et info-bulles d'alarmes sur `/map` ainsi que la spectroscopie sur `/lane-view`. |
 
 ## 2. Approuver le certificat OSCAR
 
@@ -128,7 +130,7 @@ Ouvrez `https://<hote-oscar>/sensorhub/admin` et saisissez les identifiants cré
 
 ### 3.1 Langue
 
-Utilisez le sélecteur de langue (ou **Paramètres**, repéré par l’**icône d’engrenage**) en haut de l’administration ou d’OSCAR Viewer. Anglais, espagnol, français et grec sont pris en charge. Le choix est partagé entre les deux interfaces et s’applique au chargement ou rechargement. Cet onglet README ouvre automatiquement le manuel localisé, et les 31 guides vidéo hors ligne `1080p` à `30 i/s` intègrent des pistes natives de sous-titres en anglais (`en`), espagnol (`es`), français (`fr`) et grec (`el`) qui basculent automatiquement selon la langue choisie par l’opérateur.
+Utilisez le sélecteur de langue (ou **Paramètres**, repéré par l’**icône d’engrenage**) en haut de l’administration ou d’OSCAR Viewer. Anglais, espagnol, français et grec sont pris en charge. Le choix est partagé entre les deux interfaces et s’applique au chargement ou rechargement. Cet onglet README ouvre automatiquement le manuel localisé, et les 33 guides vidéo hors ligne `1080p` à `30 i/s` intègrent des pistes natives de sous-titres en anglais (`en`), espagnol (`es`), français (`fr`) et grec (`el`) qui basculent automatiquement selon la langue choisie par l’opérateur.
 
 ### 3.2 Trois actions différentes
 
@@ -504,6 +506,7 @@ Le sélecteur montre tous les types compatibles installés. La version illustré
 | Type | Utilisation |
 | --- | --- |
 | Système de voie | Parent d'un RPM et d'une ou plusieurs caméras ; choix normal pour OSCAR. |
+| Système de détecteur mobile | Détecteur portable sac à dos RS-350 ou Kromek D5 avec traces GPS sur carte, marqueurs d'alarme et spectroscopie (masque les options caméras, OCR, occupation prolongée et WebRelay des portiques fixes). |
 | Pilote Aspect | Pilote RPM direct, normalement généré dans une voie. |
 | Pilote Rapiscan | Pilote RPM direct, normalement généré dans une voie. |
 | Pilote RS-350 | Pilote direct ; la voie crée aussi le processus d'occupation. |
@@ -627,6 +630,28 @@ Consultez la documentation [Rapiscan](https://github.com/ORNL/osh-oakridge-modul
   </video>
 </details>
 
+### 7.7 Créer un Système de détecteur mobile (sac à dos `RS-350` et `Kromek D5`)
+
+Pour superviser un **sac à dos RS-350** ou un détecteur portable **Kromek D5** sans portique fixe de véhicules, cliquez avec le bouton droit sur **Capteurs -> Ajouter un nouveau module** et sélectionnez **Système de détecteur mobile** (`http://sensorml.com/ont/swe/system/MobileDetectorLane`, présenté par `MobileDetectorConfigForm`) :
+
+1. Renseignez **Nom du module** (`12` caractères ou moins, par ex. `Walker01`), **ID unique** (par ex. `backpack-01`, converti en `urn:osh:system:lane:backpack-01`) et les **Clés de vue opérationnelle** facultatives.
+2. Sous **Connexion du détecteur**, choisissez **RS-350 Backpack** (flux XML ANSI N42.42 `STX..ETX`, par ex. `198.51.100.40` port `10110`) ou **Kromek D5** (protocole RFC 1055 SLIP interrogé à 1 Hz, par ex. `198.51.100.41` port `10111`), cliquez sur **Appliquer les modifications**, démarrez le module puis cliquez sur **Enregistrer** globalement.
+3. `MobileDetectorSystem` active automatiquement la sortie GPS `location` sur le pilote enfant tout en séparant les portiques fixes RS-350/D5 (`enableLocationOutput = false`) et en masquant caméras, OCR véhicules, Occupation prolongée (`Code 9998`) et WebRelay. Les quatre flux mobiles (`location`, `alarm`, `KromekDetectorRadiometricsV1Report`, `KromekSerialRadiometricStatusReport`) sont archivés dans `PARQUET_PRIMARY`.
+4. Dans OSCAR Viewer, **Carte** (`/map`) trace le sillage GPS à `1 Hz` et les info-bulles d'alarmes géolocalisées, **État de santé** (`/health`) maintient l'état `En ligne` en intérieur sans GPS grâce aux battements `foregroundReport` ou rapports radiométriques D5 (`Intérieur / GPS indisponible`), et **Vue de voie** (`/lane-view`) affiche les spectres en temps réel à **1 024 canaux** RS-350 (`WebID`) ou **4 096 canaux** Kromek D5 ainsi que l'adjudication des alarmes. (Pour les essais sans matériel, voir `tools/mobile-detector-mocks/rs350_mock.py` sur `:10110` et `d5_mock.py` sur `:10111`.)
+
+![Suivi GPS sur carte, points d’alarme et spectroscopie du Système de détecteur mobile](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/57-mobile-detector-map-and-lane-view.png)
+
+<details class="oscar-video-guide">
+  <summary>Guide vidéo (#33) : Configurer et suivre des détecteurs de rayonnement mobiles (sac à dos RS-350 et Kromek D5)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/33-mobile-radiation-detectors.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/33-mobile-radiation-detectors.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/33-mobile-radiation-detectors.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/33-mobile-radiation-detectors.vtt" srclang="fr" label="Français" default>
+    <track kind="captions" src="/video-guides/captions/el/33-mobile-radiation-detectors.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
 ## 8. Utiliser OSCAR Viewer
 
 Ouvrez `https://<hote-oscar>/`. Le **Tableau de bord** (`/`, repéré par l’**icône de grille à quatre carreaux**) affiche l’état des voies, la table des événements et la **Carte** (`/map` ou carte intégrée, repérée par l’**icône d’épingle de carte**). Avec un plan configuré, il est l’image supérieure et l’étendue initiale correspond à ses limites. Les marqueurs OSCAR restent interactifs au-dessus ; une épingle dessinée dans la capture n’est qu’une partie de l’image.
@@ -636,6 +661,7 @@ Chaque page et outil d’OSCAR Viewer est associé à un symbole visuel distinct
 | Page ou contrôle | Route / emplacement | Symbole d’icône visuelle |
 | --- | --- | --- |
 | **Tableau de bord** | `/` | Icône de grille à quatre carreaux |
+| **Tableaux personnalisés** | `/dashboards` | Icône de mosaïque personnalisable (`+` en grille) |
 | **Événements** | `/event-log` | Icône de triangle d’avertissement (`!`) |
 | **État de santé** | `/health` | Icône de moniteur de pouls cardiaque |
 | **Carte** | `/map` | Icône d’épingle de carte |
@@ -892,6 +918,27 @@ Si la récupération automatique limitée est épuisée, le panneau affiche **La
   </video>
 </details>
 
+### 8.10 Tableaux de bord personnalisés à widgets (`/dashboards`)
+
+Sélectionnez **Tableaux personnalisés** (`/dashboards`, repéré par l’**icône de mosaïque personnalisable (`+` en grille)** dans le tiroir de navigation gauche) pour composer un espace multi-widgets optionnel tout en laissant intactes les routes canoniques d’OSCAR (`/`, `/event-log`, `/event-details`, `/lane-view`, `/health`, `/map`, `/national-view`, `/report`) :
+
+1. **Modèles de départ et édition de la grille :** Créez une page à partir de **Mur multi-voies**, **Vue alarmes et carte**, **Vue d’ensemble statistique**, **Tableau de bord** ou **Tableau vierge** (ou cliquez sur **Ajouter un tableau**), puis activez **Modifier la disposition** pour déplacer, redimensionner, configurer et verrouiller les widgets sur une grille adaptative de `12`/`8`/`4` colonnes.
+2. **Isolation par portée et portabilité JSON :** Les dispositions sont isolées par opérateur connecté et par **Vue opérationnelle** active (`(username, activeViewKey)`). Utilisez **Importer / Exporter** pour exporter des configurations JSON ou importer des fichiers JSON validés de `<= 512 KiB` (**Fusionner** ou **Remplacer tous**).
+3. **Garde-fous d’échelle pour 50 voies :** Chaque tableau limite les flux en direct à `<= 4` widgets vidéo et `<= 6` graphiques de comptage ; les widgets **Statistiques d’alarmes** imposent un rafraîchissement manuel (`0 s`) ou automatique `>= 60 s` (`300 s` par défaut) via compteurs de résumé `phenomenonTime` PostgreSQL à `POOL <= 2` ; les tables d’alarmes/événements personnalisées isolent leur état de lecture du filigrane non lu partagé sur `/` ; et la surveillance sonore globale reste active sur `/dashboards` comme sur toutes les routes.
+
+![Espace de travail et modèles de départ des Tableaux personnalisés à widgets](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/56-custom-dashboards-workspace.png)
+
+<details class="oscar-video-guide">
+  <summary>Guide vidéo (#32) : Créer, filtrer et exporter des Tableaux personnalisés à widgets (/dashboards)</summary>
+  <video controls loading="lazy" width="720" height="405" preload="none" playsinline>
+    <source src="/video-guides/videos/32-custom-widget-dashboards.mp4" type="video/mp4">
+    <track kind="captions" src="/video-guides/captions/32-custom-widget-dashboards.vtt" srclang="en" label="English">
+    <track kind="captions" src="/video-guides/captions/es/32-custom-widget-dashboards.vtt" srclang="es" label="Español">
+    <track kind="captions" src="/video-guides/captions/fr/32-custom-widget-dashboards.vtt" srclang="fr" label="Français" default>
+    <track kind="captions" src="/video-guides/captions/el/32-custom-widget-dashboards.vtt" srclang="el" label="Ελληνικά">
+  </video>
+</details>
+
 ## 9. Statistiques nationales
 
 ![Statistiques nationales](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/30-national-statistics.png)
@@ -1001,17 +1048,18 @@ Une fois les portails distants connectés via des jetons `oscar_fed_...`, **Év�
 Le profil standard 3.11.15 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet en mode
 `PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Les flux de configuration statiques
 (`sensorLocation`, `adjudicationCodes`, `siteInfo`) restent dans PostgreSQL `ONLY oscar.obs`, tandis que
-les 22 sorties opérationnelles et probantes autorisées (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
+les 26 sorties opérationnelles, probantes et mobiles autorisées (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
 `setupGamma`, `setupNeutron`, `speed`, `backgroundReport`, `foregroundReport`, `status`, `emlContextual`,
 `emlScanContextual`, `emlAnalysis`, `dailyFile`, `connectionStatus`, `occupancyStatus`, `tamper`,
-`occupancy`, `adjudication`, `report`, `siteStatistics`, `nationalSummary`, `vehicleOcr`) sont écrites dans des
+`occupancy`, `adjudication`, `report`, `siteStatistics`, `nationalSummary`, `vehicleOcr`, `location`, `alarm`,
+`KromekDetectorRadiometricsV1Report`, `KromekSerialRadiometricStatusReport`) sont écrites dans des
 partitions de transit de 30 minutes (`osg_*`). Cinq minutes après la clôture de chaque fenêtre de
 30 minutes, des tâches d'arrière-plan exportent la partition vers des fichiers Apache Parquet catalogués
 et compressés en ZSTD (`archive/datasets/observations/`), alimentent `oscar_obs_latest`, les compteurs de
 résumé de `oscar_archive_schema` et `oscar_event_locator`, vérifient la parité exacte des lignes/empreintes
 et suppriment la partition de transit afin de garder PostgreSQL compact (et au démarrage, OSCAR réconcilie
 les routes existantes et exporte rétroactivement vers Parquet toute ligne historique non archivée de la
-table parente pour ces 22 sorties). Les décisions et ré-adjudications portant sur des occupations archivées
+table parente pour ces 26 sorties). Les décisions et ré-adjudications portant sur des occupations archivées
 sont enregistrées dans `oscar_obs_overlay` + `oscar_obs_latest` sans réécrire Parquet, et chaque heure
 OSCAR purge les commandes opérationnelles transitoires dans `cmd_commands`/`cmd_status` de plus de
 24 heures (tout en conservant définitivement les commandes d'audit `%adjudicate%`). (Les sites configurés
@@ -1227,14 +1275,14 @@ Sur les sites équipés de scanners rayons X NII (`UFF 2.0` ou `UFF 3.0.0`), un 
 
 ### Parcours guidé de révision (`:443`) et bac à sable éphémère de formation pratique (`:8444`)
 
-Tout utilisateur connecté peut cliquer à tout moment sur **Parcours guidé** (**icône de toque universitaire** dans la barre supérieure, ou dans **Aide (`?`)**, **icône de point d’interrogation cerclé (`?`)**) sur la console opérationnelle (`:443`) pour ouvrir le **Mode révision en lecture seule** — parcourant les **13 ateliers par rôle**, les **31 guides vidéo hors ligne `1080p` à `30 i/s`** (dotés de sous-titres natifs en anglais `en`, espagnol `es`, français `fr` et grec `el` basculant automatiquement selon la langue sélectionnée), les captures annotées et les boutons en 1 clic **Mettre l’icône en évidence** pour cibler **État de santé** (icône de moniteur de pouls cardiaque) ou toute autre page ou commande à l’écran sans injecter de fausses alarmes ni modifier les données réelles.
+Tout utilisateur connecté peut cliquer à tout moment sur **Parcours guidé** (**icône de toque universitaire** dans la barre supérieure, ou dans **Aide (`?`)**, **icône de point d’interrogation cerclé (`?`)**) sur la console opérationnelle (`:443`) pour ouvrir le **Mode révision en lecture seule** — parcourant les **15 ateliers par rôle**, les **33 guides vidéo hors ligne `1080p` à `30 i/s`** (dotés de sous-titres natifs en anglais `en`, espagnol `es`, français `fr` et grec `el` basculant automatiquement selon la langue sélectionnée), les captures annotées et les boutons en 1 clic **Mettre l’icône en évidence** pour cibler **État de santé** (icône de moniteur de pouls cardiaque) ou toute autre page ou commande à l’écran sans injecter de fausses alarmes ni modifier les données réelles.
 
 Pour s’entraîner à injecter des alarmes simulées, téléverser des échantillons ou configurer des voies sans toucher aux capteurs réels, lancez le **Bac à sable de formation pratique (`oscar-sandbox`)** isolé sur le port HTTPS `8444` (en 1 clic depuis **Parcours guidé** / **Aide (`?`)** lorsque `sudo bash oscar.sh sandbox enable-ui-bridge` est activé sous Ubuntu, ou via CLI ; le démarrage idempotent `start` est ouvert à tout utilisateur connecté, tandis que `stop`/`reset` anticipé est réservé aux **Administrateurs**) :
 
 - **Ubuntu Server 24.04 :** `sudo bash oscar.sh sandbox start` (arrêt et purge avec `sudo bash oscar.sh sandbox stop`).
 - **Windows 11 + WSL 2 :** `.\oscar.bat sandbox start` (arrêt et purge avec `.\oscar.bat sandbox stop`).
 
-Le bac à sable réutilise les images OSCAR installées avec des volumes jetables (`oscar_sandbox_state`, `oscar_sandbox_pg`), une copie unidirectionnelle en lecture seule des identifiants/Passkeys (connectez-vous sur `https://<hôte>:8444` avec vos identifiants habituels sans écriture vers `:443`), un contrôle préalable de `>= 3.5 GiB` de RAM libre, `archive.enabled = false` (`0` fichier `.parquet`), une extinction automatique après `120 min` (2 heures) avec compte à rebours en direct purgeant toutes les données d’exercice à l’expiration (`< 2 s`), le filigrane `TRAINING SANDBOX — NON-OPERATIONAL` sur chaque export et des micro-émulateurs locaux Rapiscan (`127.0.0.1:10099`), caméra RTSP (`127.0.0.1:8554/tutorial-cam`) et `WebRelay-Quad` (`127.0.0.1:10180`) à travers **13 ateliers guidés** (ouvrant automatiquement `/event-log` avec la colonne **`Code d'adjudication`** visible pour `Code 9999`, `Code 9998` et les passages normaux, `/health` pour les défauts et l'atelier `3.5` WebRelay, et offrant la **vue scindée `/sensorhub/admin`**) ainsi qu'une attestation PDF d'achèvement (à télécharger avant la fin du minuteur).
+Le bac à sable réutilise les images OSCAR installées avec des volumes jetables (`oscar_sandbox_state`, `oscar_sandbox_pg`), une copie unidirectionnelle en lecture seule des identifiants/Passkeys (connectez-vous sur `https://<hôte>:8444` avec vos identifiants habituels sans écriture vers `:443`), un contrôle préalable de `>= 3.5 GiB` de RAM libre, `archive.enabled = false` (`0` fichier `.parquet`), une extinction automatique après `120 min` (2 heures) avec compte à rebours en direct purgeant toutes les données d’exercice à l’expiration (`< 2 s`), le filigrane `TRAINING SANDBOX — NON-OPERATIONAL` sur chaque export et des micro-émulateurs locaux Rapiscan (`127.0.0.1:10099`), sac à dos mobile RS-350 (`127.0.0.1:10110`), caméra RTSP (`127.0.0.1:8554/tutorial-cam`) et `WebRelay-Quad` (`127.0.0.1:10180`) à travers **15 ateliers guidés** (dont l’atelier Opérateur `1.6` de création et d’exportation d’un mur multi-widgets dans `/dashboards` et l’atelier Administrateur `3.6` de configuration et de suivi d’un détecteur mobile RS-350 bouclé sur `127.0.0.1:10110`, ouvrant automatiquement `/event-log` avec la colonne **`Code d'adjudication`** visible pour `Code 9999`, `Code 9998` et les passages normaux, `/health` pour les défauts et l'atelier `3.5` WebRelay, et offrant la **vue scindée `/sensorhub/admin`**) ainsi qu'une attestation PDF d'achèvement (à télécharger avant la fin du minuteur).
 
 ![Coach de formation et atelier opérateur dans le bac à sable isolé](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/51-training-sandbox-coach-and-operator-lab.png)
 
@@ -1342,6 +1390,8 @@ Pour l'assistance technique, exportez une archive de diagnostic expurgée (`.zip
 - [Guide des extensions d’exécution et cartes hors ligne](https://github.com/ORNL/oscar/blob/main/docs/PLUGGABLE_EXTENSIONS_GUIDE.md)
 - [Guide d’inspection non intrusive du fret (OMD UFF 2.0 et 3.0)](https://github.com/ORNL/oscar/blob/main/docs/CARGO_UFF_INTEGRATION.md)
 - [Guide du bac à sable de formation pratique et de l’académie guidée](https://github.com/ORNL/oscar/blob/main/docs/TRAINING_SANDBOX_GUIDE.md)
+- [Guide des vues opérationnelles et des tableaux personnalisés à widgets (`/dashboards`)](https://github.com/ORNL/oscar/blob/main/docs/OPERATIONAL_VIEWS.md)
+- [Guide des pilotes de détecteurs de rayonnement et du Système de détecteur mobile](https://github.com/ORNL/oscar/blob/main/docs/RADIATION_DETECTOR_DRIVER_GUIDE.md)
 - [Guide des feux et de la sirène physiques du RPM par voie (`WebRelay-Quad`)](https://github.com/ORNL/oscar/blob/main/docs/LANE_WEBRELAY_GUIDE.md)
 - [Guide du proxy de périphérie RPM Rapiscan en parallèle d’une CAS (`oscar-rpm-proxy`)](https://github.com/ORNL/oscar/blob/main/docs/RPM_EDGE_PROXY_GUIDE.md)
 - [Guide du système de traduction](https://github.com/ORNL/oscar/blob/main/docs/TRANSLATION_SYSTEM.md)

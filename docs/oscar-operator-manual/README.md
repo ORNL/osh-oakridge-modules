@@ -7,7 +7,7 @@ The localized OSCAR 3.11.15 administrator and operator manuals are loaded direct
 - [Français](../../services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_fr.md)
 - [Ελληνικά](../../services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_el.md)
 
-The `images` directory contains the shared, ordered training screenshots. Keep image names stable because all localized manuals reference their upstream raw GitHub URLs so the pictures also render inside the administration README panel. Companion bite-sized `1080p` `30 fps` workflow screen recordings are maintained in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides); all 31 bundled offline video guides ship with native English (`en`), Spanish (`es`), French (`fr`), and Greek (`el`) subtitle tracks that switch automatically with the operator's selected UI language.
+The `images` directory contains all **57** shared, ordered training screenshots (`images/01-certificate-warning.png` through `images/57-mobile-detector-map-and-lane-view.png`, including `images/56-custom-dashboards-workspace.png` for Opt-In Custom Widget Dashboards on `/dashboards` and `images/57-mobile-detector-map-and-lane-view.png` for Mobile Detector System live GPS map tracking and `/lane-view` spectroscopy). Keep image names stable because all localized manuals reference their upstream raw GitHub URLs so the pictures also render inside the administration README panel. Companion bite-sized `1080p` `30 fps` workflow screen recordings are maintained in [`ORNL/oscar-video-guides`](https://github.com/ORNL/oscar-video-guides); all **33** bundled offline video guides ship with native English (`en`), Spanish (`es`), French (`fr`), and Greek (`el`) subtitle tracks that switch automatically with the operator's selected UI language.
 
 ## Console navigation and toolbar icon symbols
 
@@ -16,6 +16,7 @@ When introducing an OSCAR Viewer page or toolbar/lane action in the manuals, alw
 | Page or control | Route / location | Visual icon symbol |
 | --- | --- | --- |
 | **Dashboard** | `/` | Four-tile grid icon |
+| **Custom Dashboards** | `/dashboards` | Dashboard-customize mosaic (`+` tile-grid) icon |
 | **Events** | `/event-log` | Warning-triangle (`!`) icon |
 | **Status of Health** | `/health` | Heart-pulse monitor icon |
 | **Map** | `/map` | Map-pin icon |
