@@ -37,11 +37,15 @@ import org.sensorhub.api.sensor.SensorConfig;
 import org.sensorhub.impl.comm.TCPCommProviderConfig;
 import org.sensorhub.impl.sensor.ffmpeg.FFMPEGSensor;
 import org.sensorhub.impl.sensor.ffmpeg.config.FFMPEGConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.vast.util.Asserts;
 
 import java.util.Date;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Bidirectional endpoint synchronizer keeping parent {@link LaneConfig#laneOptionsConfig}
@@ -81,24 +85,36 @@ public final class LaneEndpointSync {
             String streamPath
     ) {}
 
+    private static final Logger LOG = LoggerFactory.getLogger(LaneEndpointSync.class);
+    private static final Pattern LEGACY_PORT_STREAM_PATH = Pattern.compile("^:(\\d+)(/.*)$");
+    private static final Pattern BROKEN_SLASH_PORT_STREAM_PATH = Pattern.compile("^/:(\\d+)(/.*)$");
+
     private LaneEndpointSync() {
     }
 
     /**
      * Normalizes accidental full RTSP URLs pasted into {@code remoteHost} (for example
-     * {@code rtsp://admin:secret@192.168.1.50:554/stream1}) into structured {@link FFMpegConfig}
-     * fields so {@code rtsp://rtsp://...} is never produced.
+     * {@code rtsp://admin:secret@198.51.100.50:554/stream1}) and legacy v3.5-style
+     * {@code remoteHost} + {@code ":port/path"} {@code streamPath} pairs into structured
+     * {@link FFMpegConfig} fields so {@code rtsp://rtsp://...} and {@code rtsp://host/:port/path}
+     * are never produced.
      */
     public static void sanitizeSimpleCameraConfig(FFMpegConfig simpleConfig) {
+        sanitizeSimpleCameraConfigWithStatus(simpleConfig);
+    }
+
+    static boolean sanitizeSimpleCameraConfigWithStatus(FFMpegConfig simpleConfig) {
         if (simpleConfig == null || simpleConfig.remoteHost == null) {
-            return;
+            return false;
         }
+        boolean mutated = false;
         String trimmed = simpleConfig.remoteHost.trim();
         int schemeIdx = trimmed.indexOf("://");
         if (schemeIdx > 0) {
             ParsedRtspEndpoint parsed = parseRtspConnectionString(trimmed);
             if (parsed != null && parsed.remoteHost() != null && !parsed.remoteHost().isBlank()) {
                 simpleConfig.remoteHost = parsed.remoteHost();
+                mutated = true;
                 if ((simpleConfig.username == null || simpleConfig.username.isBlank())
                         && parsed.username() != null && !parsed.username().isBlank()) {
                     simpleConfig.username = parsed.username();
@@ -119,7 +135,74 @@ public final class LaneEndpointSync {
             while (trimmed.endsWith("/")) {
                 trimmed = trimmed.substring(0, trimmed.length() - 1);
             }
+            if (!Objects.equals(simpleConfig.remoteHost, trimmed)) {
+                mutated = true;
+            }
             simpleConfig.remoteHost = trimmed;
+        }
+
+        if (simpleConfig instanceof CustomCameraConfig custom
+                && !simpleConfig.remoteHost.isEmpty()
+                && !remoteHostHasExplicitPort(simpleConfig.remoteHost)
+                && custom.streamPath != null) {
+            String trimmedPath = custom.streamPath.trim();
+            Matcher legacyMatcher = LEGACY_PORT_STREAM_PATH.matcher(trimmedPath);
+            if (legacyMatcher.matches()) {
+                String portStr = legacyMatcher.group(1);
+                int port = parseValidPortOrNegative(portStr);
+                if (port > 0) {
+                    String originalHost = simpleConfig.remoteHost;
+                    String originalPath = custom.streamPath;
+                    String normalizedHost = formatHostWithPort(originalHost, port);
+                    String normalizedPath = LaneSystem.normalizeStreamPath(legacyMatcher.group(2), "/");
+                    simpleConfig.remoteHost = normalizedHost;
+                    custom.streamPath = normalizedPath;
+                    mutated = true;
+                    LOG.warn("Normalized legacy v3.5 camera configuration (remoteHost='{}', streamPath='{}') to remoteHost='{}', streamPath='{}'",
+                            originalHost, originalPath, normalizedHost, normalizedPath);
+                }
+            }
+        }
+        return mutated;
+    }
+
+    static boolean remoteHostHasExplicitPort(String host) {
+        if (host == null || host.isEmpty()) {
+            return false;
+        }
+        if (host.startsWith("[")) {
+            int closeBracket = host.indexOf(']');
+            return closeBracket > 0
+                    && closeBracket + 1 < host.length()
+                    && host.charAt(closeBracket + 1) == ':';
+        }
+        int firstColon = host.indexOf(':');
+        if (firstColon < 0) {
+            return false;
+        }
+        // Multiple colons without brackets indicate a bare IPv6 address literal without port
+        return firstColon == host.lastIndexOf(':');
+    }
+
+    private static String formatHostWithPort(String host, int port) {
+        if (host.startsWith("[")) {
+            return host + ":" + port;
+        }
+        if (host.indexOf(':') >= 0 && host.indexOf(':') != host.lastIndexOf(':')) {
+            return "[" + host + "]:" + port;
+        }
+        return host + ":" + port;
+    }
+
+    private static int parseValidPortOrNegative(String rawPort) {
+        if (rawPort == null || rawPort.isEmpty() || rawPort.length() > 5) {
+            return -1;
+        }
+        try {
+            int port = Integer.parseInt(rawPort);
+            return (port >= 1 && port <= 65_535) ? port : -1;
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 
@@ -239,8 +322,23 @@ public final class LaneEndpointSync {
             }
         }
 
+        String cleanedHostPort = hostPort.trim();
+        if (!cleanedHostPort.isEmpty() && !remoteHostHasExplicitPort(cleanedHostPort)) {
+            Matcher brokenMatcher = BROKEN_SLASH_PORT_STREAM_PATH.matcher(rawPath);
+            if (brokenMatcher.matches()) {
+                int port = parseValidPortOrNegative(brokenMatcher.group(1));
+                if (port > 0) {
+                    String repairedHost = formatHostWithPort(cleanedHostPort, port);
+                    String repairedPath = LaneSystem.normalizeStreamPath(brokenMatcher.group(2), "/");
+                    LOG.warn("Normalized legacy v3.5 RTSP URL '{}' to host='{}', path='{}'",
+                            trimmed, repairedHost, repairedPath);
+                    cleanedHostPort = repairedHost;
+                    rawPath = repairedPath;
+                }
+            }
+        }
         String normalizedPath = LaneSystem.normalizeStreamPath(rawPath, "/");
-        return new ParsedRtspEndpoint(scheme, username, password, hostPort.trim(), normalizedPath);
+        return new ParsedRtspEndpoint(scheme, username, password, cleanedHostPort, normalizedPath);
     }
 
     public static FFMpegConfig applyChildToSimpleCameraConfig(
@@ -305,7 +403,7 @@ public final class LaneEndpointSync {
             int videoIndex,
             FFMpegConfig simpleConfig,
             FFMPEGConfig existingChildConfig) {
-        sanitizeSimpleCameraConfig(simpleConfig);
+        boolean normalizedSimple = sanitizeSimpleCameraConfigWithStatus(simpleConfig);
         if (existingChildConfig == null) {
             FFMPEGConfig created = createInitialFFmpegChildConfig(laneConfig, simpleConfig, videoIndex);
             return new CameraSyncResult(SyncAction.REGISTER_NEW_CHILD, simpleConfig, created, true);
@@ -322,12 +420,12 @@ public final class LaneEndpointSync {
         String lastSynced = normalizeCameraToken(simpleConfig.lastSyncedEndpoint(), simpleConfig.bufferSize);
 
         if (Objects.equals(parentToken, childToken)) {
-            boolean stamped = !Objects.equals(simpleConfig.lastSyncedEndpoint(), parentToken);
+            boolean stamped = normalizedSimple || !Objects.equals(simpleConfig.lastSyncedEndpoint(), parentToken);
             simpleConfig.markSyncedEndpoint(parentToken);
             return new CameraSyncResult(SyncAction.NO_OP, simpleConfig, existingChildConfig, stamped);
         }
 
-        boolean parentWins = chooseParentWins(
+        boolean parentWins = normalizedSimple || chooseParentWins(
                 lastSynced,
                 parentToken,
                 childToken,

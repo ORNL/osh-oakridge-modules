@@ -201,4 +201,66 @@ public class LaneEndpointSyncTest {
         assertEquals("10.3.3.30", rs350Child.commSettings.protocol.remoteHost);
         assertTrue(Modifier.isPublic(LaneEndpointSync.class.getModifiers()));
     }
+
+    @Test
+    public void normalizesLegacyV35PortPrefixedCameraStreamPathsAcrossIpv4HostnameAndIpv6() {
+        LaneConfig lane = new LaneConfig();
+        lane.uniqueID = "lane-legacy-cam";
+        lane.name = "LegacyCam";
+
+        // 1. IPv4 host without port + ":9001/cam1" streamPath -> "198.51.100.10:9001" + "/cam1"
+        CustomCameraConfig ipv4Cam = new CustomCameraConfig();
+        ipv4Cam.remoteHost = "198.51.100.10";
+        ipv4Cam.streamPath = ":9001/cam1";
+        ipv4Cam.username = "oper";
+        ipv4Cam.password = "secret";
+
+        var ipv4Result = LaneEndpointSync.reconcileCamera(lane, 0, ipv4Cam, null);
+        assertEquals("198.51.100.10:9001", ipv4Cam.remoteHost);
+        assertEquals("/cam1", ipv4Cam.streamPath);
+        assertEquals("rtsp://oper:secret@198.51.100.10:9001/cam1",
+                ipv4Result.childConfig().connection.connectionString);
+
+        // 2. Hostname without port + ":8554/h264Preview_01_main" -> "camera.example.test:8554" + "/h264Preview_01_main"
+        CustomCameraConfig hostCam = new CustomCameraConfig();
+        hostCam.remoteHost = "camera.example.test";
+        hostCam.streamPath = ":8554/h264Preview_01_main";
+        var hostResult = LaneEndpointSync.reconcileCamera(lane, 1, hostCam, null);
+        assertEquals("camera.example.test:8554", hostCam.remoteHost);
+        assertEquals("/h264Preview_01_main", hostCam.streamPath);
+        assertEquals("rtsp://camera.example.test:8554/h264Preview_01_main",
+                hostResult.childConfig().connection.connectionString);
+
+        // 3. Bracketed IPv6 without port + ":9002/live/0" -> "[2001:db8::10]:9002" + "/live/0"
+        CustomCameraConfig ipv6Cam = new CustomCameraConfig();
+        ipv6Cam.remoteHost = "[2001:db8::10]";
+        ipv6Cam.streamPath = ":9002/live/0";
+        var ipv6Result = LaneEndpointSync.reconcileCamera(lane, 2, ipv6Cam, null);
+        assertEquals("[2001:db8::10]:9002", ipv6Cam.remoteHost);
+        assertEquals("/live/0", ipv6Cam.streamPath);
+        assertEquals("rtsp://[2001:db8::10]:9002/live/0",
+                ipv6Result.childConfig().connection.connectionString);
+
+        // 4. Host that ALREADY carries an explicit port is never double-ported
+        CustomCameraConfig explicitPortCam = new CustomCameraConfig();
+        explicitPortCam.remoteHost = "198.51.100.20:554";
+        explicitPortCam.streamPath = ":9001/cam1";
+        LaneEndpointSync.sanitizeSimpleCameraConfig(explicitPortCam);
+        assertEquals("198.51.100.20:554", explicitPortCam.remoteHost);
+        assertEquals(":9001/cam1", explicitPortCam.streamPath);
+
+        // 5. Upgraded config with already-persisted broken child URL "rtsp://198.51.100.10/:9001/cam1" heals child too
+        CustomCameraConfig upgradedParent = new CustomCameraConfig();
+        upgradedParent.remoteHost = "198.51.100.10";
+        upgradedParent.streamPath = ":9001/cam1";
+        upgradedParent.markSyncedEndpoint("rtsp://198.51.100.10/:9001/cam1|0");
+
+        FFMPEGConfig brokenChild = new FFMPEGConfig();
+        brokenChild.connection.connectionString = "rtsp://198.51.100.10/:9001/cam1";
+        var healed = LaneEndpointSync.reconcileCamera(lane, 3, upgradedParent, brokenChild);
+        assertEquals(LaneEndpointSync.SyncAction.UPDATE_CHILD, healed.action());
+        assertEquals("198.51.100.10:9001", upgradedParent.remoteHost);
+        assertEquals("/cam1", upgradedParent.streamPath);
+        assertEquals("rtsp://198.51.100.10:9001/cam1", brokenChild.connection.connectionString);
+    }
 }

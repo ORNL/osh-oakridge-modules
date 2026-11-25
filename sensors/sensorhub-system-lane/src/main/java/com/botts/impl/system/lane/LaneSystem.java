@@ -1002,49 +1002,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     }
     
     private FFMPEGConfig createFFmpegConfig(FFMpegConfig ffmpegConfig, int videoIndex) {
-        String defaultAxis = AxisCameraConfig.CodecEndpoint.H264.getPath();
-
-        Asserts.checkNotNull(ffmpegConfig.remoteHost);
-
-        // This is the actual ffmpeg sensor config
-        StringBuilder endpoint = new StringBuilder("rtsp://"); // All streams should be over rtsp
-
-        // Add username and password if provided
-        if (ffmpegConfig.username != null && !ffmpegConfig.username.isBlank()) {
-            endpoint.append(ffmpegConfig.username);
-            endpoint.append(":");
-            endpoint.append(ffmpegConfig.password);
-            endpoint.append("@");
-        }
-        endpoint.append(ffmpegConfig.remoteHost);
-
-        FFMPEGConfig config = new FFMPEGConfig();
-
-        String path = defaultAxis;
-
-        if(ffmpegConfig instanceof AxisCameraConfig axisVideoConfig){
-             path = axisVideoConfig.streamPath.getPath();
-        }else if (ffmpegConfig instanceof SonyCameraConfig sonyVideoConfig){
-             path = sonyVideoConfig.streamPath;
-        }else if(ffmpegConfig instanceof CustomCameraConfig customVideoConfig){
-             path = !customVideoConfig.streamPath.isEmpty() ? customVideoConfig.streamPath : defaultAxis;
-        }
-
-        endpoint.append(normalizeStreamPath(path, defaultAxis));
-
-        config.connection.useTCP = true;
-        config.connection.fps = 30;
-        config.name = getConfiguration().name + " - Camera " + videoIndex;
-        config.serialNumber = "lane:" + getConfiguration().uniqueID + ":" + videoIndex;
-        config.autoStart = true;
-        config.connection.connectionString = endpoint.toString();
-        config.moduleClass = FFMPEGSensor.class.getCanonicalName();
-        config.connectionConfig.connectTimeout = 4500;
-        config.connectionConfig.reconnectAttempts = -1;
-        config.output.useHLS = true;
-        config.output.useVideoFrames = false;
-        config.connection.bufferSize = ffmpegConfig.bufferSize;
-        return config;
+        return LaneEndpointSync.createInitialFFmpegChildConfig(getConfiguration(), ffmpegConfig, videoIndex);
     }
 
     static String normalizeStreamPath(String path, String fallbackPath) {
