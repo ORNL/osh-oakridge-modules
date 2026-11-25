@@ -1,5 +1,6 @@
 package com.botts.impl.system.lane.helpers.occupancy;
 
+import com.botts.impl.process.d5.occupancy.D5OccupancyProcessModule;
 import com.botts.impl.process.rs350.occupancy.Rs350OccupancyProcessModule;
 import com.botts.impl.sensor.aspect.AspectSensor;
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
@@ -86,6 +87,7 @@ public class OccupancyWrapper {
     private long occupancyEpoch = 0;
     private ScheduledFuture<?> extendedOccupancyFaultTimer = null;
     private volatile int extendedOccupancyThresholdMinutes = LaneConfig.DEFAULT_EXTENDED_OCCUPANCY_THRESHOLD_MINUTES;
+    private volatile boolean extendedOccupancyMonitoringEnabled = true;
 
     public OccupancyWrapper(ISensorHub hub) {
         this(hub, (OccupancyStatusOutput) null);
@@ -458,6 +460,8 @@ public class OccupancyWrapper {
             return new RapiscanStateManager();
         } else if (sensor instanceof Rs350OccupancyProcessModule){
             return new Rs350StateManager();
+        } else if (sensor instanceof D5OccupancyProcessModule){
+            return new Rs350StateManager();
         }
         return null;
     }
@@ -524,8 +528,21 @@ public class OccupancyWrapper {
                 extendedOccupancyThresholdMinutes));
     }
 
+    public void setExtendedOccupancyMonitoringEnabled(boolean enabled) {
+        this.extendedOccupancyMonitoringEnabled = enabled;
+        if (!enabled) {
+            synchronized (lifecycleLock) {
+                cancelExtendedOccupancyFaultTimerLocked();
+            }
+        }
+    }
+
+    public boolean isExtendedOccupancyMonitoringEnabled() {
+        return extendedOccupancyMonitoringEnabled;
+    }
+
     private boolean hasExceededExtendedOccupancyThreshold(Instant start, Instant sampleTime) {
-        if (start == null || sampleTime == null)
+        if (!extendedOccupancyMonitoringEnabled || start == null || sampleTime == null)
             return false;
         return !sampleTime.isBefore(start.plus(getExtendedOccupancyThreshold()));
     }
@@ -539,7 +556,7 @@ public class OccupancyWrapper {
 
     private void scheduleExtendedOccupancyFaultTimerLocked(long expectedOccupancyEpoch, Instant activeStart, Instant observationTime) {
         cancelExtendedOccupancyFaultTimerLocked();
-        if (!started || activeStart == null)
+        if (!started || activeStart == null || !extendedOccupancyMonitoringEnabled)
             return;
         Duration threshold = getExtendedOccupancyThreshold();
         Duration elapsed = observationTime != null && observationTime.isAfter(activeStart)
@@ -629,7 +646,7 @@ public class OccupancyWrapper {
     }
 
     void evaluateCompletedOccupancy(Occupancy occupancy) {
-        if (occupancy == null)
+        if (occupancy == null || !extendedOccupancyMonitoringEnabled)
             return;
 
         double thresholdSeconds = getExtendedOccupancyThreshold().toSeconds();

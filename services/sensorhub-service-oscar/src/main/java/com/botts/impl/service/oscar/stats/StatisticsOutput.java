@@ -108,12 +108,15 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
         };
 
         for (String property : observedProperties) {
-            Set<BigId> dataStreamIds = database.getDataStreamStore()
+            Set<BigId> dataStreamIds;
+            try (var keys = database.getDataStreamStore()
                     .selectKeys(new DataStreamFilter.Builder()
                             .withObservedProperties(property)
-                            .build())
-                    .map(ResourceKey::getInternalID)
-                    .collect(Collectors.toSet());
+                            .build())) {
+                dataStreamIds = keys
+                        .map(ResourceKey::getInternalID)
+                        .collect(Collectors.toSet());
+            }
 
             observedPropertyToDataStreamIds.put(property, dataStreamIds);
         }
@@ -441,9 +444,11 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
         long numTampers = countObservations(database, tamperCQL, timeRange, laneUIDs, RADHelper.DEF_TAMPER);
         long numFaults = countObservations(database, faultCQL, timeRange, laneUIDs, RADHelper.DEF_GAMMA, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM, RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT) + numTampers;
 
-        // RS350 alarm counts from raw AlarmOutput (uses alarmCategoryCode observed property)
-        long numRS350GammaAlarms = countObservations(database, rs350GammaAlarmCQL, timeRange, laneUIDs, DEF_ALARM_CATEGORY);
-        long numRS350NeutronAlarms = countObservations(database, rs350NeutronAlarmCQL, timeRange, laneUIDs, DEF_ALARM_CATEGORY);
+        // Standalone RS350 alarm counts from raw AlarmOutput only; exclude OccupancyExtended
+        // datastreams (which also carry DEF_ALARM_CATEGORY) so they are never double-counted.
+        Set<BigId> rawAlarmStreamIds = selectNonOccupancyAlarmCategoryStreamIds(database, laneUIDs);
+        long numRS350GammaAlarms = countObservationsOnStreams(database, rs350GammaAlarmCQL, timeRange, rawAlarmStreamIds);
+        long numRS350NeutronAlarms = countObservationsOnStreams(database, rs350NeutronAlarmCQL, timeRange, rawAlarmStreamIds);
         numGammaAlarms += numRS350GammaAlarms;
         numNeutronAlarms += numRS350NeutronAlarms;
         numOccupancies += numRS350GammaAlarms + numRS350NeutronAlarms;
@@ -458,6 +463,64 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
                 .numNeutronFaults(numNeutronFaults)
                 .numTampers(numTampers)
                 .build();
+    }
+
+    private Set<BigId> selectNonOccupancyAlarmCategoryStreamIds(
+            IObsSystemDatabase database,
+            Collection<String> laneUIDs) {
+        var dsFilterBuilder = new DataStreamFilter.Builder()
+                .withObservedProperties(DEF_ALARM_CATEGORY);
+
+        if (laneUIDs != null && !laneUIDs.isEmpty()) {
+            dsFilterBuilder.withSystems()
+                    .withUniqueIDs(laneUIDs.toArray(String[]::new))
+                    .includeMembers(true)
+                    .done();
+        }
+
+        Set<BigId> rawAlarmStreams = new java.util.HashSet<>();
+        try (var entries = database.getDataStreamStore().selectEntries(dsFilterBuilder.build())) {
+            entries.forEach(entry -> {
+                DataComponent struct = entry.getValue() != null ? entry.getValue().getRecordStructure() : null;
+                if (!isOccupancyDataStream(struct)) {
+                    rawAlarmStreams.add(entry.getKey().getInternalID());
+                }
+            });
+        }
+        return rawAlarmStreams;
+    }
+
+    private static boolean isOccupancyDataStream(DataComponent struct) {
+        if (struct == null) {
+            return false;
+        }
+        if (RADHelper.DEF_OCCUPANCY.equals(struct.getDefinition())) {
+            return true;
+        }
+        try {
+            return struct.getComponent("occupancyCount") != null
+                    && struct.getComponent("gammaAlarm") != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private long countObservationsOnStreams(
+            IObsSystemDatabase database,
+            String cqlValue,
+            Range<Instant> timeRange,
+            Set<BigId> streamIds) {
+        if (streamIds == null || streamIds.isEmpty()) {
+            return 0L;
+        }
+        var obsBuilder = new ObsFilter.Builder().withDataStreams(streamIds);
+        if (timeRange != null) {
+            obsBuilder.withPhenomenonTime().withRange(timeRange).done();
+        }
+        if (cqlValue != null && !cqlValue.isBlank()) {
+            obsBuilder.withCQLFilter(cqlValue);
+        }
+        return database.getObservationStore().countMatchingEntries(obsBuilder.build());
     }
 
     /**

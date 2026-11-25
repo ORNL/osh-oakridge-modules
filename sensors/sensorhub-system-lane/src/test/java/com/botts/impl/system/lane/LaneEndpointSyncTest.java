@@ -1,17 +1,22 @@
 package com.botts.impl.system.lane;
 
 import com.botts.impl.sensor.aspect.AspectConfig;
+import com.botts.impl.sensor.kromek.d5.D5Config;
+import com.botts.impl.sensor.kromek.d5.D5Sensor;
 import com.botts.impl.sensor.rapiscan.RapiscanConfig;
 import com.botts.impl.sensor.rs350.RS350Config;
 import com.botts.impl.system.lane.config.AspectRPMConfig;
 import com.botts.impl.system.lane.config.AxisCameraConfig;
 import com.botts.impl.system.lane.config.ConnectionConfig;
 import com.botts.impl.system.lane.config.CustomCameraConfig;
+import com.botts.impl.system.lane.config.D5RPMConfig;
 import com.botts.impl.system.lane.config.LaneConfig;
 import com.botts.impl.system.lane.config.LaneOptionsConfig;
 import com.botts.impl.system.lane.config.RS350RPMConfig;
 import com.botts.impl.system.lane.config.RapiscanRPMConfig;
+import com.botts.impl.system.lane.mobile.config.MobileDetectorConfig;
 import org.junit.Test;
+import org.sensorhub.impl.comm.TCPCommProviderConfig;
 import org.sensorhub.impl.module.ModuleConfigJsonFile;
 import org.sensorhub.impl.sensor.SensorSystemConfig;
 import org.sensorhub.impl.sensor.ffmpeg.config.FFMPEGConfig;
@@ -262,5 +267,64 @@ public class LaneEndpointSyncTest {
         assertEquals("198.51.100.10:9001", upgradedParent.remoteHost);
         assertEquals("/cam1", upgradedParent.streamPath);
         assertEquals("rtsp://198.51.100.10:9001/cam1", brokenChild.connection.connectionString);
+    }
+
+    @Test
+    public void reconcilesD5MobileDetectorEndpointBothWaysAndIsolatesPortalLocationOutput() {
+        // Fixed portal RS-350 lane keeps enableLocationOutput = false
+        LaneConfig fixedPortal = new LaneConfig();
+        fixedPortal.uniqueID = "portal-rs350";
+        fixedPortal.name = "Portal RS350";
+        RS350RPMConfig fixedRs350 = new RS350RPMConfig();
+        fixedRs350.remoteHost = "198.51.100.40";
+        fixedRs350.remotePort = 1627;
+        RS350Config fixedRs350Child = (RS350Config) LaneEndpointSync.reconcileRpm(fixedPortal, fixedRs350, null).childConfig();
+        assertFalse("Fixed portal RS-350 must NOT enable GPS location output", fixedRs350Child.outputs.enableLocationOutput);
+
+        // Mobile RS-350 backpack enables enableLocationOutput = true
+        MobileDetectorConfig mobileBackpack = new MobileDetectorConfig();
+        mobileBackpack.uniqueID = "backpack-01";
+        mobileBackpack.name = "Backpack 01";
+        RS350RPMConfig mobileRs350 = new RS350RPMConfig();
+        mobileRs350.remoteHost = "198.51.100.41";
+        mobileRs350.remotePort = 1627;
+        RS350Config mobileRs350Child = (RS350Config) LaneEndpointSync.reconcileRpm(mobileBackpack, mobileRs350, null).childConfig();
+        assertTrue("Mobile RS-350 backpack must enable GPS location output", mobileRs350Child.outputs.enableLocationOutput);
+
+        // Mobile Kromek D5 walker bidirectional endpoint reconciliation + enableLocationOutput = true
+        MobileDetectorConfig mobileWalker = new MobileDetectorConfig();
+        mobileWalker.uniqueID = "walker-02";
+        mobileWalker.name = "Walker 02";
+
+        D5RPMConfig d5 = new D5RPMConfig();
+        d5.remoteHost = "198.51.100.50";
+        d5.remotePort = 10111;
+
+        var init = LaneEndpointSync.reconcileRpm(mobileWalker, d5, null);
+        assertEquals(LaneEndpointSync.SyncAction.REGISTER_NEW_CHILD, init.action());
+        D5Config child = (D5Config) init.childConfig();
+        assertEquals(D5Sensor.class.getCanonicalName(), child.moduleClass);
+        assertEquals("walker-02", child.serialNumber);
+        assertEquals("Walker 02 - RPM", child.name);
+        assertTrue("Mobile D5 walker must enable GPS location output", child.outputs.enableLocationOutput);
+        TCPCommProviderConfig comm = (TCPCommProviderConfig) child.commSettings;
+        assertEquals("198.51.100.50", comm.protocol.remoteHost);
+        assertEquals(10111, comm.protocol.remotePort);
+        assertEquals(10, comm.connection.reconnectAttempts);
+
+        var unchanged = LaneEndpointSync.reconcileRpm(mobileWalker, d5, child);
+        assertEquals(LaneEndpointSync.SyncAction.NO_OP, unchanged.action());
+
+        d5.remoteHost = "198.51.100.51:10112";
+        var parentEdit = LaneEndpointSync.reconcileRpm(mobileWalker, d5, child);
+        assertEquals(LaneEndpointSync.SyncAction.UPDATE_CHILD, parentEdit.action());
+        assertEquals("198.51.100.51", comm.protocol.remoteHost);
+        assertEquals(10112, comm.protocol.remotePort);
+
+        comm.protocol.remoteHost = "198.51.100.52";
+        var childEdit = LaneEndpointSync.reconcileRpm(mobileWalker, d5, child);
+        assertEquals(LaneEndpointSync.SyncAction.UPDATE_PARENT, childEdit.action());
+        assertTrue(childEdit.simpleConfig() instanceof D5RPMConfig);
+        assertEquals("198.51.100.52", childEdit.simpleConfig().remoteHost);
     }
 }

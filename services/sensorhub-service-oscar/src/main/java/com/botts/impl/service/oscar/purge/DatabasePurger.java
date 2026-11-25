@@ -82,10 +82,14 @@ public class DatabasePurger {
     private static final String OUTPUT_EML_ANALYSIS = "emlAnalysis";
     private static final String CLEAR_OCCUPANCY_ALARM_STATE = "Clear";
 
-    // RS350 data stream output names
+    // RS350 & mobile/D5 high-volume data stream output names
     private static final String OUTPUT_BACKGROUND_REPORT = "backgroundReport";
     private static final String OUTPUT_FOREGROUND_REPORT = "foregroundReport";
     private static final String OUTPUT_STATUS = "status";
+    private static final String OUTPUT_LOCATION = "location";
+    private static final String OUTPUT_ALARM = "alarm";
+    private static final String OUTPUT_D5_RADIOMETRICS = "KromekDetectorRadiometricsV1Report";
+    private static final String OUTPUT_D5_RADIOMETRIC_STATUS = "KromekSerialRadiometricStatusReport";
 
     public DatabasePurger(IObsSystemDatabase database, IBucketStore bucketStore, int occupancyBufferSeconds) {
         this(database, bucketStore, occupancyBufferSeconds, null, ZoneId.of("UTC"), Clock.systemUTC(),
@@ -604,10 +608,11 @@ public class DatabasePurger {
             .withOutputNames(outputNames)
             .build();
 
-        return database.getDataStreamStore()
-            .selectKeys(filter)
-            .map(ResourceKey::getInternalID)
-            .collect(Collectors.toSet());
+        try (var keys = database.getDataStreamStore().selectKeys(filter)) {
+            return keys
+                .map(ResourceKey::getInternalID)
+                .collect(Collectors.toSet());
+        }
     }
 
     private Map<BigId, IDataStreamInfo> getDataStreamEntriesByOutputNames(String... outputNames) {
@@ -616,13 +621,13 @@ public class DatabasePurger {
             .build();
 
         Map<BigId, IDataStreamInfo> result = new HashMap<>();
-        database.getDataStreamStore()
-            .selectEntries(filter)
-            .forEach(entry -> {
+        try (var entries = database.getDataStreamStore().selectEntries(filter)) {
+            entries.forEach(entry -> {
                 DataStreamKey key = entry.getKey();
                 IDataStreamInfo value = entry.getValue();
                 result.put(key.getInternalID(), value);
             });
+        }
         return result;
     }
 
@@ -1172,7 +1177,11 @@ public class DatabasePurger {
             OUTPUT_STATUS,
             OUTPUT_EML_CONTEXTUAL,
             OUTPUT_EML_SCAN_CONTEXTUAL,
-            OUTPUT_EML_ANALYSIS
+            OUTPUT_EML_ANALYSIS,
+            OUTPUT_LOCATION,
+            OUTPUT_ALARM,
+            OUTPUT_D5_RADIOMETRICS,
+            OUTPUT_D5_RADIOMETRIC_STATUS
         );
 
         if (streamsByLane.isEmpty()) {

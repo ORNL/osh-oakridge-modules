@@ -31,6 +31,7 @@ import org.sensorhub.impl.sensor.tstar.TSTARConfig;
 import org.sensorhub.impl.security.session.BasicSessionConfig;
 import org.sensorhub.impl.utils.rad.dailyfile.DailyFileJournalClientConfig;
 import org.sensorhub.ui.AdminI18n;
+import com.botts.impl.process.d5.occupancy.D5OccupancyProcessConfig;
 import com.botts.impl.process.occupancy.OccupancyProcessConfig;
 import com.botts.impl.process.rs350.occupancy.Rs350OccupancyProcessConfig;
 import com.botts.impl.sensor.aspect.AspectConfig;
@@ -56,6 +57,7 @@ import com.botts.impl.sensor.wapirz1.WAPIRZ1Config;
 import com.botts.impl.sensor.zse18.ZSE18Config;
 import com.botts.impl.sensor.zw100.ZW100Config;
 import com.botts.impl.system.lane.config.LaneConfig;
+import com.botts.impl.system.lane.mobile.config.MobileDetectorConfig;
 import com.botts.impl.service.oscar.retention.StoragePressureRetentionConfig;
 import com.botts.impl.service.oscar.siteinfo.SiteDiagramConfig;
 import com.botts.impl.service.oscar.video.VideoRetentionConfig;
@@ -96,6 +98,8 @@ public class OakridgeSensorI18nTest
         "/org/sensorhub/impl/utils/rad/dailyfile/i18n/ConfigMessages",
         "/com/botts/impl/process/occupancy/i18n/ConfigMessages",
         "/com/botts/impl/process/rs350/occupancy/i18n/ConfigMessages",
+        "/com/botts/impl/process/d5/occupancy/i18n/ConfigMessages",
+        "/com/botts/impl/system/lane/mobile/config/i18n/ConfigMessages",
         "/com/botts/ui/oscar/forms/i18n/ConfigMessages");
 
     private static final List<Class<?>> MODULE_CONFIGS = Arrays.asList(
@@ -121,6 +125,8 @@ public class OakridgeSensorI18nTest
         BasicSessionConfig.class,
         OccupancyProcessConfig.class,
         Rs350OccupancyProcessConfig.class,
+        D5OccupancyProcessConfig.class,
+        MobileDetectorConfig.class,
         ZwaveCommServiceConfig.class);
 
     private static final List<Class<?>> README_CONFIGS = Arrays.asList(
@@ -137,6 +143,7 @@ public class OakridgeSensorI18nTest
         RS350Config.class,
         TSTARConfig.class,
         LaneConfig.class,
+        MobileDetectorConfig.class,
         DS100Config.class,
         WADWAZ1Config.class,
         WAPIRZ1Config.class,
@@ -147,6 +154,7 @@ public class OakridgeSensorI18nTest
         BasicSessionConfig.class,
         OccupancyProcessConfig.class,
         Rs350OccupancyProcessConfig.class,
+        D5OccupancyProcessConfig.class,
         ZwaveCommServiceConfig.class);
 
     private static final List<Class<?>> FORM_CONFIGS = Arrays.asList(
@@ -198,6 +206,8 @@ public class OakridgeSensorI18nTest
         BasicSessionConfig.class,
         OccupancyProcessConfig.class,
         Rs350OccupancyProcessConfig.class,
+        D5OccupancyProcessConfig.class,
+        MobileDetectorConfig.class,
         ZwaveCommServiceConfig.class,
         ZwaveCommServiceConfig.NodeList.class);
 

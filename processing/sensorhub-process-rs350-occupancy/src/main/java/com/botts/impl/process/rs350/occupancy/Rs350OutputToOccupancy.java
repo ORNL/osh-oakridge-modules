@@ -66,17 +66,19 @@ public class Rs350OutputToOccupancy extends ExecutableProcessImpl implements ISe
     public static final String ALARM_NAME = "alarm";
     public static final String BACKGROUND_NAME = "backgroundReport";
     public static final String FOREGROUND_NAME = "foregroundReport";
+    public static final String LOCATION_NAME = "location";
+    private static final long LOCATION_FIX_MAX_AGE_MS = 120_000L;
     private static final String SAMPLING_TIME_NAME = radHelper.createPrecisionTimeStamp().getName();
     private static final String DURATION_NAME = radHelper.createDuration().getName();
     private static final String ALARM_CAT_NAME = radHelper.createAlarmCatCode().getName();
     private static final String GAMMA_GROSS_COUNT_NAME = radHelper.createGammaGrossCount().getName();
     private static final String NEUTRON_GROSS_COUNT_NAME = radHelper.createNeutronGrossCount().getName();
 
-    // All RS350 outputs. Some arrive less regularly, so we don't want to connect as input and block while waiting
-    public static final List<String> ALL_OUTPUTS = List.of(ALARM_NAME, BACKGROUND_NAME, FOREGROUND_NAME);
-    // Subset of RS350 outputs we want to connect to process input
+    // All RS350 outputs. Some arrive less regularly, so do not connect all as blocking SML inputs.
+    public static final List<String> ALL_OUTPUTS = List.of(ALARM_NAME, BACKGROUND_NAME, FOREGROUND_NAME, LOCATION_NAME);
+    // Subset of RS350 outputs connected to SML process input
     public static final List<String> RS350_OUTPUTS = List.of(FOREGROUND_NAME);
-    public final List<Flow.Subscription> subscriptions = new ArrayList<>(ALL_OUTPUTS.size());
+    public final List<Flow.Subscription> subscriptions = new java.util.concurrent.CopyOnWriteArrayList<>();
     // Use the extended builder so the trailing alarmCategoryCode field is populated.
     OccupancyExtended.Builder occupancyBuilder;
     private IOPropertyList allInputs = new IOPropertyList();
@@ -85,6 +87,9 @@ public class Rs350OutputToOccupancy extends ExecutableProcessImpl implements ISe
     private double latestNeutronBackground = 0;
     private int maxGammaCount = 0;
     private int maxNeutronCount = 0;
+    private double lastFixLat = 0.0;
+    private double lastFixLon = 0.0;
+    private long lastFixTimeMillis = 0L;
 
     private OccupancyExtended occupancy;
 
@@ -214,27 +219,32 @@ public class Rs350OutputToOccupancy extends ExecutableProcessImpl implements ISe
         var db = hub.getDatabaseRegistry().getFederatedDatabase();
 
         for (String dataStreamName : dataStreamNames) {
-            // Get output data from input system UID
-            var occupancyDataStreamQuery = db.getDataStreamStore().select(new DataStreamFilter.Builder()
+            List<org.sensorhub.api.data.IDataStreamInfo> occupancyDataStreams;
+            try (var occupancyDataStreamQuery = db.getDataStreamStore().select(new DataStreamFilter.Builder()
                     .withSystems(sysFilter)
                     .withCurrentVersion()
                     .withOutputNames(dataStreamName)
                     .withLimit(1)
-                    .build());
-
-            var occupancyDataStreams = occupancyDataStreamQuery.collect(Collectors.toList());
+                    .build())) {
+                occupancyDataStreams = occupancyDataStreamQuery.collect(Collectors.toList());
+            }
             if (!occupancyDataStreams.isEmpty()) {
                 if (RS350_OUTPUTS.contains(dataStreamName))
                     inputData.add(dataStreamName, occupancyDataStreams.get(0).getRecordStructure().copy());
 
-                // Separate list of all data we actually care about
                 allInputs.add(dataStreamName, occupancyDataStreams.get(0).getRecordStructure().copy());
 
                 hub.getEventBus().newSubscription(ObsEvent.class)
                         .withTopicID(EventUtils.getDataStreamDataTopicID(inputSystemID, dataStreamName))
                         .subscribe(this::processDataEvent)
                         .thenAccept(subscription -> {
-                            subscriptions.add(subscription);
+                            synchronized (lock) {
+                                if (disposed) {
+                                    subscription.cancel();
+                                    return;
+                                }
+                                subscriptions.add(subscription);
+                            }
                             subscription.request(Long.MAX_VALUE);
                             logger.info("Started subscription to " + dataStreamName);
                         });
@@ -271,6 +281,7 @@ public class Rs350OutputToOccupancy extends ExecutableProcessImpl implements ISe
                 processForeground(obsResults);
                 publishLiveState = true;
             }
+            case LOCATION_NAME -> processLocation(obsResults);
             default -> logger.debug("(Default) Received data event for unknown output: {}", outputName);
         }
 
@@ -284,14 +295,36 @@ public class Rs350OutputToOccupancy extends ExecutableProcessImpl implements ISe
         }
     }
 
+    private void processLocation(DataBlock... eventRecords) {
+        synchronized (lock) {
+            for (DataBlock eventRecord : eventRecords) {
+                if (eventRecord == null || eventRecord.getAtomCount() < 3) {
+                    continue;
+                }
+                double lat = eventRecord.getDoubleValue(1);
+                double lon = eventRecord.getDoubleValue(2);
+                if (!Double.isFinite(lat) || !Double.isFinite(lon) || (lat == 0.0 && lon == 0.0)) {
+                    continue;
+                }
+                lastFixLat = lat;
+                lastFixLon = lon;
+                lastFixTimeMillis = System.currentTimeMillis();
+            }
+        }
+    }
+
     private synchronized void processAlarm(DataBlock... eventRecords) {
         synchronized (lock) {
-            if (doPublishOccupancy || System.currentTimeMillis() - lastOccupancyPublish < OCCUPANCY_INTERVAL_MS) {
+            long now = System.currentTimeMillis();
+            if (doPublishOccupancy || now - lastOccupancyPublish < OCCUPANCY_INTERVAL_MS) {
                 return;
             }
-            lastAlarmTime = System.currentTimeMillis();
+            lastAlarmTime = now;
 
-            DataComponent alarmComponent = ((DataComponent) allInputs.get(ALARM_NAME)).copy();
+            DataComponent alarmComponent = (DataComponent) allInputs.get(ALARM_NAME);
+            if (alarmComponent == null || eventRecords.length == 0) {
+                return;
+            }
 
             var eventRecord = eventRecords[0];
             alarmComponent.setData(eventRecord);
@@ -300,25 +333,19 @@ public class Rs350OutputToOccupancy extends ExecutableProcessImpl implements ISe
             double endTime = startTime + ((Quantity) alarmComponent.getComponent(DURATION_NAME)).getValue();
             alarmDuration = endTime - startTime;
 
-
-            // Preserve the raw alarm category string reported by the RS350 driver
-            // (e.g. "Gamma", "Neutron", "Gamma-Neutron", "Alpha", ...) unchanged.
-            // The UI prefers this field over the gamma/neutron booleans.
             String alarmCat = alarmComponent.getComponent(ALARM_CAT_NAME).getData().getStringValue();
             boolean hasGammaAlarm = alarmCat.toLowerCase().contains(RadAlarmCategoryCodeSimpleType.GAMMA.value().toLowerCase());
             boolean hasNeutronAlarm = alarmCat.toLowerCase().contains(RadAlarmCategoryCodeSimpleType.NEUTRON.value().toLowerCase());
             if (!hasGammaAlarm && !hasNeutronAlarm) {
-                // Fallback for unknown/combined categories so that
-                // gamma/neutron boolean consumers still see an alarm.
                 hasGammaAlarm = true;
                 hasNeutronAlarm = true;
             }
 
             occupancyBuilder = new OccupancyExtended.Builder();
-            // alarmCategory() must be called first because Occupancy.Builder setters
-            // return the parent builder type (see the note on
-            // OccupancyExtended.Builder.alarmCategory).
             occupancyBuilder.alarmCategory(alarmCat);
+            if (lastFixTimeMillis > 0 && now - lastFixTimeMillis < LOCATION_FIX_MAX_AGE_MS) {
+                occupancyBuilder.location(lastFixLat, lastFixLon);
+            }
             occupancyBuilder.startTime(startTime).endTime(endTime).samplingTime(startTime);
             occupancyBuilder.gammaAlarm(hasGammaAlarm).neutronAlarm(hasNeutronAlarm);
             occupancyBuilder.maxGammaCount(maxGammaCount).maxNeutronCount(maxNeutronCount);
@@ -333,7 +360,10 @@ public class Rs350OutputToOccupancy extends ExecutableProcessImpl implements ISe
     // Concerned w/ max gamma and neutron counts
     private void processForeground(DataBlock... eventRecords) {
         synchronized (lock) {
-            DataComponent foregroundComponent = ((DataComponent) allInputs.get(FOREGROUND_NAME)).copy();
+            DataComponent foregroundComponent = (DataComponent) allInputs.get(FOREGROUND_NAME);
+            if (foregroundComponent == null) {
+                return;
+            }
 
             for (DataBlock eventRecord : eventRecords) {
                 foregroundComponent.setData(eventRecord);
@@ -358,7 +388,10 @@ public class Rs350OutputToOccupancy extends ExecutableProcessImpl implements ISe
     // Concerned with background neutron counts
     private void processBackground(DataBlock... eventRecords) {
         synchronized (lock) {
-            DataComponent backgroundComponent = ((DataComponent) allInputs.get(BACKGROUND_NAME)).copy();
+            DataComponent backgroundComponent = (DataComponent) allInputs.get(BACKGROUND_NAME);
+            if (backgroundComponent == null) {
+                return;
+            }
 
             for (DataBlock eventRecord : eventRecords) {
                 backgroundComponent.setData(eventRecord);

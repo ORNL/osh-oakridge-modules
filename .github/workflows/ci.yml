@@ -64,6 +64,7 @@ jobs:
             :sensorhub-service-bucket:test \
             :sensorhub-service-dailyfile-journal:test \
             :sensorhub-system-lane:test \
+            :sensorhub-process-d5-occupancy:test \
             :sensorhub-security-basic-session:test
 
           ./gradlew --no-parallel \
@@ -71,7 +72,8 @@ jobs:
             --tests org.sensorhub.impl.utils.rad.cambio.CambioTempDirectoryTest \
             --tests org.sensorhub.impl.utils.rad.dailyfile.DailyFileAppenderTest \
             --tests org.sensorhub.impl.utils.rad.eml.EmlArchiveAndRuntimeTest \
-            --tests org.sensorhub.impl.utils.rad.output.OccupancyOutputConcurrencyTest
+            --tests org.sensorhub.impl.utils.rad.output.OccupancyOutputConcurrencyTest \
+            --tests org.sensorhub.impl.utils.rad.model.OccupancyExtendedSchemaCompatibilityTest
 
           ./gradlew --no-parallel \
             :sensorhub-driver-aspect:test \

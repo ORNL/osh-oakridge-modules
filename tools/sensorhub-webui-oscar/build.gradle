@@ -41,6 +41,7 @@ dependencies {
     testImplementation project(':sensorhub-service-dailyfile-journal')
     testImplementation project(':sensorhub-process-occupancy')
     testImplementation project(':sensorhub-process-rs350-occupancy')
+    testImplementation project(':sensorhub-process-d5-occupancy')
     implementation('junit:junit:4.13.1')
 }
 

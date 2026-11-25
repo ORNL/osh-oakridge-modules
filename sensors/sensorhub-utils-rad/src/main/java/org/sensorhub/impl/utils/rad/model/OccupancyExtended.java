@@ -1,16 +1,17 @@
 /*******************************************************************************
  * Extension of {@link Occupancy} that carries an additional raw alarm-category
- * string reported by the RS350 driver. Lives in sensorhub-utils-rad (rather than
- * the rs350-occupancy processing module) so that downstream consumers in
+ * string and optional GPS fix coordinates reported by spectroscopic/mobile RPM
+ * drivers. Lives in sensorhub-utils-rad so that downstream consumers in
  * sensorhub-utils-rad and sensorhub-system-lane (WebIdAnalyzer, WebIdHelper,
  * AdjudicationControl) can read/write extended-schema occupancy datablocks
- * without taking a dependency on the RS350 processing module.
+ * without taking a dependency on any specific occupancy processing module.
  ******************************************************************************/
 package org.sensorhub.impl.utils.rad.model;
 
 import net.opengis.swe.v20.DataBlock;
 import net.opengis.swe.v20.DataComponent;
 import net.opengis.swe.v20.DataRecord;
+import net.opengis.swe.v20.Quantity;
 import net.opengis.swe.v20.Text;
 import org.sensorhub.impl.sensor.SensorSystem;
 import org.sensorhub.impl.utils.rad.RADHelper;
@@ -23,25 +24,49 @@ import java.util.List;
 /**
  * Occupancy variant that carries the raw alarm category string reported by the
  * driver (e.g. "Gamma", "Neutron", "Gamma-Neutron", "Alpha", "Isotope", or any
- * vendor-specific value). The base {@link OccupancyOutput} record schema is
- * extended with one trailing text field {@code alarmCategoryCode}; see
- * {@link #createExtendedRecordStructure()}.
+ * vendor-specific value) and optional WGS84 latitude/longitude coordinates for
+ * mobile detector deployments.
  *
- * <p>The class also exposes <strong>schema-aware</strong> static helpers
- * ({@link #readOccupancy(DataComponent, DataBlock)} and
- * {@link #writeOccupancy(DataComponent, Occupancy)}) so that callers which
- * receive a generic {@link Occupancy} datablock can dispatch to the correct
- * (base vs. extended) serialization based on the datastream record description,
- * without having to know which RPM produced the observation.
+ * <p>Schema compatibility across upgrades:
+ * <ul>
+ *   <li>Base {@link Occupancy}: 16 fields (no {@code alarmCategoryCode}).</li>
+ *   <li>Extended v1 (legacy RS-350): 17 fields (adds {@code alarmCategoryCode},
+ *       no {@code latitude}/{@code longitude}).</li>
+ *   <li>Extended v2 (current RS-350 &amp; Kromek D5): 19 fields (adds
+ *       {@code alarmCategoryCode}, {@code latitude}, and {@code longitude}).</li>
+ * </ul>
+ *
+ * <p>{@link #readOccupancy(DataComponent, DataBlock)} and
+ * {@link #writeOccupancy(DataComponent, Occupancy)} inspect the datastream's
+ * persisted {@link DataComponent} record structure so pre-upgrade v1 streams
+ * continue receiving 17-atom datablocks while v2 streams receive 19-atom
+ * datablocks.
  */
 public class OccupancyExtended extends Occupancy {
 
     public static final String ALARM_CATEGORY_FIELD_NAME = "alarmCategoryCode";
+    public static final String LATITUDE_FIELD_NAME = "latitude";
+    public static final String LONGITUDE_FIELD_NAME = "longitude";
 
     protected String alarmCategory = "";
+    protected double latitude = 0.0;
+    protected double longitude = 0.0;
 
     public String getAlarmCategory() {
         return alarmCategory;
+    }
+
+    public double getLatitude() {
+        return latitude;
+    }
+
+    public double getLongitude() {
+        return longitude;
+    }
+
+    public boolean hasLocation() {
+        return Double.isFinite(latitude) && Double.isFinite(longitude)
+                && (latitude != 0.0 || longitude != 0.0);
     }
 
     public static class Builder extends Occupancy.Builder {
@@ -56,27 +81,29 @@ public class OccupancyExtended extends Occupancy {
         }
 
         /**
-         * NOTE: returns the parent {@link Occupancy.Builder} so the rest of the
-         * fluent chain can continue calling base setters. The underlying
-         * {@code instance} is an {@link OccupancyExtended}, so chaining back to
-         * {@code build()} still returns the extended instance. Call
-         * {@code alarmCategory(...)} first in the chain, or cast to reuse it.
+         * Sets the raw alarm category string. Returns {@link Builder} (which is
+         * also an {@link Occupancy.Builder}) so callers can chain location and
+         * base occupancy setters fluently.
          */
-        public Occupancy.Builder alarmCategory(String alarmCategory) {
+        public Builder alarmCategory(String alarmCategory) {
             ((OccupancyExtended) instance).alarmCategory = alarmCategory == null ? "" : alarmCategory;
+            return this;
+        }
+
+        public Builder location(double latitude, double longitude) {
+            ((OccupancyExtended) instance).latitude = Double.isFinite(latitude) ? latitude : 0.0;
+            ((OccupancyExtended) instance).longitude = Double.isFinite(longitude) ? longitude : 0.0;
             return this;
         }
     }
 
     /**
-     * Build a DataRecord that matches the base {@link OccupancyOutput} record
-     * structure plus a trailing {@code alarmCategoryCode} text field. Used as
-     * the output record schema for the RS350 occupancy process so that
-     * observations persisted to the obs store carry the extra field.
+     * Build the legacy v1 extended DataRecord (base {@link OccupancyOutput}
+     * fields plus {@code alarmCategoryCode}, without {@code latitude} or
+     * {@code longitude}). Used when serializing observations back into a
+     * pre-upgrade v1 extended datastream.
      */
-    public static DataRecord createExtendedRecordStructure() {
-        // Reuse base OccupancyOutput to build the common fields exactly once so
-        // they stay in sync with Rapiscan/Aspect schemas.
+    public static DataRecord createLegacyV1ExtendedRecordStructure() {
         @SuppressWarnings({"rawtypes", "unchecked"})
         OccupancyOutput base = new OccupancyOutput(new SensorSystem());
         DataRecord baseRecord = (DataRecord) base.getRecordDescription();
@@ -90,17 +117,11 @@ public class OccupancyExtended extends Occupancy {
                 .description(baseRecord.getDescription())
                 .build();
 
-        // Copy all existing fields from the base record (cloned so they can
-        // be reparented safely).
         for (int i = 0; i < baseRecord.getComponentCount(); i++) {
             DataComponent child = baseRecord.getComponent(i).copy();
             extended.addComponent(child.getName(), child);
         }
 
-        // Append the raw alarm category code as a plain text field. A Text
-        // field (not a constrained Category) is intentional: the RS350 can
-        // report arbitrary / combined categories (e.g. "Gamma-Neutron") that
-        // don't fit RadAlarmCategoryCodeSimpleType's enum.
         Text alarmCategoryCode = radHelper.createText()
                 .name(ALARM_CATEGORY_FIELD_NAME)
                 .label("Alarm Category Code")
@@ -113,67 +134,104 @@ public class OccupancyExtended extends Occupancy {
     }
 
     /**
-     * Returns true if the supplied datastream record description carries the
-     * extended {@code alarmCategoryCode} field — i.e. the datablock matching
-     * this record should be serialized via {@link #fromOccupancy(OccupancyExtended)}
-     * rather than {@link Occupancy#fromOccupancy(Occupancy)}.
+     * Build the v2 extended DataRecord matching base {@link OccupancyOutput}
+     * plus {@code alarmCategoryCode}, {@code latitude}, and {@code longitude}.
      */
-    public static boolean isExtendedSchema(DataComponent recordStructure) {
-        if (recordStructure == null)
-            return false;
+    public static DataRecord createExtendedRecordStructure() {
+        DataRecord extended = createLegacyV1ExtendedRecordStructure();
+        RADHelper radHelper = new RADHelper();
+
+        Quantity latField = radHelper.createQuantity()
+                .name(LATITUDE_FIELD_NAME)
+                .label("Latitude")
+                .definition(RADHelper.getRadUri("AlarmLatitude"))
+                .description("Latitude of detector at occupancy alarm time (0 if unavailable)")
+                .uom("deg")
+                .build();
+        extended.addComponent(LATITUDE_FIELD_NAME, latField);
+
+        Quantity lonField = radHelper.createQuantity()
+                .name(LONGITUDE_FIELD_NAME)
+                .label("Longitude")
+                .definition(RADHelper.getRadUri("AlarmLongitude"))
+                .description("Longitude of detector at occupancy alarm time (0 if unavailable)")
+                .uom("deg")
+                .build();
+        extended.addComponent(LONGITUDE_FIELD_NAME, lonField);
+
+        return extended;
+    }
+
+    private static DataComponent safeGetComponent(DataComponent recordStructure, String fieldName) {
+        if (recordStructure == null || fieldName == null) {
+            return null;
+        }
         try {
-            return recordStructure.getComponent(ALARM_CATEGORY_FIELD_NAME) != null;
+            return recordStructure.getComponent(fieldName);
         } catch (Exception e) {
-            return false;
+            return null;
         }
     }
 
     /**
+     * Returns true if the supplied datastream record description carries the
+     * extended {@code alarmCategoryCode} field (either v1 17-field or v2 19-field).
+     */
+    public static boolean isExtendedSchema(DataComponent recordStructure) {
+        return safeGetComponent(recordStructure, ALARM_CATEGORY_FIELD_NAME) != null;
+    }
+
+    /**
+     * Returns true if the supplied datastream record description carries the v2
+     * {@code latitude} and {@code longitude} fields.
+     */
+    public static boolean hasLocationFields(DataComponent recordStructure) {
+        return safeGetComponent(recordStructure, LATITUDE_FIELD_NAME) != null
+                && safeGetComponent(recordStructure, LONGITUDE_FIELD_NAME) != null;
+    }
+
+    /**
      * Schema-aware reader: returns an {@link OccupancyExtended} when the record
-     * has the extended {@code alarmCategoryCode} field, otherwise a plain
-     * {@link Occupancy}. Callers that mutate and write back should pair this
-     * with {@link #writeOccupancy(DataComponent, Occupancy)}.
+     * has the extended {@code alarmCategoryCode} field (handling both 17-field
+     * v1 and 19-field v2 schemas cleanly), otherwise a plain {@link Occupancy}.
      */
     public static Occupancy readOccupancy(DataComponent recordStructure, DataBlock dataBlock) {
         if (isExtendedSchema(recordStructure)) {
-            return toOccupancy(dataBlock);
+            return toOccupancy(recordStructure, dataBlock);
         }
         return Occupancy.toOccupancy(dataBlock);
     }
 
     /**
-     * Schema-aware writer: serializes to a datablock matching the supplied
-     * record structure. Used by callers that mutate occupancy data and need to
-     * write it back to the obs store without having to know whether the
-     * underlying datastream is base or extended.
-     *
-     * <p>If the record carries the extended field but the supplied
-     * {@link Occupancy} is not an {@link OccupancyExtended} (e.g. it was
-     * deserialized as a base occupancy), the alarm category is preserved as
-     * an empty string so the produced datablock still matches the schema.
+     * Schema-aware writer: serializes to a datablock whose atom layout matches
+     * the supplied record structure (16-field base, 17-field legacy v1 extended,
+     * or 19-field v2 extended).
      */
     public static DataBlock writeOccupancy(DataComponent recordStructure, Occupancy occupancy) {
         if (isExtendedSchema(recordStructure)) {
             OccupancyExtended extended;
-            if (occupancy instanceof OccupancyExtended) {
-                extended = (OccupancyExtended) occupancy;
+            if (occupancy instanceof OccupancyExtended ext) {
+                extended = ext;
             } else {
                 extended = wrapAsExtended(occupancy, "");
             }
-            return fromOccupancy(extended);
+            return fromOccupancy(extended, hasLocationFields(recordStructure));
         }
         return Occupancy.fromOccupancy(occupancy);
     }
 
     /**
      * Wrap a plain {@link Occupancy} as an {@link OccupancyExtended} with the
-     * given alarm category, copying all base fields. Useful when a caller
-     * already has a base Occupancy in hand but needs to push it through the
-     * extended writer (e.g. AdjudicationControl mutating a base-read instance).
+     * given alarm category, copying all base fields (and preserving coordinates
+     * if {@code occupancy} is already an {@link OccupancyExtended}).
      */
     public static OccupancyExtended wrapAsExtended(Occupancy occupancy, String alarmCategory) {
-        return (OccupancyExtended) new OccupancyExtended.Builder()
-                .alarmCategory(alarmCategory)
+        OccupancyExtended.Builder builder = new OccupancyExtended.Builder()
+                .alarmCategory(alarmCategory);
+        if (occupancy instanceof OccupancyExtended ext) {
+            builder.location(ext.getLatitude(), ext.getLongitude());
+        }
+        return (OccupancyExtended) builder
                 .samplingTime(occupancy.getSamplingTime())
                 .occupancyCount(occupancy.getOccupancyCount())
                 .startTime(occupancy.getStartTime())
@@ -190,13 +248,22 @@ public class OccupancyExtended extends Occupancy {
     }
 
     /**
-     * Serialize an {@link OccupancyExtended} to a DataBlock matching the
-     * schema returned by {@link #createExtendedRecordStructure()}. Mirrors
-     * {@link Occupancy#fromOccupancy(Occupancy)} field-for-field then appends
-     * the trailing alarm category code atom.
+     * Serialize an {@link OccupancyExtended} to a v2 (19-field) DataBlock
+     * matching {@link #createExtendedRecordStructure()}.
      */
     public static DataBlock fromOccupancy(OccupancyExtended occupancy) {
-        DataComponent resultStructure = createExtendedRecordStructure();
+        return fromOccupancy(occupancy, true);
+    }
+
+    /**
+     * Serialize an {@link OccupancyExtended} to either the v2 19-field schema
+     * ({@code includeLocation == true}) or the legacy v1 17-field schema
+     * ({@code includeLocation == false}).
+     */
+    public static DataBlock fromOccupancy(OccupancyExtended occupancy, boolean includeLocation) {
+        DataComponent resultStructure = includeLocation
+                ? createExtendedRecordStructure()
+                : createLegacyV1ExtendedRecordStructure();
         DataBlock dataBlock = resultStructure.createDataBlock();
         dataBlock.updateAtomCount();
         resultStructure.setData(dataBlock);
@@ -246,21 +313,32 @@ public class OccupancyExtended extends Occupancy {
             }
         }
 
-        // Trailing alarm category code
         String alarmCat = occupancy.getAlarmCategory();
-        dataBlock.setStringValue(index, alarmCat == null ? "" : alarmCat);
+        dataBlock.setStringValue(index++, alarmCat == null ? "" : alarmCat);
+
+        if (includeLocation) {
+            dataBlock.setDoubleValue(index++, occupancy.getLatitude());
+            dataBlock.setDoubleValue(index, occupancy.getLongitude());
+        }
 
         return dataBlock;
     }
 
     /**
      * Deserialize an {@link OccupancyExtended} from a DataBlock produced by
-     * {@link #fromOccupancy(OccupancyExtended)} or an equivalent extended
-     * occupancy record. Missing trailing fields (older records that don't
-     * carry the alarm category) are tolerated.
+     * either v1 (17-field) or v2 (19-field) extended occupancy schemas.
      */
     public static OccupancyExtended toOccupancy(DataBlock dataBlock) {
+        return toOccupancy(null, dataBlock);
+    }
+
+    /**
+     * Schema-aware extended deserializer. Avoids reading beyond {@code atomCount}
+     * on legacy 17-field datablocks even when dynamic arrays contain entries.
+     */
+    public static OccupancyExtended toOccupancy(DataComponent recordStructure, DataBlock dataBlock) {
         int index = 0;
+        int atomCount = dataBlock.getAtomCount();
 
         var samplingTime = dataBlock.getDoubleValue(index++);
         var occupancyCount = dataBlock.getIntValue(index++);
@@ -273,29 +351,41 @@ public class OccupancyExtended extends Occupancy {
         var maxNeutronCount = dataBlock.getIntValue(index++);
 
         int adjCount = dataBlock.getIntValue(index++);
-        List<String> adjIds = new ArrayList<>();
-        for (int i = 0; i < adjCount; i++)
+        List<String> adjIds = new ArrayList<>(Math.max(0, adjCount));
+        for (int i = 0; i < adjCount && index < atomCount; i++) {
             adjIds.add(dataBlock.getStringValue(index++));
+        }
 
         int videoCount = dataBlock.getIntValue(index++);
-        List<String> videoPaths = new ArrayList<>();
-        for (int i = 0; i < videoCount; i++)
+        List<String> videoPaths = new ArrayList<>(Math.max(0, videoCount));
+        for (int i = 0; i < videoCount && index < atomCount; i++) {
             videoPaths.add(dataBlock.getStringValue(index++));
+        }
 
         List<String> webIdObsIds = new ArrayList<>();
         String alarmCat = "";
-        try {
+        double lat = 0.0;
+        double lon = 0.0;
+
+        if (index < atomCount) {
             int webIdObsIdsCount = dataBlock.getIntValue(index++);
-            for (int i = 0; i < webIdObsIdsCount; i++)
+            for (int i = 0; i < webIdObsIdsCount && index < atomCount; i++) {
                 webIdObsIds.add(dataBlock.getStringValue(index++));
-            alarmCat = dataBlock.getStringValue(index);
-        } catch (Exception ignored) {
-            // backwards compatibility: older records may lack webIdObsIds
-            // and/or the alarm category code trailing field
+            }
+            if (index < atomCount) {
+                String rawCat = dataBlock.getStringValue(index++);
+                alarmCat = rawCat == null ? "" : rawCat;
+            }
+            boolean expectLocation = recordStructure == null || hasLocationFields(recordStructure);
+            if (expectLocation && index + 1 < atomCount) {
+                lat = dataBlock.getDoubleValue(index++);
+                lon = dataBlock.getDoubleValue(index);
+            }
         }
 
         return (OccupancyExtended) new OccupancyExtended.Builder()
                 .alarmCategory(alarmCat)
+                .location(lat, lon)
                 .samplingTime(samplingTime)
                 .occupancyCount(occupancyCount)
                 .startTime(startTime)
