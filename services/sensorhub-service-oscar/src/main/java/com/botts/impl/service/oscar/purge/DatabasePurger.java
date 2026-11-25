@@ -639,24 +639,26 @@ public class DatabasePurger {
                 .withDataStreams(occupancyStreams.keySet())
                 .build();
         Map<String, List<TimeExtent>> windowsByLane = new HashMap<>();
-        database.getObservationStore().select(filter).forEach(obs -> {
-            String lane = laneByDataStream.get(obs.getDataStreamID());
-            if (lane == null)
-                return;
-            try {
-                Occupancy occupancy = Occupancy.toOccupancy(obs.getResult());
-                Instant start = instantFromEpochSeconds(occupancy.getStartTime());
-                Instant end = instantFromEpochSeconds(occupancy.getEndTime());
-                if (!start.isBefore(end)) {
-                    log.warn("Ignoring invalid occupancy window on lane {}: [{}, {})", lane, start, end);
+        try (var observations = database.getObservationStore().select(filter)) {
+            observations.forEach(obs -> {
+                String lane = laneByDataStream.get(obs.getDataStreamID());
+                if (lane == null)
                     return;
+                try {
+                    Occupancy occupancy = Occupancy.toOccupancy(obs.getResult());
+                    Instant start = instantFromEpochSeconds(occupancy.getStartTime());
+                    Instant end = instantFromEpochSeconds(occupancy.getEndTime());
+                    if (!start.isBefore(end)) {
+                        log.warn("Ignoring invalid occupancy window on lane {}: [{}, {})", lane, start, end);
+                        return;
+                    }
+                    windowsByLane.computeIfAbsent(lane, ignored -> new ArrayList<>())
+                            .add(TimeExtent.period(start, end));
+                } catch (Exception e) {
+                    log.warn("Failed to parse occupancy record for lane {}: {}", lane, e.getMessage());
                 }
-                windowsByLane.computeIfAbsent(lane, ignored -> new ArrayList<>())
-                        .add(TimeExtent.period(start, end));
-            } catch (Exception e) {
-                log.warn("Failed to parse occupancy record for lane {}: {}", lane, e.getMessage());
-            }
-        });
+            });
+        }
         windowsByLane.values().forEach(windows -> windows.sort(Comparator.comparing(TimeExtent::begin)));
         return windowsByLane;
     }

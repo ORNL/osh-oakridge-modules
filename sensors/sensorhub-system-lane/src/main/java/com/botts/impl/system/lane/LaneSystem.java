@@ -886,8 +886,12 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                             if (getUniqueIdentifier() != null)
                                 database = getParentHub().getSystemDriverRegistry().getDatabase(getUniqueIdentifier());
                             long systemAndMembers = 0;
-                            if (database != null)
-                                systemAndMembers = database.getSystemDescStore().select(new SystemFilter.Builder().withUniqueIDs(getUniqueIdentifier()).includeMembers(true).build()).count();
+                            if (database != null) {
+                                try (var systemStream = database.getSystemDescStore().select(
+                                        new SystemFilter.Builder().withUniqueIDs(getUniqueIdentifier()).includeMembers(true).build())) {
+                                    systemAndMembers = systemStream.count();
+                                }
+                            }
                             // Only delete from database if lane doesn't have children
                             if (systemAndMembers == 1) {
                                 var transactionHandler = new SystemDatabaseTransactionHandler(getParentHub().getEventBus(), database);

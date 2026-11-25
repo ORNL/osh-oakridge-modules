@@ -474,11 +474,13 @@ public class MessageHandler {
                     .includeMembers(true)
                     .build();
 
-            String[] rs350ProcessUids = db.getSystemDescStore()
-                    .select(laneMemberFilter)
-                    .map(sys -> sys.getUniqueIdentifier())
-                    .filter(uid -> uid != null && uid.startsWith(RS350_OCCUPANCY_PROCESS_UID_PREFIX))
-                    .toArray(String[]::new);
+            String[] rs350ProcessUids;
+            try (var systemStream = db.getSystemDescStore().select(laneMemberFilter)) {
+                rs350ProcessUids = systemStream
+                        .map(sys -> sys.getUniqueIdentifier())
+                        .filter(uid -> uid != null && uid.startsWith(RS350_OCCUPANCY_PROCESS_UID_PREFIX))
+                        .toArray(String[]::new);
+            }
 
             if (rs350ProcessUids.length == 0) {
                 log.debug("No RS350 occupancy process system (prefix {}) found under lane {}",
@@ -490,12 +492,15 @@ public class MessageHandler {
                     .withUniqueIDs(rs350ProcessUids)
                     .build();
 
-            var keys = db.getObservationStore().selectKeys(new ObsFilter.Builder()
+            java.util.List<BigId> keys;
+            try (var keyStream = db.getObservationStore().selectKeys(new ObsFilter.Builder()
                     .withLatestResult()
                     .withSystems(rs350SysFilter)
                     .withDataStreams().withOutputNames(OccupancyOutput.NAME).done()
                     .withLimit(1)
-                    .build()).toList();
+                    .build())) {
+                keys = keyStream.toList();
+            }
 
             if (keys.isEmpty()) {
                 log.debug("No RS350 occupancy observations yet under lane {}; rs350 process systems scanned: {}",

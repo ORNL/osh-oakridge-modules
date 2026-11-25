@@ -688,14 +688,16 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
 
     private void refreshSiteDiagram() {
         long currTime = System.currentTimeMillis();
-        var query = getParentHub().getDatabaseRegistry().getFederatedDatabase().getObservationStore().select(new ObsFilter.Builder()
+        java.util.List<org.sensorhub.api.data.IObsData> obsList;
+        try (var query = getParentHub().getDatabaseRegistry().getFederatedDatabase().getObservationStore().select(new ObsFilter.Builder()
                 .withDataStreams(new DataStreamFilter.Builder()
                         .withOutputNames(SiteInfoOutput.NAME)
                         .build())
                 .withLatestResult()
-                .build());
-
-        var obsList = query.toList();
+                .withLimit(1)
+                .build())) {
+            obsList = query.toList();
+        }
         if (obsList.isEmpty())
             return;
 

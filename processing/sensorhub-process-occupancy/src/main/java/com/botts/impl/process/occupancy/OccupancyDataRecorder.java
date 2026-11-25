@@ -217,7 +217,9 @@ public class OccupancyDataRecorder extends ExecutableProcessImpl implements ISen
                 .withLimit(Long.MAX_VALUE)
                 .build();
 
-        return db.getObservationStore().select(filter).collect(Collectors.toList());
+        try (var observations = db.getObservationStore().select(filter)) {
+            return observations.collect(Collectors.toList());
+        }
     }
 
     /**
