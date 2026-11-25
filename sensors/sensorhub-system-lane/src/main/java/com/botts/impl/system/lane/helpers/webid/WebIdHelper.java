@@ -40,7 +40,7 @@ public class WebIdHelper {
     private static final Logger logger = LoggerFactory.getLogger(WebIdHelper.class);
     private final int MAX_OUTPUT_INTERVAL_MS = 10000;
     private final long MAX_OCCUPANCY_PRODUCER_WAIT_MS = 5000;
-    private final long TIME_TIL_OBS_CHECK_MS = 300; // Wait before checking the obs store
+    private final long timeTilObsCheckMs;
 
     IdEncoder obsIdEncoder, sysEncoder;
 
@@ -50,6 +50,8 @@ public class WebIdHelper {
     LaneSystem laneSystem;
     ISensorHub hub;
     IDataProducerModule<?> occupancyProducer;
+    private final String laneUidOverride;
+    private final String occupancyProducerUidOverride;
     Flow.Subscription webIdSub, occupancySub;
     Thread startupThread;
     private volatile boolean subscriptionsRequested;
@@ -68,8 +70,36 @@ public class WebIdHelper {
         this.laneSystem = laneSystem;
         this.hub = laneSystem.getParentHub();
         this.occupancyProducer = occupancyProducer;
+        this.laneUidOverride = null;
+        this.occupancyProducerUidOverride = null;
+        this.timeTilObsCheckMs = 300L;
         startupThread = new Thread(this::init);
         startupThread.start();
+    }
+
+    WebIdHelper(String laneUid,
+                String occupancyProducerUid,
+                IObsStore webIdObsStore,
+                IObsStore occupancyObsStore,
+                IdEncoder obsIdEncoder,
+                long timeTilObsCheckMs) {
+        this.laneSystem = null;
+        this.hub = null;
+        this.occupancyProducer = null;
+        this.laneUidOverride = laneUid;
+        this.occupancyProducerUidOverride = occupancyProducerUid;
+        this.webIdObsStore = webIdObsStore;
+        this.occupancyObsStore = occupancyObsStore;
+        this.obsIdEncoder = obsIdEncoder;
+        this.timeTilObsCheckMs = Math.max(0L, timeTilObsCheckMs);
+    }
+
+    private String resolveLaneUid() {
+        return laneUidOverride != null ? laneUidOverride : laneSystem.getUniqueIdentifier();
+    }
+
+    private String resolveOccupancyProducerUid() {
+        return occupancyProducerUidOverride != null ? occupancyProducerUidOverride : occupancyProducer.getUniqueIdentifier();
     }
 
     private void init() {
@@ -126,15 +156,17 @@ public class WebIdHelper {
         }
     }
 
-    private void processWebIdEvent(ObsEvent event) {
-        try {
-            Thread.sleep(TIME_TIL_OBS_CHECK_MS);
-        } catch (InterruptedException e) { return; }
+    void processWebIdEvent(ObsEvent event) {
+        if (timeTilObsCheckMs > 0L) {
+            try {
+                Thread.sleep(timeTilObsCheckMs);
+            } catch (InterruptedException e) { return; }
+        }
 
         for (var obs : event.getObservations()) {
             ObsFilter filter = new ObsFilter.Builder()
                     .withSystems()
-                        .withUniqueIDs(laneSystem.getUniqueIdentifier())
+                        .withUniqueIDs(resolveLaneUid())
                         .done()
                     .withDataStreams()
                         .withOutputNames(WEBID_NAME)
@@ -142,13 +174,21 @@ public class WebIdHelper {
                     .withPhenomenonTime()
                         .withSingleValue(obs.getPhenomenonTime())
                         .done()
+                    .withLimit(1)
                     .build();
 
-            BigId obsId = null;
-            try {
-                obsId = webIdObsStore.selectKeys(filter).findFirst().get();
+            // Close the stream: the tiered store holds a DuckDB session slot
+            // (only 2 exist) until it is closed, and leaking them blocks every
+            // historical query on the node.
+            BigId obsId;
+            try (var keys = webIdObsStore.selectKeys(filter)) {
+                obsId = keys.findFirst().orElse(null);
             } catch (Exception e) {
-                logger.error("Empty filter intersection", e);
+                logger.error("Failed to look up observation key", e);
+                return;
+            }
+            if (obsId == null) {
+                logger.warn("No stored observation matched phenomenonTime {}", obs.getPhenomenonTime());
                 return;
             }
 
@@ -165,15 +205,17 @@ public class WebIdHelper {
         }
     }
 
-    private void processOccupancyEvent(ObsEvent event) {
-        try {
-            Thread.sleep(TIME_TIL_OBS_CHECK_MS);
-        } catch (InterruptedException e) { return; }
+    void processOccupancyEvent(ObsEvent event) {
+        if (timeTilObsCheckMs > 0L) {
+            try {
+                Thread.sleep(timeTilObsCheckMs);
+            } catch (InterruptedException e) { return; }
+        }
 
         for (var obs : event.getObservations()) {
             ObsFilter filter = new ObsFilter.Builder()
                     .withSystems()
-                        .withUniqueIDs(occupancyProducer.getUniqueIdentifier())
+                        .withUniqueIDs(resolveOccupancyProducerUid())
                         .done()
                     .withDataStreams()
                         .withOutputNames(OCCUPANCY_NAME)
@@ -181,13 +223,21 @@ public class WebIdHelper {
                     .withPhenomenonTime()
                         .withSingleValue(obs.getPhenomenonTime())
                         .done()
+                    .withLimit(1)
                     .build();
 
-            BigId obsId = null;
-            try {
-                obsId = occupancyObsStore.selectKeys(filter).findFirst().get();
+            // Close the stream: the tiered store holds a DuckDB session slot
+            // (only 2 exist) until it is closed, and leaking them blocks every
+            // historical query on the node.
+            BigId obsId;
+            try (var keys = occupancyObsStore.selectKeys(filter)) {
+                obsId = keys.findFirst().orElse(null);
             } catch (Exception e) {
-                logger.error("Empty filter intersection", e);
+                logger.error("Failed to look up observation key", e);
+                return;
+            }
+            if (obsId == null) {
+                logger.warn("No stored observation matched phenomenonTime {}", obs.getPhenomenonTime());
                 return;
             }
 

@@ -352,14 +352,17 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
     }
 
     private BigId getLatestObservationIdWithinScope() {
-        var keys = database.getObservationStore().selectKeys(new ObsFilter.Builder()
+        List<BigId> keys;
+        try (var keyStream = database.getObservationStore().selectKeys(new ObsFilter.Builder()
                 .withLatestResult()
                 .withSystems().withUniqueIDs(parentSensor.getUniqueIdentifier())
                 .done()
                 .withDataStreams().withOutputNames(NAME)
                 .done()
                 .withLimit(1)
-                .build()).toList();
+                .build())) {
+            keys = keyStream.toList();
+        }
         return keys.size() == 1 ? keys.get(0) : null;
     }
 
@@ -490,15 +493,17 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
      * get last observation
      */
     private LastStatisticObservationData getLastObservation() {
-        var query = database.getObservationStore().select(new ObsFilter.Builder()
+        List<org.sensorhub.api.data.IObsData> observations;
+        try (var query = database.getObservationStore().select(new ObsFilter.Builder()
                 .withSystems().withUniqueIDs(parentSensor.getUniqueIdentifier()).done()
                 .withDataStreams(new DataStreamFilter.Builder()
                         .withOutputNames(NAME)
                         .build())
                 .withLatestResult()
-                .build());
-
-        var observations = query.toList();
+                .withLimit(1)
+                .build())) {
+            observations = query.toList();
+        }
 
         if (observations.isEmpty())
             return null;

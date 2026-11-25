@@ -642,24 +642,26 @@ public final class TrainingSandboxManager implements Closeable {
             return list;
         }
         var obsStore = db.getObservationStore();
-        obsStore.selectEntries(new ObsFilter.Builder()
+        try (var entries = obsStore.selectEntries(new ObsFilter.Builder()
                 .withDataStreams(new DataStreamFilter.Builder()
                         .withObservedProperties(RADHelper.getRadUri("Occupancy"))
                         .build())
-                .build()).forEach(entry -> {
-            IObsData obs = entry.getValue();
-            IDataStreamInfo ds = obsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
-            if (ds == null) {
-                return;
-            }
-            Occupancy occ = OccupancyExtended.readOccupancy(ds.getRecordStructure(), obs.getResult());
-            if ((occ.hasGammaAlarm() || occ.hasNeutronAlarm())
-                    && (occ.getAdjudicatedIds() == null || occ.getAdjudicatedIds().isEmpty())) {
-                list.add(new UnadjudicatedAlarmRef(
-                        obsEncoder.encodeID(entry.getKey()),
-                        ds.getSystemID() != null ? ds.getSystemID().getUniqueID() : ""));
-            }
-        });
+                .build())) {
+            entries.forEach(entry -> {
+                IObsData obs = entry.getValue();
+                IDataStreamInfo ds = obsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
+                if (ds == null) {
+                    return;
+                }
+                Occupancy occ = OccupancyExtended.readOccupancy(ds.getRecordStructure(), obs.getResult());
+                if ((occ.hasGammaAlarm() || occ.hasNeutronAlarm())
+                        && (occ.getAdjudicatedIds() == null || occ.getAdjudicatedIds().isEmpty())) {
+                    list.add(new UnadjudicatedAlarmRef(
+                            obsEncoder.encodeID(entry.getKey()),
+                            ds.getSystemID() != null ? ds.getSystemID().getUniqueID() : ""));
+                }
+            });
+        }
         return list;
     }
 
@@ -821,26 +823,14 @@ public final class TrainingSandboxManager implements Closeable {
                     : null;
             if (db != null && db.getObservationStore() != null) {
                 var obsStore = db.getObservationStore();
-                obsStore.select(new ObsFilter.Builder()
+                List<IObsData> list;
+                try (var obsStream = obsStore.select(new ObsFilter.Builder()
                         .withDataStreams(new DataStreamFilter.Builder()
                                 .withObservedProperties(RADHelper.getRadUri("Occupancy"))
                                 .build())
-                        .build()).forEach(obs -> {
-                    IDataStreamInfo ds = obsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
-                    if (ds == null) {
-                        return;
-                    }
-                    Occupancy occ = OccupancyExtended.readOccupancy(ds.getRecordStructure(), obs.getResult());
-                    if (occ == null) {
-                        return;
-                    }
-                });
-                // Iterate cleanly with mutable counters
-                var list = obsStore.select(new ObsFilter.Builder()
-                        .withDataStreams(new DataStreamFilter.Builder()
-                                .withObservedProperties(RADHelper.getRadUri("Occupancy"))
-                                .build())
-                        .build()).toList();
+                        .build())) {
+                    list = obsStream.toList();
+                }
                 for (IObsData obs : list) {
                     IDataStreamInfo ds = obsStore.getDataStreams().get(new DataStreamKey(obs.getDataStreamID()));
                     if (ds == null) {
