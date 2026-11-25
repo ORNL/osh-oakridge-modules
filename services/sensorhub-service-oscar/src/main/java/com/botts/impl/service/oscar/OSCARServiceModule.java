@@ -74,6 +74,9 @@ import java.util.concurrent.TimeoutException;
 
 public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> implements IWebIdProvider, IAdjudicationCodeProvider {
     static final long STOP_BUDGET_NANOS = TimeUnit.SECONDS.toNanos(8);
+    static final long BUCKET_SERVICE_WAIT_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(60);
+    static final long BUCKET_SERVICE_ACTIVE_START_EXTENSION_MS = TimeUnit.SECONDS.toMillis(60);
+    static final long BUCKET_SERVICE_POLL_SLICE_MS = 200L;
 
     SiteInfoOutput siteInfoOutput;
     AdjudicationCodesOutput adjudicationCodesOutput;
@@ -109,10 +112,12 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     ApplicationReadiness applicationReadiness;
     volatile Flow.Subscription staticGuideMimeSubscription;
     volatile boolean staticGuideMimeStopped;
+    volatile boolean stoppingRequested;
 
     @Override
     protected void doInit() throws SensorHubException {
         super.doInit();
+        stoppingRequested = false;
 
         try {
             config.getCustomAdjudicationCodeValues();
@@ -120,16 +125,9 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
             throw new SensorHubException("Invalid custom disposition code configuration", e);
         }
 
-        // Block here for bucket service
-        try {
-            getLogger().info("Checking that a bucket service is loaded...");
-            this.bucketService = getParentHub().getModuleRegistry()
-                    .waitForModuleType(IBucketService.class, ModuleEvent.ModuleState.STARTED)
-                    .get(10, TimeUnit.SECONDS);
-            this.bucketStore = bucketService.getBucketStore();
-        } catch (InterruptedException | ExecutionException | TimeoutException e) {
-            reportError("Could not find this OSH node's Bucket Service", new IllegalStateException(e));
-        }
+        // State-aware readiness wait for Bucket Service (tolerates > 10s cold-disk startup)
+        this.bucketService = resolveBucketServiceReady();
+        this.bucketStore = this.bucketService.getBucketStore();
 
         emlPluginHandler = new EmlPluginHandler(getParentHub(), getLogger(), config);
         emlPluginHandler.restoreConfiguredOrActivePlugin(config.emlPluginPath);
@@ -243,6 +241,12 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     @Override
     protected void doStart() throws SensorHubException {
         super.doStart();
+        stoppingRequested = false;
+
+        if (!isBucketServiceReady(this.bucketService) || this.bucketStore == null) {
+            this.bucketService = resolveBucketServiceReady();
+            this.bucketStore = this.bucketService.getBucketStore();
+        }
 
         registerSystemAndPublishCodes();
 
@@ -332,6 +336,7 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
 
     @Override
     protected void doStop() throws SensorHubException {
+        stoppingRequested = true;
         long deadline = System.nanoTime() + STOP_BUDGET_NANOS;
         SensorHubException failure = null;
         // Withdraw readiness before stopping any service. This prevents a second
@@ -427,12 +432,15 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         try {
             IObsSystemDatabase db = resolveSliceDatabase();
             if (db != null && db.getObservationStore() != null && db.getDataStreamStore() != null) {
-                var streamIds = db.getDataStreamStore()
+                java.util.Set<BigId> streamIds;
+                try (var keys = db.getDataStreamStore()
                         .selectKeys(new DataStreamFilter.Builder()
                                 .withOutputNames(AdjudicationCodesOutput.NAME)
-                                .build())
-                        .map(org.sensorhub.api.resource.ResourceKey::getInternalID)
-                        .collect(java.util.stream.Collectors.toSet());
+                                .build())) {
+                    streamIds = keys
+                            .map(org.sensorhub.api.resource.ResourceKey::getInternalID)
+                            .collect(java.util.stream.Collectors.toSet());
+                }
                 if (!streamIds.isEmpty()) {
                     db.getObservationStore().removeEntries(new ObsFilter.Builder()
                             .withDataStreams(streamIds)
@@ -441,6 +449,130 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
             }
         } catch (Exception e) {
             getLogger().debug("Could not prune prior adjudicationCodes observations before publishing current codes", e);
+        }
+    }
+
+    long bucketServiceWaitTimeoutMs() {
+        return BUCKET_SERVICE_WAIT_TIMEOUT_MS;
+    }
+
+    long bucketServiceActiveStartExtensionMs() {
+        return BUCKET_SERVICE_ACTIVE_START_EXTENSION_MS;
+    }
+
+    long bucketServicePollSliceMs() {
+        return BUCKET_SERVICE_POLL_SLICE_MS;
+    }
+
+    private static boolean isActivelyBootingBucketCandidate(org.sensorhub.api.module.IModule<?> mod) {
+        if (mod == null || mod.getCurrentError() != null) {
+            return false;
+        }
+        ModuleEvent.ModuleState state = mod.getCurrentState();
+        return state == ModuleEvent.ModuleState.INITIALIZING
+                || state == ModuleEvent.ModuleState.INITIALIZED
+                || state == ModuleEvent.ModuleState.STARTING
+                || (state == ModuleEvent.ModuleState.LOADED
+                        && mod.getConfiguration() != null
+                        && mod.getConfiguration().autoStart);
+    }
+
+    private static boolean isBucketServiceReady(IBucketService service) {
+        if (service == null || service.getBucketStore() == null) {
+            return false;
+        }
+        if (service instanceof org.sensorhub.api.module.IModule<?> mod) {
+            return mod.isStarted();
+        }
+        return true;
+    }
+
+    IBucketService resolveBucketServiceReady() throws SensorHubException {
+        if (isBucketServiceReady(this.bucketService)) {
+            return this.bucketService;
+        }
+        var registry = getParentHub() != null ? getParentHub().getModuleRegistry() : null;
+        if (registry == null) {
+            throw new SensorHubException("Could not find this OSH node's Bucket Service: module registry unavailable");
+        }
+
+        getLogger().info("Checking that a bucket service is loaded...");
+        CompletableFuture<IBucketService> waitFuture =
+                registry.waitForModuleType(IBucketService.class, ModuleEvent.ModuleState.STARTED);
+        long sliceMs = Math.max(10L, bucketServicePollSliceMs());
+        long deadlineNanos = System.nanoTime()
+                + TimeUnit.MILLISECONDS.toNanos(Math.max(1L, bucketServiceWaitTimeoutMs()));
+        boolean grantedActiveBootExtension = false;
+
+        try {
+            while (true) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new SensorHubException("Interrupted while waiting for Bucket Service");
+                }
+                if (stoppingRequested || getCurrentState() == ModuleEvent.ModuleState.STOPPING) {
+                    throw new SensorHubException("OSCAR service stopped while waiting for Bucket Service");
+                }
+
+                var candidates = registry.getLoadedModules(IBucketService.class);
+                boolean anyCandidateActivelyStarting = false;
+                Throwable terminalCandidateError = null;
+                if (candidates != null && !candidates.isEmpty()) {
+                    for (IBucketService candidate : candidates) {
+                        if (candidate instanceof org.sensorhub.api.module.IModule<?> mod) {
+                            if (mod.getCurrentState() == ModuleEvent.ModuleState.STARTED
+                                    && candidate.getBucketStore() != null) {
+                                return candidate;
+                            }
+                            Throwable err = mod.getCurrentError();
+                            if (err != null && mod.getCurrentState() != ModuleEvent.ModuleState.STARTING
+                                    && mod.getCurrentState() != ModuleEvent.ModuleState.INITIALIZING) {
+                                terminalCandidateError = err;
+                            } else if (isActivelyBootingBucketCandidate(mod)) {
+                                anyCandidateActivelyStarting = true;
+                            }
+                        } else if (isBucketServiceReady(candidate)) {
+                            return candidate;
+                        }
+                    }
+                    if (terminalCandidateError != null && !anyCandidateActivelyStarting) {
+                        throw new SensorHubException(
+                                "Bucket Service failed before OSCAR service could attach",
+                                terminalCandidateError);
+                    }
+                }
+
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0L) {
+                    long extMs = bucketServiceActiveStartExtensionMs();
+                    if (!grantedActiveBootExtension && anyCandidateActivelyStarting && extMs > 0L) {
+                        grantedActiveBootExtension = true;
+                        deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(extMs);
+                        remainingNanos = deadlineNanos - System.nanoTime();
+                        getLogger().warn(
+                                "Bucket Service is still initializing or starting; extending readiness wait by {} ms",
+                                extMs);
+                    } else {
+                        throw new SensorHubException("Could not find this OSH node's Bucket Service");
+                    }
+                }
+
+                long waitMillis = Math.max(1L, Math.min(sliceMs, TimeUnit.NANOSECONDS.toMillis(remainingNanos)));
+                try {
+                    IBucketService started = waitFuture.get(waitMillis, TimeUnit.MILLISECONDS);
+                    if (started != null && started.getBucketStore() != null) {
+                        return started;
+                    }
+                } catch (TimeoutException expectedSliceTimeout) {
+                    // Continue state-aware polling until deadline, stop, or interruption.
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new SensorHubException("Interrupted while waiting for Bucket Service", e);
+                } catch (ExecutionException e) {
+                    throw new SensorHubException("Could not find this OSH node's Bucket Service", e.getCause());
+                }
+            }
+        } finally {
+            waitFuture.cancel(false);
         }
     }
 
