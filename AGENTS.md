@@ -31,7 +31,7 @@ Both human contributors and AI coding agents (`Codex`, `Claude Code`, `Gemini` /
 
 ## 2. Planned `v3.12.0` Architecture: `MobileDetectorSystem` (`ORNL/osh-oakridge-modules#57`)
 
-Contributors working on shared `v3.12.0` branches for `sensorhub-system-mobile` ([`ORNL/osh-oakridge-modules#57`](https://github.com/ORNL/osh-oakridge-modules/pull/57)) should implement against the current `main` baseline (`v3.11.14`+):
+Contributors working on shared `v3.12.0` branches for `sensorhub-system-mobile` ([`ORNL/osh-oakridge-modules#57`](https://github.com/ORNL/osh-oakridge-modules/pull/57)) should implement against the current `main` baseline (`v3.11.15`+):
 
 - **Shared Lifecycle Helpers:** Reuse [`OccupancyProcessStarter`](sensors/sensorhub-system-lane/src/main/java/com/botts/impl/system/lane/helpers/occupancy/OccupancyProcessStarter.java) (supporting both synchronous `INITIALIZED` and `initAsync = true` `INITIALIZING -> INITIALIZED` occupancy modules) and [`RpmRecoverySupervisor`](sensors/sensorhub-system-lane/src/main/java/com/botts/impl/system/lane/helpers/RpmRecoverySupervisor.java) patterns rather than duplicating ad-hoc module-start listeners.
 - **No Unbounded `ConcurrentHashMap` Caches Across Module Reloads:** Scope camera/HLS capability discovery to the parent `MobileDetectorSystem` instance lifecycle (cleared in `doStop()`), rather than process-global static maps keyed by mutable UIDs.

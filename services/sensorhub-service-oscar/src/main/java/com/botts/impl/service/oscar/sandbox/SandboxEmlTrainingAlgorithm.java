@@ -31,7 +31,7 @@ public final class SandboxEmlTrainingAlgorithm implements EmlAlarmAssessmentAlgo
 
     @Override
     public String getVersionId() {
-        return "3.11.14-sandbox-edu";
+        return "3.11.15-sandbox-edu";
     }
 
     @Override
