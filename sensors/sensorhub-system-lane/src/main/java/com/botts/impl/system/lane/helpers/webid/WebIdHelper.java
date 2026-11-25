@@ -144,11 +144,18 @@ public class WebIdHelper {
                         .done()
                     .build();
 
-            BigId obsId = null;
-            try {
-                obsId = webIdObsStore.selectKeys(filter).findFirst().get();
+            // Close the stream: the tiered store holds a DuckDB session slot
+            // (only 2 exist) until it is closed, and leaking them blocks every
+            // historical query on the node.
+            BigId obsId;
+            try (var keys = webIdObsStore.selectKeys(filter)) {
+                obsId = keys.findFirst().orElse(null);
             } catch (Exception e) {
-                logger.error("Empty filter intersection", e);
+                logger.error("Failed to look up observation key", e);
+                return;
+            }
+            if (obsId == null) {
+                logger.warn("No stored observation matched phenomenonTime {}", obs.getPhenomenonTime());
                 return;
             }
 
@@ -183,11 +190,18 @@ public class WebIdHelper {
                         .done()
                     .build();
 
-            BigId obsId = null;
-            try {
-                obsId = occupancyObsStore.selectKeys(filter).findFirst().get();
+            // Close the stream: the tiered store holds a DuckDB session slot
+            // (only 2 exist) until it is closed, and leaking them blocks every
+            // historical query on the node.
+            BigId obsId;
+            try (var keys = occupancyObsStore.selectKeys(filter)) {
+                obsId = keys.findFirst().orElse(null);
             } catch (Exception e) {
-                logger.error("Empty filter intersection", e);
+                logger.error("Failed to look up observation key", e);
+                return;
+            }
+            if (obsId == null) {
+                logger.warn("No stored observation matched phenomenonTime {}", obs.getPhenomenonTime());
                 return;
             }
 
