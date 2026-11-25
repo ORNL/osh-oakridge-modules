@@ -886,6 +886,122 @@ public class BasicSessionAuthenticatorTest
     }
 
 
+    @Test
+    public void adminLogoutPreservesContinueToSensorhubAdminWhileViewerLogoutLandsOnRootAndRejectsOpenRedirects()
+            throws Exception
+    {
+        Path storePath = tempFolder.newFile("oscar-logout-redirect.json").toPath();
+        Files.deleteIfExists(storePath);
+
+        InMemoryUserRegistry registry = new InMemoryUserRegistry();
+        registry.addAdmin("admin", "StrongAdminPassword!23");
+
+        BasicSessionAuthenticator auth = createAuthenticator(storePath, registry);
+
+        // 1. Sign in and obtain a valid session cookie
+        ResponseCapture loginResp = new ResponseCapture();
+        auth.validateRequest(createRequest(
+            "POST",
+            "/login",
+            Map.of("username", "admin", "password", "StrongAdminPassword!23", "continue", "/sensorhub/admin"),
+            null,
+            Map.of("Host", "portal.example.test", "Accept", "text/html")), loginResp.proxy(), true);
+        assertEquals("/sensorhub/admin", loginResp.redirectLocation);
+        Cookie sessionCookie = new Cookie("OSCAR_SESSION",
+            extractCookieValue(loginResp.setCookies.get(0), "OSCAR_SESSION"));
+
+        // 2. GET /sensorhub/logout from SensorHub Admin (Referer: /sensorhub/admin) preserves continue=/sensorhub/admin
+        ResponseCapture adminLogoutResp = new ResponseCapture();
+        auth.validateRequest(createRequest(
+            "GET",
+            "/sensorhub/logout",
+            Map.of(),
+            new Cookie[] {sessionCookie},
+            Map.of(
+                "Host", "portal.example.test",
+                "Referer", "https://portal.example.test/sensorhub/admin#!modules")),
+            adminLogoutResp.proxy(), true);
+        assertEquals(302, adminLogoutResp.status);
+        assertEquals("/login?continue=%2Fsensorhub%2Fadmin", adminLogoutResp.redirectLocation);
+
+        // Signing back in via the preserved continue target lands back on /sensorhub/admin
+        ResponseCapture reLoginResp = new ResponseCapture();
+        auth.validateRequest(createRequest(
+            "POST",
+            "/login",
+            Map.of("username", "admin", "password", "StrongAdminPassword!23", "continue", "/sensorhub/admin"),
+            null,
+            Map.of("Host", "portal.example.test", "Accept", "text/html")), reLoginResp.proxy(), true);
+        assertEquals("/sensorhub/admin", reLoginResp.redirectLocation);
+
+        // 3. Explicit safe continue query parameter on GET /logout is preserved
+        ResponseCapture explicitContinueResp = new ResponseCapture();
+        auth.validateRequest(createRequest(
+            "GET",
+            "/logout",
+            Map.of("continue", "/sensorhub/admin"),
+            null,
+            Map.of("Host", "portal.example.test")), explicitContinueResp.proxy(), true);
+        assertEquals("/login?continue=%2Fsensorhub%2Fadmin", explicitContinueResp.redirectLocation);
+
+        // 4. Trailing-slash Vaadin resolution (/sensorhub/admin/ -> /sensorhub/admin/logout) also preserves /sensorhub/admin
+        ResponseCapture trailingAdminLogoutResp = new ResponseCapture();
+        auth.validateRequest(createRequest(
+            "GET",
+            "/sensorhub/admin/logout",
+            Map.of(),
+            null,
+            Map.of("Host", "portal.example.test")), trailingAdminLogoutResp.proxy(), true);
+        assertEquals("/login?continue=%2Fsensorhub%2Fadmin", trailingAdminLogoutResp.redirectLocation);
+
+        // 5. Viewer logout (no Referer or Viewer Referer) continues landing on /login (which signs in to /)
+        ResponseCapture viewerLogoutResp = new ResponseCapture();
+        auth.validateRequest(createRequest(
+            "GET",
+            "/logout",
+            Map.of(),
+            null,
+            Map.of(
+                "Host", "portal.example.test",
+                "Referer", "https://portal.example.test/event-log")),
+            viewerLogoutResp.proxy(), true);
+        assertEquals("/login", viewerLogoutResp.redirectLocation);
+
+        // 6. Open-redirect vectors (//, /\, external URL, cross-origin Referer) fall back safely to /login
+        for (String unsafe : List.of(
+                "//evil.example.test/sensorhub/admin",
+                "/\\evil.example.test/sensorhub/admin",
+                "https://evil.example.test/sensorhub/admin"))
+        {
+            ResponseCapture unsafeResp = new ResponseCapture();
+            auth.validateRequest(createRequest(
+                "GET",
+                "/logout",
+                Map.of("continue", unsafe),
+                null,
+                Map.of(
+                    "Host", "portal.example.test",
+                    "Referer", "https://portal.example.test/sensorhub/admin")),
+                unsafeResp.proxy(), true);
+            assertEquals("Unsafe continue must never propagate: " + unsafe, "/login", unsafeResp.redirectLocation);
+        }
+
+        ResponseCapture crossOriginRefererResp = new ResponseCapture();
+        auth.validateRequest(createRequest(
+            "GET",
+            "/sensorhub/logout",
+            Map.of(),
+            null,
+            Map.of(
+                "Host", "portal.example.test",
+                "Referer", "https://evil.example.test/sensorhub/admin")),
+            crossOriginRefererResp.proxy(), true);
+        assertEquals("/login", crossOriginRefererResp.redirectLocation);
+
+        auth.close();
+    }
+
+
     private static String extractCookieValue(String setCookieHeader, String name)
     {
         String prefix = name + "=";
