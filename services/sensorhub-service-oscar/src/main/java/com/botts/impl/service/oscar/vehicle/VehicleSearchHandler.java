@@ -81,10 +81,15 @@ public final class VehicleSearchHandler implements IObjectHandler {
             try {
                 Thread.sleep(3_000L);
                 if (module.isStarted()) {
+                    Instant now = Instant.now();
                     VehicleIncidentSpec warmSpec = new VehicleIncidentSpec(
                             "__WARMUP__", "WARMUP", MatchMode.EQUALS, "", false, List.of(), List.of());
                     VehicleIncidentAggregator.queryVehicleIncident(
-                            module, warmSpec, Instant.EPOCH, Instant.now().plusSeconds(60L), 1);
+                            module,
+                            warmSpec,
+                            now.minus(VehicleIncidentAggregator.HOT_CACHE_WINDOW),
+                            now.plusSeconds(60L),
+                            1);
                 }
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
