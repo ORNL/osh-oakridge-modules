@@ -76,7 +76,7 @@ public class BucketService extends AbstractHttpServiceModule<BucketServiceConfig
         this.securityHandler = new BucketSecurity(this, buckets, config.security.enableAccessControl);
 
         this.threadPool = Executors.newScheduledThreadPool(
-                Runtime.getRuntime().availableProcessors(),
+                Math.max(16, Runtime.getRuntime().availableProcessors() * 2),
                 new NamedThreadFactory("BucketStorageService-Pool"));
 
         defaultObjectHandler = new DefaultObjectHandler(bucketStore, UploadPolicy.maxFileSizeBytes(config.maxFileSizeMb));

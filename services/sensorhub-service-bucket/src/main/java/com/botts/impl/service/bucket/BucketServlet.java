@@ -8,6 +8,8 @@ import org.sensorhub.impl.module.ModuleSecurity;
 import org.slf4j.Logger;
 
 import javax.servlet.AsyncContext;
+import javax.servlet.AsyncEvent;
+import javax.servlet.AsyncListener;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -15,6 +17,7 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static javax.servlet.http.HttpServletResponse.*;
 import static javax.servlet.http.HttpServletResponse.SC_FORBIDDEN;
@@ -48,153 +51,117 @@ public class BucketServlet extends HttpServlet {
         this.bucketHandler = bucketHandler;
     }
 
-    @Override
-    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+    static final long ASYNC_TIMEOUT_MS = 120_000L;
+
+    @FunctionalInterface
+    private interface BucketAction {
+        void execute(RequestContext ctx) throws Exception;
+    }
+
+    private void dispatchAsync(HttpServletRequest req, HttpServletResponse resp, BucketAction action) {
         try {
             resp.setContentType(JSON_CONTENT_TYPE);
             var ctx = new RequestContext(req, resp, this);
 
             final AsyncContext aCtx = req.startAsync(req, resp);
+            aCtx.setTimeout(ASYNC_TIMEOUT_MS);
+            final AtomicBoolean finished = new AtomicBoolean(false);
+            aCtx.addListener(new AsyncListener() {
+                @Override
+                public void onComplete(AsyncEvent event) {
+                    finished.set(true);
+                }
+
+                @Override
+                public void onTimeout(AsyncEvent event) {
+                    if (finished.compareAndSet(false, true)) {
+                        log.warn("Bucket async request timed out after {} ms: {} {}",
+                                ASYNC_TIMEOUT_MS, req.getMethod(), req.getRequestURI());
+                        if (!resp.isCommitted()) {
+                            sendError(SC_GATEWAY_TIMEOUT, "Bucket request timed out", req, resp);
+                        }
+                        try {
+                            aCtx.complete();
+                        } catch (IllegalStateException ignored) {
+                        }
+                    }
+                }
+
+                @Override
+                public void onError(AsyncEvent event) {
+                    finished.set(true);
+                }
+
+                @Override
+                public void onStartAsync(AsyncEvent event) {
+                }
+            });
+
             CompletableFuture.runAsync(() -> {
                 try {
+                    if (finished.get()) {
+                        return;
+                    }
                     setCurrentUser(req);
-                    bucketHandler.doGet(ctx);
+                    action.execute(ctx);
                 } catch (InvalidRequestException e) {
-                    handleInvalidRequestException(req, resp, e);
+                    if (!finished.get()) {
+                        handleInvalidRequestException(req, resp, e);
+                    }
                 } catch (SecurityException e) {
-                    handleAuthException(req, resp, e);
+                    if (!finished.get()) {
+                        handleAuthException(req, resp, e);
+                    }
                 } catch (Exception e) {
-                    if (e.getCause() instanceof InvalidRequestException) {
-                        handleInvalidRequestException(req, resp, (InvalidRequestException) e.getCause());
-                    } else if (isClientDisconnect(e)) {
-                        log.debug("Client closed stream early on {} {}", req.getMethod(), req.getRequestURI());
-                    } else {
-                        logError(req, e);
-                        if (!resp.isCommitted()) {
-                            sendError(SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG, req, resp);
+                    if (!finished.get()) {
+                        if (e.getCause() instanceof InvalidRequestException) {
+                            handleInvalidRequestException(req, resp, (InvalidRequestException) e.getCause());
+                        } else if (isClientDisconnect(e)) {
+                            log.debug("Client closed stream early on {} {}", req.getMethod(), req.getRequestURI());
+                        } else {
+                            logError(req, e);
+                            if (!resp.isCommitted()) {
+                                sendError(SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG, req, resp);
+                            }
                         }
                     }
                 } finally {
                     clearCurrentUser();
-                    aCtx.complete();
+                    if (finished.compareAndSet(false, true)) {
+                        try {
+                            aCtx.complete();
+                        } catch (IllegalStateException ignored) {
+                        }
+                    }
                 }
             }, threadPool);
         } catch (Exception e) {
             logError(req, e);
             sendError(SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG, req, resp);
         }
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        dispatchAsync(req, resp, bucketHandler::doGet);
     }
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        try {
-            resp.setContentType(JSON_CONTENT_TYPE);
-            var ctx = new RequestContext(req, resp, this);
-
-            final AsyncContext aCtx = req.startAsync(req, resp);
-            CompletableFuture.runAsync(() -> {
-                try {
-                    setCurrentUser(req);
-                    bucketHandler.doPost(ctx);
-                } catch (InvalidRequestException e) {
-                    handleInvalidRequestException(req, resp, e);
-                } catch (SecurityException e) {
-                    handleAuthException(req, resp, e);
-                } catch (Exception e) {
-                    if (e.getCause() instanceof InvalidRequestException) {
-                        handleInvalidRequestException(req, resp, (InvalidRequestException) e.getCause());
-                    } else if (isClientDisconnect(e)) {
-                        log.debug("Client closed stream early on {} {}", req.getMethod(), req.getRequestURI());
-                    } else {
-                        logError(req, e);
-                        if (!resp.isCommitted()) {
-                            sendError(SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG, req, resp);
-                        }
-                    }
-                } finally {
-                    clearCurrentUser();
-                    aCtx.complete();
-                }
-            }, threadPool);
-        } catch (Exception e) {
-            logError(req, e);
-            sendError(SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG, req, resp);
-        }
+        dispatchAsync(req, resp, bucketHandler::doPost);
     }
 
     @Override
     protected void doPut(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        try {
-            resp.setContentType(JSON_CONTENT_TYPE);
-            var ctx = new RequestContext(req, resp, this);
-
-            final AsyncContext aCtx = req.startAsync(req, resp);
-            CompletableFuture.runAsync(() -> {
-                try {
-                    setCurrentUser(req);
-                    bucketHandler.doPut(ctx);
-                } catch (InvalidRequestException e) {
-                    handleInvalidRequestException(req, resp, e);
-                } catch (SecurityException e) {
-                    handleAuthException(req, resp, e);
-                } catch (Exception e) {
-                    if (e.getCause() instanceof InvalidRequestException) {
-                        handleInvalidRequestException(req, resp, (InvalidRequestException) e.getCause());
-                    } else if (isClientDisconnect(e)) {
-                        log.debug("Client closed stream early on {} {}", req.getMethod(), req.getRequestURI());
-                    } else {
-                        logError(req, e);
-                        if (!resp.isCommitted()) {
-                            sendError(SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG, req, resp);
-                        }
-                    }
-                } finally {
-                    clearCurrentUser();
-                    aCtx.complete();
-                }
-            }, threadPool);
-        } catch (Exception e) {
-            logError(req, e);
-            sendError(SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG, req, resp);
-        }
+        dispatchAsync(req, resp, bucketHandler::doPut);
     }
 
     @Override
     protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        try {
-            resp.setContentType(JSON_CONTENT_TYPE);
-            var ctx = new RequestContext(req, resp, this);
-
-            final AsyncContext aCtx = req.startAsync(req, resp);
-            CompletableFuture.runAsync(() -> {
-                try {
-                    setCurrentUser(req);
-                    bucketHandler.doDelete(ctx);
-                    ctx.getResponse().setStatus(HttpServletResponse.SC_NO_CONTENT);
-                } catch (InvalidRequestException e) {
-                    handleInvalidRequestException(req, resp, e);
-                } catch (SecurityException e) {
-                    handleAuthException(req, resp, e);
-                } catch (Exception e) {
-                    if (e.getCause() instanceof InvalidRequestException) {
-                        handleInvalidRequestException(req, resp, (InvalidRequestException) e.getCause());
-                    } else if (isClientDisconnect(e)) {
-                        log.debug("Client closed stream early on {} {}", req.getMethod(), req.getRequestURI());
-                    } else {
-                        logError(req, e);
-                        if (!resp.isCommitted()) {
-                            sendError(SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG, req, resp);
-                        }
-                    }
-                } finally {
-                    clearCurrentUser();
-                    aCtx.complete();
-                }
-            }, threadPool);
-        } catch (Exception e) {
-            logError(req, e);
-            sendError(SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG, req, resp);
-        }
+        dispatchAsync(req, resp, ctx -> {
+            bucketHandler.doDelete(ctx);
+            ctx.getResponse().setStatus(HttpServletResponse.SC_NO_CONTENT);
+        });
     }
 
     private void handleInvalidRequestException(HttpServletRequest req, HttpServletResponse resp, InvalidRequestException e) {
