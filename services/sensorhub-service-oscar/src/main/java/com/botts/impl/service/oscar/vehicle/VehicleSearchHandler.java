@@ -60,7 +60,7 @@ public final class VehicleSearchHandler implements IObjectHandler {
     public static final int MAX_VEHICLE_QUERY_LENGTH = 128;
 
     private static final int MAX_CONCURRENT_SEARCHES = 8;
-    private static final long PERMIT_TIMEOUT_SECONDS = 5L;
+    private static final long PERMIT_TIMEOUT_SECONDS = 30L;
     private static final Pattern OBJECT_PATTERN = Pattern.compile("vehicle-search(?:/.*)?");
     private static final Pattern SAFE_OBS_ID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{1,64}$");
 
