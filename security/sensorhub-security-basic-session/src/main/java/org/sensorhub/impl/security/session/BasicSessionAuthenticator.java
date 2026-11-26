@@ -97,6 +97,10 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
     private static final String LOGIN_ENROLL_PASSKEY_OPTIONS_PATH = "/login/enroll/passkey/options";
     private static final String LOGIN_ENROLL_PASSKEY_VERIFY_PATH = "/login/enroll/passkey/verify";
     private static final String LOGOUT_PATH = "/logout";
+    private static final String SENSORHUB_LOGOUT_PATH = "/sensorhub/logout";
+    private static final String ADMIN_LOGOUT_PATH = "/admin/logout";
+    private static final String SENSORHUB_ADMIN_LOGOUT_PATH = "/sensorhub/admin/logout";
+    private static final String SENSORHUB_ADMIN_PATH = "/sensorhub/admin";
     private static final String SESSION_PATH = "/session";
     private static final String SENSORHUB_SESSION_PATH = "/sensorhub/session";
     private static final String RESPONSE_SENT_ATTRIBUTE = BasicSessionAuthenticator.class.getName() + ".responseSent";
@@ -242,8 +246,8 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             pruneExpiredSessions();
             String path = normalizedRequestPath(request);
 
-            if (LOGOUT_PATH.equals(path)) {
-                logout(request, response);
+            if (isLogoutPath(path)) {
+                logout(request, response, path);
                 return Authentication.SEND_CONTINUE;
             }
 
@@ -1931,7 +1935,8 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
     // Logout & HTML Rendering
     // -------------------------------------------------------------------------
 
-    private void logout(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    private void logout(HttpServletRequest request, HttpServletResponse response, String normalizedPath)
+            throws IOException {
         String token = readSessionCookie(request);
         if (token != null)
             identityStore.removeSession(token);
@@ -1950,10 +1955,84 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
             }
         }
 
-        if ("GET".equalsIgnoreCase(request.getMethod()))
-            response.sendRedirect(LOGIN_PATH);
-        else
+        if ("GET".equalsIgnoreCase(request.getMethod())) {
+            String loginRedirect = resolveLogoutRedirectLocation(request, normalizedPath);
+            response.sendRedirect(response.encodeRedirectURL(loginRedirect));
+        } else {
             response.setStatus(HttpServletResponse.SC_NO_CONTENT);
+        }
+    }
+
+    private String resolveLogoutRedirectLocation(HttpServletRequest request, String normalizedPath) {
+        String explicitContinue = request.getParameter("continue");
+        if (explicitContinue != null && !explicitContinue.isEmpty()) {
+            if (!isSafeRedirectTarget(explicitContinue))
+                return LOGIN_PATH;
+            if (explicitContinue.equals(defaultRedirectPath))
+                return LOGIN_PATH;
+            return LOGIN_PATH + "?continue=" + URLEncoder.encode(explicitContinue, StandardCharsets.UTF_8);
+        }
+
+        if (isAdminScopedLogoutPath(normalizedPath) || isSameOriginAdminReferer(request)) {
+            if (isSafeRedirectTarget(SENSORHUB_ADMIN_PATH) && !SENSORHUB_ADMIN_PATH.equals(defaultRedirectPath)) {
+                return LOGIN_PATH + "?continue=" + URLEncoder.encode(SENSORHUB_ADMIN_PATH, StandardCharsets.UTF_8);
+            }
+        }
+        return LOGIN_PATH;
+    }
+
+    private static boolean isLogoutPath(String path) {
+        return LOGOUT_PATH.equals(path)
+                || SENSORHUB_LOGOUT_PATH.equals(path)
+                || ADMIN_LOGOUT_PATH.equals(path)
+                || SENSORHUB_ADMIN_LOGOUT_PATH.equals(path);
+    }
+
+    private static boolean isAdminScopedLogoutPath(String path) {
+        return ADMIN_LOGOUT_PATH.equals(path) || SENSORHUB_ADMIN_LOGOUT_PATH.equals(path);
+    }
+
+    private static boolean isSameOriginAdminReferer(HttpServletRequest request) {
+        String referer = request.getHeader("Referer");
+        if (referer == null || referer.isBlank())
+            return false;
+        try {
+            java.net.URI uri = java.net.URI.create(referer.trim());
+            String refHost = uri.getHost();
+            if (refHost != null && !refHost.isBlank()) {
+                String normalizedRefHost = refHost.startsWith("[") && refHost.endsWith("]")
+                        ? refHost.substring(1, refHost.length() - 1)
+                        : refHost;
+                String explicitReqHost = extractExplicitRequestHost(request);
+                if (explicitReqHost != null && !normalizedRefHost.equalsIgnoreCase(explicitReqHost))
+                    return false;
+            } else if (uri.getRawAuthority() != null && !uri.getRawAuthority().isBlank()) {
+                return false;
+            }
+            String refPath = uri.getRawPath();
+            if (!isSafeRedirectTarget(refPath))
+                return false;
+            return SENSORHUB_ADMIN_PATH.equals(refPath) || refPath.startsWith(SENSORHUB_ADMIN_PATH + "/");
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private static String extractExplicitRequestHost(HttpServletRequest request) {
+        String forwardedHost = request.getHeader("X-Forwarded-Host");
+        String host = (forwardedHost != null && !forwardedHost.isBlank())
+                ? forwardedHost.split(",")[0].trim()
+                : request.getHeader("Host");
+        if (host == null || host.isBlank())
+            host = request.getServerName();
+        if (host == null || host.isBlank())
+            return null;
+        if (host.startsWith("[")) {
+            int end = host.indexOf(']');
+            return end > 0 ? host.substring(1, end) : host;
+        }
+        int colon = host.indexOf(':');
+        return (colon >= 0 ? host.substring(0, colon) : host).toLowerCase(Locale.ROOT);
     }
 
     private void renderLogin(HttpServletResponse response,

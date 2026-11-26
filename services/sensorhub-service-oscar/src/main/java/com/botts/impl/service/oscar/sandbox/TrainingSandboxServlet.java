@@ -4,6 +4,7 @@
  *******************************************************************************/
 package com.botts.impl.service.oscar.sandbox;
 
+import com.botts.impl.system.lane.mobile.MobileDetectorSystem;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -68,7 +69,7 @@ public final class TrainingSandboxServlet extends HttpServlet {
             if (!requireAuthenticatedUser(req, resp)) {
                 return;
             }
-            sendJson(resp, HttpServletResponse.SC_OK, manager.getSandboxActiveStatus());
+            sendJson(resp, HttpServletResponse.SC_OK, enrichVerificationPayload(manager.getSandboxActiveStatus()));
             return;
         }
 
@@ -174,7 +175,7 @@ public final class TrainingSandboxServlet extends HttpServlet {
                     String track = body.has("track") && body.get("track").isJsonPrimitive()
                             ? body.get("track").getAsString()
                             : TrainingSandboxManager.TRACK_OPERATOR;
-                    sendJson(resp, HttpServletResponse.SC_OK, manager.stageTrack(track));
+                    sendJson(resp, HttpServletResponse.SC_OK, enrichVerificationPayload(manager.stageTrack(track)));
                 }
                 case "/certificate" -> {
                     JsonObject body = parseJsonBody(req);
@@ -215,6 +216,44 @@ public final class TrainingSandboxServlet extends HttpServlet {
             sendJsonError(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
                     e.getMessage() != null ? e.getMessage() : "Sandbox operation failed");
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> enrichVerificationPayload(Map<String, Object> statusPayload) {
+        if (statusPayload == null || !Boolean.TRUE.equals(statusPayload.get("sandboxMode"))) {
+            return statusPayload;
+        }
+        Object rawVer = statusPayload.get("verification");
+        if (rawVer instanceof Map<?, ?> verMap) {
+            Map<String, Object> verification = (Map<String, Object>) verMap;
+            boolean configured = Boolean.TRUE.equals(verification.get("mobileDetectorConfigured"))
+                    || hasActiveMobileDetectorModule();
+            verification.put("mobileDetectorConfigured", configured);
+        }
+        return statusPayload;
+    }
+
+    private boolean hasActiveMobileDetectorModule() {
+        if (hub == null || hub.getModuleRegistry() == null) {
+            return false;
+        }
+        var mobiles = hub.getModuleRegistry().getLoadedModules(MobileDetectorSystem.class);
+        if (mobiles != null) {
+            for (MobileDetectorSystem mobile : mobiles) {
+                if (mobile != null && mobile.isStarted()) {
+                    return true;
+                }
+            }
+        }
+        var allLoaded = hub.getModuleRegistry().getLoadedModules();
+        if (allLoaded != null) {
+            for (var mod : allLoaded) {
+                if (mod instanceof MobileDetectorSystem mobile && mobile.isStarted()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private boolean requireAuthenticatedUser(HttpServletRequest req, HttpServletResponse resp) throws IOException {

@@ -18,12 +18,15 @@ package com.botts.impl.system.lane;
 import com.botts.impl.system.lane.helpers.RpmRecoverySupervisor;
 
 
+import com.botts.impl.process.d5.occupancy.D5OccupancyProcessConfig;
+import com.botts.impl.process.d5.occupancy.D5OccupancyProcessModule;
 import com.botts.impl.process.rs350.occupancy.Rs350OccupancyProcessConfig;
 import com.botts.impl.process.rs350.occupancy.Rs350OccupancyProcessModule;
 import com.botts.impl.sensor.aspect.AspectConfig;
 import com.botts.impl.sensor.aspect.AspectSensor;
 import com.botts.impl.sensor.aspect.comm.ModbusTCPCommProvider;
 import com.botts.impl.sensor.aspect.comm.ModbusTCPCommProviderConfig;
+import com.botts.impl.sensor.kromek.d5.D5Sensor;
 import com.botts.impl.sensor.rapiscan.EMLConfig;
 import com.botts.impl.sensor.rapiscan.RapiscanConfig;
 import com.botts.impl.sensor.rapiscan.RapiscanSensor;
@@ -83,7 +86,8 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     private static final String URN_PREFIX = "urn:";
     private static final String LANE_SYSTEM_PREFIX = URN_PREFIX + "osh:system:lane:";
     private static final String RAPISCAN_URI = URN_PREFIX + "osh:sensor:rapiscan";
-    private static final String RS350_URI = URN_PREFIX + "osh:sensor:rs350";
+    private static final String RS350_URI = URN_PREFIX + "osh:sensor:rsi:rs350";
+    private static final String D5_URI = URN_PREFIX + "osh:sensor:kromek:d5";
     private static final String ASPECT_URI = URN_PREFIX + "osh:sensor:aspect";
     private static final String PROCESS_URI = URN_PREFIX + "osh:process:occupancy";
     private static final Set<Class<?>> WEBID_SENSORS = Set.of(RS350Sensor.class);
@@ -188,10 +192,10 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             } else if (member instanceof FFMPEGSensor) {
                 ffmpegConfigs.put(member.getLocalID(), ((FFMPEGSensor) member).getConfiguration());
 
-            // Want to be able to handle both RS350 and its process.
-            } else if (member instanceof RS350Sensor) {
+            // Want to be able to handle both RS350/D5 and their processes.
+            } else if (member instanceof RS350Sensor || member instanceof D5Sensor) {
                 existingRPMModule = (AbstractSensorModule<?>) member;
-            } else if (member instanceof Rs350OccupancyProcessModule) {
+            } else if (member instanceof Rs350OccupancyProcessModule || member instanceof D5OccupancyProcessModule) {
                 occupancyProducer = (IDataProducerModule<?>) member;
             }
         }
@@ -250,7 +254,8 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                 }
                 catch (Exception e) {
                     // If RPM fails to initialize, then don't load process module
-                    if (module instanceof RapiscanSensor || module instanceof AspectSensor || module instanceof RS350Sensor)
+                    if (module instanceof RapiscanSensor || module instanceof AspectSensor
+                            || module instanceof RS350Sensor || module instanceof D5Sensor)
                         rpmFailedToInit = true;
                     getLogger().error("Cannot initialize system component {}", MsgUtils.moduleString(module), e);
                 }
@@ -285,6 +290,11 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         synchronized (sensorDescLock) {
             super.updateSensorDescription();
 
+            String defUri = getSystemDefinitionUri();
+            if (defUri != null && sensorDescription != null) {
+                sensorDescription.setDefinition(defUri);
+            }
+
             if (config == null)
                 return;
 
@@ -299,14 +309,28 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                         .map(key -> OPERATIONAL_VIEW_KEYWORD_PREFIX + key)
                         .forEach(keywords::addKeyword);
             }
-            keywords.addKeyword(EXTENDED_OCCUPANCY_THRESHOLD_KEYWORD_PREFIX + getExtendedOccupancyThresholdMinutes());
+            if (isExtendedOccupancyMonitoringEnabled()) {
+                keywords.addKeyword(EXTENDED_OCCUPANCY_THRESHOLD_KEYWORD_PREFIX + getExtendedOccupancyThresholdMinutes());
+            }
             if (getConfiguration().webRelayConfig != null && getConfiguration().webRelayConfig.enabled) {
                 keywords.addKeyword("oscar:webrelay-enabled:true");
             }
+            contributeAdditionalKeywords(keywords);
 
             if (keywords.getNumKeywords() > 0)
                 sensorDescription.addKeywords(keywords);
         }
+    }
+
+    protected boolean isExtendedOccupancyMonitoringEnabled() {
+        return true;
+    }
+
+    protected String getSystemDefinitionUri() {
+        return null;
+    }
+
+    protected void contributeAdditionalKeywords(net.opengis.sensorml.v20.KeywordList keywords) {
     }
 
     public int getExtendedOccupancyThresholdMinutes() {
@@ -439,8 +463,8 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     }
 
     private void removeOccupancyProcess() throws SensorHubException {
-        for (var member : this.getMembers().values()) {
-            if (member instanceof Rs350OccupancyProcessModule) {
+        for (var member : new ArrayList<>(this.getMembers().values())) {
+            if (member instanceof Rs350OccupancyProcessModule || member instanceof D5OccupancyProcessModule) {
                 this.removeSubSystem(member.getConfiguration().id);
             }
         }
@@ -460,12 +484,23 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                 OccupancyProcessStarter.startIfStranded(occupancyProducer, isStarted(),
                         autoStartDispatchComplete, threadPool, getLogger());
             }
+        } else if (existingRPMModule instanceof D5Sensor d5Module) {
+            var processConfig = createOccupancyProcessConfig(d5Module);
+            occupancyProducer = (IDataProducerModule<?>) registerSubmodule(processConfig);
+            if (d5Module.getCurrentState() == ModuleEvent.ModuleState.STARTED
+                    && occupancyProducer instanceof D5OccupancyProcessModule d5Process) {
+                d5Process.getConfiguration().systemUID = d5Module.getUniqueIdentifier();
+                occupancyProducer.init();
+                OccupancyProcessStarter.startIfStranded(occupancyProducer, isStarted(),
+                        autoStartDispatchComplete, threadPool, getLogger());
+            }
         } else {
             occupancyProducer = existingRPMModule;
         }
         if (occupancyProducer != null) {
             occupancyWrapper = new OccupancyWrapper(getParentHub(), occupancyProducer, occupancyStatusOutput);
             occupancyWrapper.setExtendedOccupancyThresholdMinutes(getExtendedOccupancyThresholdMinutes());
+            occupancyWrapper.setExtendedOccupancyMonitoringEnabled(isExtendedOccupancyMonitoringEnabled());
             for (var member : getMembers().values()) {
                 if (member instanceof FFMPEGSensorBase<?> cam
                         && cam.getCurrentState() == ModuleEvent.ModuleState.STARTED) {
@@ -754,7 +789,10 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             if (event.getParentGroupUID() != null && event.getParentGroupUID().equals(getUniqueIdentifier())) {
 
                 // If RPM is removed, nullify local object
-                if (event.getSystemUID().contains(RAPISCAN_URI) || event.getSystemUID().contains(ASPECT_URI) || event.getSystemUID().contains(RS350_URI)) {
+                if (event.getSystemUID().contains(RAPISCAN_URI)
+                        || event.getSystemUID().contains(ASPECT_URI)
+                        || event.getSystemUID().contains(RS350_URI)
+                        || event.getSystemUID().contains(D5_URI)) {
                     if (occupancyWrapper != null)
                         occupancyWrapper.removeRpmSensor();
                     existingRPMModule = null;
@@ -796,26 +834,29 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                     }
                 }
 
-                else if ((event.getModule() instanceof RapiscanSensor || event.getModule() instanceof AspectSensor || event.getModule() instanceof RS350Sensor)
+                else if ((event.getModule() instanceof RapiscanSensor
+                        || event.getModule() instanceof AspectSensor
+                        || event.getModule() instanceof RS350Sensor
+                        || event.getModule() instanceof D5Sensor)
                 && getMembers().containsValue(event.getModule())) {
                     var state = event.getNewState();
 
                     if (state == ModuleEvent.ModuleState.STARTED) {
-                        if (occupancyProducer != existingRPMModule) {
+                        if (occupancyProducer != existingRPMModule && occupancyProducer != null) {
                             try {
                                 if (occupancyProducer instanceof Rs350OccupancyProcessModule rs350Process) {
                                     rs350Process.getConfiguration().systemUID = existingRPMModule.getUniqueIdentifier();
+                                } else if (occupancyProducer instanceof D5OccupancyProcessModule d5Process) {
+                                    d5Process.getConfiguration().systemUID = existingRPMModule.getUniqueIdentifier();
                                 }
                                 occupancyProducer.init();
                             } catch (SensorHubException ex) {
                                 throw new RuntimeException(ex);
                             }
-                            // A detector that comes up after the lane's auto-start pass leaves
-                            // the process initialized but never started.
                             OccupancyProcessStarter.startIfStranded(occupancyProducer, isStarted(),
                                     autoStartDispatchComplete, threadPool, getLogger());
                         }
-                        if (occupancyWrapper != null)
+                        if (occupancyWrapper != null && occupancyProducer != null)
                             occupancyWrapper.setRpmSensor((IDataProducerModule<?>) occupancyProducer);
                     } else {
                         if (occupancyWrapper != null)
@@ -863,7 +904,8 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                 // Child RPM config changed in Admin UI or API -> sync back to LaneOptionsConfig
                 if ((event.getModule() instanceof RapiscanSensor
                         || event.getModule() instanceof AspectSensor
-                        || event.getModule() instanceof RS350Sensor)
+                        || event.getModule() instanceof RS350Sensor
+                        || event.getModule() instanceof D5Sensor)
                         && getMembers().containsValue(event.getModule())) {
                     var rpmModule = (AbstractSensorModule<?>) event.getModule();
                     syncSubsystemConfigReference(rpmModule);
@@ -920,16 +962,20 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     private ModuleConfig createOccupancyProcessConfig(AbstractSensorModule<?> parentRpm) {
         ModuleConfig config = null;
 
-        // Using this structure just in case another type of rpm is added that needs a process
         if (parentRpm instanceof RS350Sensor) {
-            String rpmId = parentRpm.getUniqueIdentifier();
             var rs350Config = new Rs350OccupancyProcessConfig();
-
             rs350Config.serialNumber = getConfiguration().uniqueID;
             rs350Config.moduleClass = Rs350OccupancyProcessModule.class.getCanonicalName();
+            rs350Config.name = getConfiguration().name + " - Occupancy";
             rs350Config.autoStart = true;
-
             config = rs350Config;
+        } else if (parentRpm instanceof D5Sensor) {
+            var d5Config = new D5OccupancyProcessConfig();
+            d5Config.serialNumber = getConfiguration().uniqueID;
+            d5Config.moduleClass = D5OccupancyProcessModule.class.getCanonicalName();
+            d5Config.name = getConfiguration().name + " - Occupancy";
+            d5Config.autoStart = true;
+            config = d5Config;
         }
         return config;
     }
@@ -1002,49 +1048,7 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
     }
     
     private FFMPEGConfig createFFmpegConfig(FFMpegConfig ffmpegConfig, int videoIndex) {
-        String defaultAxis = AxisCameraConfig.CodecEndpoint.H264.getPath();
-
-        Asserts.checkNotNull(ffmpegConfig.remoteHost);
-
-        // This is the actual ffmpeg sensor config
-        StringBuilder endpoint = new StringBuilder("rtsp://"); // All streams should be over rtsp
-
-        // Add username and password if provided
-        if (ffmpegConfig.username != null && !ffmpegConfig.username.isBlank()) {
-            endpoint.append(ffmpegConfig.username);
-            endpoint.append(":");
-            endpoint.append(ffmpegConfig.password);
-            endpoint.append("@");
-        }
-        endpoint.append(ffmpegConfig.remoteHost);
-
-        FFMPEGConfig config = new FFMPEGConfig();
-
-        String path = defaultAxis;
-
-        if(ffmpegConfig instanceof AxisCameraConfig axisVideoConfig){
-             path = axisVideoConfig.streamPath.getPath();
-        }else if (ffmpegConfig instanceof SonyCameraConfig sonyVideoConfig){
-             path = sonyVideoConfig.streamPath;
-        }else if(ffmpegConfig instanceof CustomCameraConfig customVideoConfig){
-             path = !customVideoConfig.streamPath.isEmpty() ? customVideoConfig.streamPath : defaultAxis;
-        }
-
-        endpoint.append(normalizeStreamPath(path, defaultAxis));
-
-        config.connection.useTCP = true;
-        config.connection.fps = 30;
-        config.name = getConfiguration().name + " - Camera " + videoIndex;
-        config.serialNumber = "lane:" + getConfiguration().uniqueID + ":" + videoIndex;
-        config.autoStart = true;
-        config.connection.connectionString = endpoint.toString();
-        config.moduleClass = FFMPEGSensor.class.getCanonicalName();
-        config.connectionConfig.connectTimeout = 4500;
-        config.connectionConfig.reconnectAttempts = -1;
-        config.output.useHLS = true;
-        config.output.useVideoFrames = false;
-        config.connection.bufferSize = ffmpegConfig.bufferSize;
-        return config;
+        return LaneEndpointSync.createInitialFFmpegChildConfig(getConfiguration(), ffmpegConfig, videoIndex);
     }
 
     static String normalizeStreamPath(String path, String fallbackPath) {
@@ -1070,6 +1074,12 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
         syncingEndpoints.set(true);
         try {
             var opts = getConfiguration().laneOptionsConfig;
+            if (getConfiguration() instanceof com.botts.impl.system.lane.mobile.config.MobileDetectorConfig mobileCfg) {
+                if (mobileCfg.detectorConfig != null) {
+                    opts.rpmConfig = mobileCfg.detectorConfig;
+                }
+                opts.ffmpegConfig = new ArrayList<>();
+            }
 
             // 1. Reconcile RPM configuration bidirectionally
             SensorConfig existingRpmCfg = existingRPMModule != null
@@ -1101,6 +1111,9 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
                 configDirty = true;
             } else if (rpmResult.action() == LaneEndpointSync.SyncAction.UPDATE_PARENT) {
                 opts.rpmConfig = rpmResult.simpleConfig();
+                if (getConfiguration() instanceof com.botts.impl.system.lane.mobile.config.MobileDetectorConfig mobileCfg) {
+                    mobileCfg.detectorConfig = opts.rpmConfig;
+                }
                 configDirty = true;
             }
 
@@ -1206,6 +1219,9 @@ public class LaneSystem extends SensorSystem implements IAutoStartDispatchStatus
             getConfiguration().laneOptionsConfig.rpmConfig = LaneEndpointSync.extractSimpleRpmConfig(
                     (SensorConfig) rpmModule.getConfiguration(),
                     existingSimple);
+            if (getConfiguration() instanceof com.botts.impl.system.lane.mobile.config.MobileDetectorConfig mobileCfg) {
+                mobileCfg.detectorConfig = getConfiguration().laneOptionsConfig.rpmConfig;
+            }
             persistLaneConfigurationSafely();
         } finally {
             syncingEndpoints.set(false);

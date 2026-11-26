@@ -90,6 +90,179 @@ public class StatisticsTests {
     }
 
     @Test
+    public void occupancyExtendedAlarmsAreCountedOnceWhileStandaloneRawAlarmStreamsRemainCounted() throws Exception {
+        var federatedDatabase = hub.getDatabaseRegistry().getFederatedDatabase();
+        var oscarDsKeys = federatedDatabase.getDataStreamStore().selectKeys(
+                new DataStreamFilter.Builder()
+                        .withSystems().withUniqueIDs(system.getUniqueIdentifier()).done()
+                        .withOutputNames(StatisticsOutput.NAME)
+                        .build()
+        ).map(org.sensorhub.api.resource.ResourceKey::getInternalID).toList();
+        assertEquals(1, oscarDsKeys.size());
+        var writableDb = hub.getDatabaseRegistry().getObsDatabaseByNum(oscarDsKeys.get(0).getScope());
+        assertNotNull(writableDb);
+
+        // Clear any baseline siteStatistics observations so publishLatestStatistics counts from epoch
+        writableDb.getObservationStore().removeEntries(new ObsFilter.Builder()
+                .withDataStreams(oscarDsKeys.get(0))
+                .build());
+
+        var sml = new org.vast.sensorML.SMLHelper();
+        var rad = new org.sensorhub.impl.utils.rad.RADHelper();
+
+        // 1. Mobile / RS-350 / D5 lane publishing OccupancyExtended (carries BOTH DEF_OCCUPANCY and DEF_ALARM_CATEGORY)
+        String mobileLaneUid = "urn:osh:system:lane:mobile-stats-1";
+        BigId mobileSysId = writableDb.getSystemDescStore().add(new org.sensorhub.impl.system.wrapper.SystemWrapper(
+                sml.createPhysicalSystem().uniqueID(mobileLaneUid).name("Mobile Stats 1").build())).getInternalID();
+
+        var extStruct = org.sensorhub.impl.utils.rad.model.OccupancyExtended.createExtendedRecordStructure();
+        BigId extOccDsId = writableDb.getObservationStore().getDataStreams().add(new org.sensorhub.api.data.DataStreamInfo.Builder()
+                .withSystem(new org.sensorhub.api.feature.FeatureId(mobileSysId, mobileLaneUid))
+                .withName("occupancy")
+                .withRecordDescription(extStruct)
+                .withRecordEncoding(new org.vast.data.TextEncodingImpl(",", "\n"))
+                .build()).getInternalID();
+
+        Instant tAlarm = Instant.now().minus(5, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.SECONDS);
+        var mobileOcc = (org.sensorhub.impl.utils.rad.model.OccupancyExtended)
+                new org.sensorhub.impl.utils.rad.model.OccupancyExtended.Builder()
+                        .alarmCategory("Gamma")
+                        .location(35.9311, -84.3102)
+                        .samplingTime(tAlarm.getEpochSecond())
+                        .occupancyCount(1)
+                        .startTime(tAlarm.minusSeconds(4).getEpochSecond())
+                        .endTime(tAlarm.getEpochSecond())
+                        .gammaAlarm(true)
+                        .neutronAlarm(false)
+                        .maxGammaCount(2100)
+                        .maxNeutronCount(3)
+                        .build();
+        writableDb.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(extOccDsId)
+                .withPhenomenonTime(tAlarm)
+                .withResultTime(tAlarm)
+                .withResult(org.sensorhub.impl.utils.rad.model.OccupancyExtended.fromOccupancy(mobileOcc))
+                .build());
+
+        // 2a. Scoped statsControl on mobileLaneUid directly against InMemorySystemDatabase:
+        // OccupancyExtended carries DEF_ALARM_CATEGORY, so before excluding DEF_OCCUPANCY streams
+        // InMemorySystemDatabase counted it 3 times (1 DEF_OCCUPANCY + 2 raw DEF_ALARM_CATEGORY queries).
+        // With the fix, selectNonOccupancyAlarmCategoryStreamIds excludes extOccDsId -> numOccupancies == 1.
+        var scopedCmd = statsControl.getCommandDescription().copy().createDataBlock();
+        scopedCmd.setTimeStamp(0, Instant.EPOCH);
+        scopedCmd.setTimeStamp(1, Instant.now().plusSeconds(60));
+        scopedCmd.setStringValue(2, mobileLaneUid);
+        var scopedStatus = statsControl.submitCommand(new CommandData(99, scopedCmd)).get();
+        assertEquals(ICommandStatus.CommandStatusCode.COMPLETED, scopedStatus.getStatusCode());
+        var scopedBlock = scopedStatus.getResult().getInlineRecords().stream().findFirst().orElseThrow();
+        assertEquals("Mobile OccupancyExtended stream must be counted once, never re-counted as raw AlarmOutput",
+                1L, scopedBlock.getLongValue(0));
+
+        statsOutput.stop();
+        writableDb.getObservationStore().removeEntries(new ObsFilter.Builder()
+                .withDataStreams(oscarDsKeys.get(0))
+                .build());
+
+        // 2b. Standalone raw RS-350 AlarmOutput stream (carries DEF_ALARM_CATEGORY, NOT DEF_OCCUPANCY)
+        String rawSensorUid = "urn:osh:sensor:rsi:rs350:standalone-raw";
+        BigId rawSysId = writableDb.getSystemDescStore().add(new org.sensorhub.impl.system.wrapper.SystemWrapper(
+                sml.createPhysicalSystem().uniqueID(rawSensorUid).name("Standalone RS350").build())).getInternalID();
+        var rawAlarmStruct = rad.createRecord()
+                .name("alarm")
+                .label("Alarm")
+                .definition(org.sensorhub.impl.utils.rad.RADHelper.getRadUri("AlarmOutput"))
+                .addField("samplingTime", rad.createPrecisionTimeStamp())
+                .addField("alarmCategoryCode", rad.createAlarmCatCode())
+                .build();
+        BigId rawAlarmDsId = writableDb.getObservationStore().getDataStreams().add(new org.sensorhub.api.data.DataStreamInfo.Builder()
+                .withSystem(new org.sensorhub.api.feature.FeatureId(rawSysId, rawSensorUid))
+                .withName("alarm")
+                .withRecordDescription(rawAlarmStruct)
+                .withRecordEncoding(new org.vast.data.TextEncodingImpl(",", "\n"))
+                .build()).getInternalID();
+
+        var rawAlarmBlock = rawAlarmStruct.createDataBlock();
+        rawAlarmBlock.setDoubleValue(0, tAlarm.plusSeconds(10).getEpochSecond());
+        rawAlarmBlock.setStringValue(1, "Neutron");
+        writableDb.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(rawAlarmDsId)
+                .withPhenomenonTime(tAlarm.plusSeconds(10))
+                .withResultTime(tAlarm.plusSeconds(10))
+                .withResult(rawAlarmBlock)
+                .build());
+
+        // Wrap federatedDatabase's countMatchingEntries to evaluate CQL predicates (which InMemorySystemDatabase ignores)
+        var baseObsStore = federatedDatabase.getObservationStore();
+        var cqlAwareObsStore = (org.sensorhub.api.datastore.obs.IObsStore) java.lang.reflect.Proxy.newProxyInstance(
+                org.sensorhub.api.datastore.obs.IObsStore.class.getClassLoader(),
+                new Class<?>[]{org.sensorhub.api.datastore.obs.IObsStore.class},
+                (proxy, method, args) -> {
+                    if ("countMatchingEntries".equals(method.getName())
+                            && args != null && args.length == 1
+                            && args[0] instanceof ObsFilter filter
+                            && filter.getCQLFilter() != null) {
+                        var cql = filter.getCQLFilter();
+                        try (var stream = baseObsStore.select(filter)) {
+                            return stream.filter(obs -> matchesSimpleStatsCql(
+                                    federatedDatabase.getDataStreamStore().get(new org.sensorhub.api.datastore.obs.DataStreamKey(obs.getDataStreamID())),
+                                    obs.getResult(),
+                                    cql)).count();
+                        }
+                    }
+                    return method.invoke(baseObsStore, args);
+                });
+        var cqlAwareDb = (IObsSystemDatabase) java.lang.reflect.Proxy.newProxyInstance(
+                IObsSystemDatabase.class.getClassLoader(),
+                new Class<?>[]{IObsSystemDatabase.class},
+                (proxy, method, args) -> "getObservationStore".equals(method.getName())
+                        ? cqlAwareObsStore
+                        : method.invoke(federatedDatabase, args));
+
+        StatisticsOutput isolatedStats = new StatisticsOutput(system, cqlAwareDb, 60);
+        isolatedStats.publishLatestStatistics();
+        var rec = isolatedStats.getLatestRecord();
+        assertNotNull(rec);
+        assertEquals("OccupancyExtended (1) + standalone raw AlarmOutput (1) must equal 2 total occupancies",
+                2L, rec.getLongValue(1));
+        assertEquals("Expected exactly 1 Gamma alarm from OccupancyExtended",
+                1L, rec.getLongValue(2));
+        assertEquals("Expected 1 Neutron alarm from standalone raw AlarmOutput",
+                1L, rec.getLongValue(3));
+        assertEquals("Expected 0 combined Gamma-Neutron alarms",
+                0L, rec.getLongValue(4));
+    }
+
+    private static boolean matchesSimpleStatsCql(
+            org.sensorhub.api.data.IDataStreamInfo dsInfo,
+            net.opengis.swe.v20.DataBlock result,
+            Object cql) {
+        if (dsInfo == null || result == null || cql == null) {
+            return false;
+        }
+        var struct = dsInfo.getRecordStructure().copy();
+        struct.setData(result);
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.gammaAlarmCQL).build().getCQLFilter(), cql)) {
+            return struct.getComponent("gammaAlarm").getData().getBooleanValue()
+                    && !struct.getComponent("neutronAlarm").getData().getBooleanValue();
+        }
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.neutronAlarmCQL).build().getCQLFilter(), cql)) {
+            return !struct.getComponent("gammaAlarm").getData().getBooleanValue()
+                    && struct.getComponent("neutronAlarm").getData().getBooleanValue();
+        }
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.gammaNeutronAlarmCQL).build().getCQLFilter(), cql)) {
+            return struct.getComponent("gammaAlarm").getData().getBooleanValue()
+                    && struct.getComponent("neutronAlarm").getData().getBooleanValue();
+        }
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.rs350GammaAlarmCQL).build().getCQLFilter(), cql)) {
+            return "Gamma".equals(struct.getComponent("alarmCategoryCode").getData().getStringValue());
+        }
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.rs350NeutronAlarmCQL).build().getCQLFilter(), cql)) {
+            return "Neutron".equals(struct.getComponent("alarmCategoryCode").getData().getStringValue());
+        }
+        return false;
+    }
+
+    @Test
     public void legacyStatisticsCutoffDoesNotDoubleCountExistingTotals() {
         statsOutput.stop();
         var federatedDatabase = hub.getDatabaseRegistry().getFederatedDatabase();

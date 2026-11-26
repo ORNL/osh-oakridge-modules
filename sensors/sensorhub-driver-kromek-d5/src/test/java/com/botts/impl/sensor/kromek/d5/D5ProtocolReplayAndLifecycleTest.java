@@ -314,6 +314,104 @@ public class D5ProtocolReplayAndLifecycleTest {
         assertFalse("Sensor must report disconnected after stop", sensor.isConnected());
     }
 
+    @Test
+    public void locationOutputDefaultsDisabledFiltersZeroCoordsAndSensorAutoReconnectsAfterPeerDrop()
+            throws Exception {
+        assertFalse("D5ConfigOutputs.enableLocationOutput must default to false",
+                new D5ConfigOutputs().enableLocationOutput);
+
+        // Unit-level D5LocationOutput checks: (0,0) ignored, ms timestamps, latestRecord populated
+        D5Sensor unitSensor = new D5Sensor() {
+            @Override
+            public String getUniqueIdentifier() {
+                return "urn:osh:sensor:kromek:d5:test-01";
+            }
+        };
+        D5LocationOutput locOut = new D5LocationOutput(unitSensor);
+        locOut.doInit();
+        List<DataEvent> locEvents = new CopyOnWriteArrayList<>();
+        locOut.registerListener(ev -> {
+            if (ev instanceof DataEvent de) {
+                locEvents.add(de);
+            }
+        });
+        locOut.onNewFix(0.0, 0.0);
+        assertEquals(0, locEvents.size());
+        assertNull(locOut.getLatestRecord());
+
+        long beforeMs = System.currentTimeMillis();
+        locOut.onNewFix(35.9311, -84.3102);
+        long afterMs = System.currentTimeMillis();
+        assertEquals(1, locEvents.size());
+        assertTrue(locEvents.get(0).getTimeStamp() >= beforeMs && locEvents.get(0).getTimeStamp() <= afterMs);
+        assertNotNull(locOut.getLatestRecord());
+        assertEquals(35.9311, locOut.getLatestRecord().getDoubleValue(1), 1e-6);
+        assertEquals(-84.3102, locOut.getLatestRecord().getDoubleValue(2), 1e-6);
+        assertFalse(locOut.getRecordDescription().hasData());
+
+        // End-to-end TCP drop & automatic reconnect test with fast poll/reconnect intervals
+        LoopbackD5TcpServer server = track(new LoopbackD5TcpServer());
+        hub = new SensorHub();
+        hub.start();
+        var reg = hub.getModuleRegistry();
+
+        D5Config config = new D5Config();
+        config.id = "kromek-d5-reconnect";
+        config.name = "Kromek D5 Reconnect Walker";
+        config.serialNumber = "D5-RECONN-01";
+        config.outputs.enableKromekDetectorRadiometricsV1Report = false;
+        config.outputs.enableKromekSerialRadiometricStatusReport = true;
+        config.outputs.enableLocationOutput = true;
+
+        TCPCommProviderConfig comm = new TCPCommProviderConfig();
+        comm.connection.connectTimeout = 1_500;
+        comm.connection.reconnectAttempts = 1;
+        comm.connection.checkReachability = false;
+        TCPConfig tcp = new TCPConfig();
+        tcp.remoteHost = "127.0.0.1";
+        tcp.remotePort = server.getPort();
+        comm.protocol = tcp;
+        config.commSettings = comm;
+
+        D5Sensor sensor = new D5Sensor() {
+            @Override long routerPollPeriodMs() { return 80L; }
+            @Override long reconnectInitialDelayMs() { return 80L; }
+        };
+        sensor.setParentHub(hub);
+        sensor.setConfiguration(config);
+        sensor.init();
+        assertTrue(sensor.waitForState(ModuleEvent.ModuleState.INITIALIZED, 5_000));
+        assertNotNull("Expected location output when enableLocationOutput=true",
+                sensor.getOutputs().get("location"));
+
+        CountDownLatch initialFixLatch = new CountDownLatch(1);
+        AtomicBoolean postDropPhase = new AtomicBoolean(false);
+        CountDownLatch postReconnectFixLatch = new CountDownLatch(1);
+
+        sensor.getOutputs().get("location").registerListener(ev -> {
+            if (ev instanceof DataEvent) {
+                initialFixLatch.countDown();
+                if (postDropPhase.get()) {
+                    postReconnectFixLatch.countDown();
+                }
+            }
+        });
+
+        sensor.start();
+        assertTrue(sensor.waitForState(ModuleEvent.ModuleState.STARTED, 5_000));
+        assertTrue("Expected initial location fix over TCP", initialFixLatch.await(5, TimeUnit.SECONDS));
+
+        // Force-close active client sockets on the server while keeping ServerSocket open for reconnect
+        server.dropActiveClients();
+        postDropPhase.set(true);
+
+        assertTrue("Expected D5Sensor to detect 3 failed cycles, reconnect, and resume publishing fixes",
+                postReconnectFixLatch.await(5, TimeUnit.SECONDS));
+
+        sensor.stop();
+        assertTrue(sensor.waitForState(ModuleEvent.ModuleState.STOPPED, 5_000));
+    }
+
     private <T extends Closeable> T track(T closeable) {
         resources.add(closeable);
         return closeable;
@@ -479,9 +577,7 @@ public class D5ProtocolReplayAndLifecycleTest {
             }
         }
 
-        @Override
-        public void close() throws IOException {
-            closed.set(true);
+        void dropActiveClients() {
             synchronized (clients) {
                 for (Socket s : clients) {
                     try {
@@ -491,6 +587,12 @@ public class D5ProtocolReplayAndLifecycleTest {
                 }
                 clients.clear();
             }
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed.set(true);
+            dropActiveClients();
             serverSocket.close();
         }
     }

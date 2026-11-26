@@ -26,7 +26,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 
 /**
- * Output specification and provider for R5Sensor driver.
+ * Output specification and provider for D5Sensor driver.
  *
  * @author Michael Elmore
  * @since Oct. 2023
@@ -35,6 +35,7 @@ public class D5Output extends AbstractSensorOutput<D5Sensor> {
     public static final Logger logger = LoggerFactory.getLogger(D5Output.class);
 
     private DataRecord dataRecord;
+    private DataRecord liveDataRecord;
     private DataEncoding dataEncoding;
 
     long lastSetTimeMillis = System.currentTimeMillis();
@@ -44,26 +45,16 @@ public class D5Output extends AbstractSensorOutput<D5Sensor> {
     private final long[] timingHistogram = new long[MAX_NUM_TIMING_SAMPLES];
     private final Object histogramLock = new Object();
 
-    /**
-     * Constructor
-     *
-     * @param parentSensor Sensor driver providing this output
-     */
     D5Output(String outputName, D5Sensor parentSensor) {
         super(outputName, parentSensor);
-
         logger.debug("Output created");
     }
 
-    /**
-     * Initializes the data structure for the output, defining the fields, their ordering,
-     * and data types.
-     */
     void doInit(SerialReport data) {
         logger.debug("Initializing output");
 
         dataRecord = data.createDataRecord();
-
+        liveDataRecord = dataRecord.copy();
         dataEncoding = new SWEHelper().newTextEncoding(",", "\n");
 
         logger.debug("Initializing output Complete");
@@ -97,32 +88,25 @@ public class D5Output extends AbstractSensorOutput<D5Sensor> {
 
     public void setData(SerialReport data) {
         try {
-            DataBlock dataBlock;
-            if (latestRecord == null) {
-                dataBlock = dataRecord.createDataBlock();
-            } else {
-                dataBlock = latestRecord.renew();
-            }
+            DataRecord workingRecord = liveDataRecord != null ? liveDataRecord : dataRecord;
+            DataBlock dataBlock = latestRecord == null
+                    ? workingRecord.createDataBlock()
+                    : latestRecord.renew();
 
+            long nowMillis = System.currentTimeMillis();
             synchronized (histogramLock) {
                 int setIndex = setCount % MAX_NUM_TIMING_SAMPLES;
-
-                // Get a sampling time for the latest set based on the previously set sampling time
-                timingHistogram[setIndex] = System.currentTimeMillis() - lastSetTimeMillis;
-
-                // Set the latest sampling time to now
-                lastSetTimeMillis = timingHistogram[setIndex];
+                timingHistogram[setIndex] = nowMillis - lastSetTimeMillis;
+                lastSetTimeMillis = nowMillis;
             }
 
             ++setCount;
 
-            double timestamp = System.currentTimeMillis() / 1000d;
-
-            data.setDataBlock(dataBlock, dataRecord, timestamp);
+            double timestamp = nowMillis / 1000.0;
+            data.setDataBlock(dataBlock, workingRecord, timestamp);
 
             latestRecord = dataBlock;
-
-            latestRecordTime = System.currentTimeMillis();
+            latestRecordTime = nowMillis;
 
             eventHandler.publish(new DataEvent(latestRecordTime, D5Output.this, dataBlock));
         } catch (Exception e) {

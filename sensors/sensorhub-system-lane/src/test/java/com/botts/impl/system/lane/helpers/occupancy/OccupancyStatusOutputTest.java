@@ -209,6 +209,44 @@ public class OccupancyStatusOutputTest {
                 normalGammaOnly.getAdjudicatedIds().isEmpty());
     }
 
+    @Test
+    public void mobileLaneNeverAutoAdjudicatesOrFaultsOnLongOccupancies() {
+        var output = newTestOutput();
+        var rs350 = new Rs350OccupancyProcessModule() {
+            @Override
+            public String getUniqueIdentifier() {
+                return "urn:osh:process:rs350:mobile-ext-test";
+            }
+        };
+        var wrapper = new OccupancyWrapper(null, rs350, output);
+        wrapper.setExtendedOccupancyMonitoringEnabled(false);
+
+        double startSec = 1_760_000_000.0;
+        Occupancy longGammaOnly = new Occupancy.Builder()
+                .samplingTime(startSec + 300.0)
+                .occupancyCount(201)
+                .startTime(startSec)
+                .endTime(startSec + 300.0)
+                .gammaAlarm(true)
+                .neutronAlarm(false)
+                .maxGammaCount(2450)
+                .maxNeutronCount(3)
+                .adjudicatedIds(List.of())
+                .build();
+        wrapper.evaluateCompletedOccupancy(longGammaOnly);
+        assertTrue("Mobile alarms must stay in the operator queue",
+                longGammaOnly.getAdjudicatedIds().isEmpty());
+        assertNull(PendingExtendedOccupancyAutoAdjudicationRegistry.claim(
+                rs350.getUniqueIdentifier(), longGammaOnly.getSamplingTime(), longGammaOnly.getOccupancyCount()));
+
+        assertTrue(wrapper.processDailyFile(rs350DailyFile(false, false, null), CLEAR_TIME));
+        assertTrue(wrapper.processDailyFile(rs350DailyFile(true, true, RS350_SOURCE_START), OCCUPIED_TIME));
+        Instant wellPastThreshold = OCCUPIED_TIME.plusSeconds(600);
+        assertTrue(wrapper.processDailyFile(rs350DailyFile(true, true, RS350_SOURCE_START), wellPastThreshold));
+        assertStatus(output, true, epochSeconds(RS350_SOURCE_START), OCCUPIED_TIME, false,
+                OccupancyStatusOutput.CLEAR_ALARM_STATE);
+    }
+
     private static void assertCanonicalLifecycle(
             IDataProducerModule<?> rpm,
             Supplier<DataComponent> clearSample,

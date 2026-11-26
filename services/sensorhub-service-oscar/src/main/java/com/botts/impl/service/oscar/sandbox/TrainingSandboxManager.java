@@ -19,6 +19,7 @@ import com.botts.impl.system.lane.config.OcrConfig;
 import com.botts.impl.system.lane.config.RapiscanRPMConfig;
 import com.botts.impl.system.lane.config.WebRelayConfig;
 import com.botts.impl.system.lane.config.WebRelayOperatingMode;
+import com.botts.impl.system.lane.mobile.MobileDetectorSystem;
 import org.sensorhub.api.ISensorHub;
 import org.sensorhub.api.command.CommandData;
 import org.sensorhub.api.command.ICommandStatus;
@@ -99,6 +100,7 @@ public final class TrainingSandboxManager implements Closeable {
     private SandboxRapiscanLoopbackServer rapiscan2;
     private SandboxWebRelayLoopbackServer webrelay1;
     private SandboxWebRelayLoopbackServer webrelay2;
+    private SandboxRs350LoopbackServer rs350Walker;
     private SandboxRtspCameraStreamer cameraStreamer;
     private ExecutorService backgroundSeeder;
     private volatile String activeTrack = TRACK_OPERATOR;
@@ -158,6 +160,10 @@ public final class TrainingSandboxManager implements Closeable {
             this.webrelay2 = new SandboxWebRelayLoopbackServer(wrPort2, "DemoLane02-WebRelay", log);
             this.webrelay2.start();
 
+            int rs350Port = Integer.getInteger("oscar.sandbox.rs350Port", TrainingSandboxEnvironment.DEFAULT_RS350_PORT);
+            this.rs350Walker = new SandboxRs350LoopbackServer(rs350Port, "PatrolRS350", log);
+            this.rs350Walker.start();
+
             boolean skipRtsp = Boolean.getBoolean("oscar.sandbox.skipRtsp");
             if (!skipRtsp) {
                 int rtspPort = Integer.getInteger("oscar.sandbox.rtspPort", TrainingSandboxEnvironment.DEFAULT_RTSP_PORT);
@@ -188,8 +194,8 @@ public final class TrainingSandboxManager implements Closeable {
                 });
             }
 
-            log.info("OSCAR Hands-On Training Sandbox active (RPM1=127.0.0.1:{}, RPM2=127.0.0.1:{}, UFF={})",
-                    rapiscan1.getListeningPort(), rapiscan2.getListeningPort(), uffShareDir);
+            log.info("OSCAR Hands-On Training Sandbox active (RPM1=127.0.0.1:{}, RPM2=127.0.0.1:{}, RS350=127.0.0.1:{}, UFF={})",
+                    rapiscan1.getListeningPort(), rapiscan2.getListeningPort(), rs350Walker.getListeningPort(), uffShareDir);
         } catch (Exception e) {
             log.error("Failed initializing TrainingSandboxManager", e);
         }
@@ -221,6 +227,14 @@ public final class TrainingSandboxManager implements Closeable {
 
     public int getWebRelayPort2() {
         return webrelay2 != null ? webrelay2.getListeningPort() : TrainingSandboxEnvironment.DEFAULT_WEBRELAY_PORT_2;
+    }
+
+    public int getRs350Port() {
+        return rs350Walker != null ? rs350Walker.getListeningPort() : TrainingSandboxEnvironment.DEFAULT_RS350_PORT;
+    }
+
+    SandboxRs350LoopbackServer getRs350LoopbackServer() {
+        return rs350Walker;
     }
 
     public Map<String, Object> getSandboxActiveStatus() {
@@ -260,6 +274,8 @@ public final class TrainingSandboxManager implements Closeable {
         endpoints.put("webRelayHost", "127.0.0.1");
         endpoints.put("webRelayPort1", getWebRelayPort1());
         endpoints.put("webRelayPort2", getWebRelayPort2());
+        endpoints.put("rs350Host", "127.0.0.1");
+        endpoints.put("rs350Port", getRs350Port());
         endpoints.put("localUffSamplePath", uffShareDir != null ? uffShareDir.toString() : "/var/lib/oscar/sandbox-tutorial/uff-share");
         out.put("loopbackEndpoints", endpoints);
 
@@ -299,8 +315,13 @@ public final class TrainingSandboxManager implements Closeable {
             LaneSystem targetLane = null;
             if (hub != null && hub.getModuleRegistry() != null) {
                 var existing = hub.getModuleRegistry().getLoadedModules(LaneSystem.class);
-                if (!existing.isEmpty()) {
-                    targetLane = existing.iterator().next();
+                if (existing != null) {
+                    for (LaneSystem candidate : existing) {
+                        if (!(candidate instanceof MobileDetectorSystem)) {
+                            targetLane = candidate;
+                            break;
+                        }
+                    }
                 }
             }
             if (targetLane == null) {
@@ -372,7 +393,8 @@ public final class TrainingSandboxManager implements Closeable {
                             extensionsManager.getCargoUffManager().resetToDisabled();
                         }
                         stageStatusMessage = "Administrator blank-slate ready (0 lanes configured). Loopback Rapiscan 127.0.0.1:"
-                                + getRapiscanPort1() + " and RTSP 127.0.0.1:" + getRtspPort() + "/tutorial-cam are online.";
+                                + getRapiscanPort1() + ", RS-350 127.0.0.1:" + getRs350Port()
+                                + ", and RTSP 127.0.0.1:" + getRtspPort() + "/tutorial-cam are online.";
                     }
                     case TRACK_OPERATOR -> {
                         removeAllLanes();
@@ -518,7 +540,7 @@ public final class TrainingSandboxManager implements Closeable {
             cam.streamPath = camPath;
             cam.username = "";
             cam.password = "";
-            cfg.laneOptionsConfig.ffmpegConfig = List.of(cam);
+            cfg.laneOptionsConfig.ffmpegConfig = new ArrayList<>(List.of(cam));
         }
 
         cfg.ocrConfig = new OcrConfig();
@@ -775,33 +797,60 @@ public final class TrainingSandboxManager implements Closeable {
         int lanesWithOcr = 0;
         int webRelayConfigured = 0;
         int webRelayOnline = 0;
+        int mobileDetectorCount = 0;
+        int onlineMobileDetectorCount = 0;
+        Set<MobileDetectorSystem> seenMobile = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         Set<String> viewKeys = new HashSet<>();
 
         if (hub != null && hub.getModuleRegistry() != null) {
-            for (LaneSystem lane : hub.getModuleRegistry().getLoadedModules(LaneSystem.class)) {
-                configuredLanes++;
-                if (lane.isStarted()) {
-                    startedLanes++;
-                }
-                LaneConfig lcfg = lane.getConfiguration();
-                if (lcfg != null) {
-                    if (lcfg.laneOptionsConfig != null
-                            && lcfg.laneOptionsConfig.ffmpegConfig != null
-                            && !lcfg.laneOptionsConfig.ffmpegConfig.isEmpty()) {
-                        lanesWithCamera++;
-                    }
-                    if (lcfg.ocrConfig != null && lcfg.ocrConfig.enabled) {
-                        lanesWithOcr++;
-                    }
-                    if (lcfg.webRelayConfig != null && lcfg.webRelayConfig.enabled) {
-                        webRelayConfigured++;
-                        var wrCtrl = lane.getWebRelayController();
-                        if (wrCtrl != null && wrCtrl.getStatusSnapshot().primaryState().online()) {
-                            webRelayOnline++;
+            Collection<MobileDetectorSystem> directMobiles =
+                    hub.getModuleRegistry().getLoadedModules(MobileDetectorSystem.class);
+            if (directMobiles != null) {
+                for (MobileDetectorSystem mobile : directMobiles) {
+                    if (mobile != null && seenMobile.add(mobile)) {
+                        mobileDetectorCount++;
+                        if (mobile.isStarted()) {
+                            onlineMobileDetectorCount++;
                         }
                     }
-                    if (lcfg.operationalViewKeys != null) {
-                        viewKeys.addAll(lcfg.operationalViewKeys);
+                }
+            }
+            Collection<LaneSystem> loadedLanes = hub.getModuleRegistry().getLoadedModules(LaneSystem.class);
+            if (loadedLanes != null) {
+                for (LaneSystem lane : loadedLanes) {
+                    if (lane == null) {
+                        continue;
+                    }
+                    configuredLanes++;
+                    if (lane.isStarted()) {
+                        startedLanes++;
+                    }
+                    if (lane instanceof MobileDetectorSystem mobile && seenMobile.add(mobile)) {
+                        mobileDetectorCount++;
+                        if (mobile.isStarted()) {
+                            onlineMobileDetectorCount++;
+                        }
+                    }
+                    LaneConfig lcfg = lane.getConfiguration();
+                    if (lcfg != null) {
+                        if (lcfg.laneOptionsConfig != null
+                                && lcfg.laneOptionsConfig.ffmpegConfig != null
+                                && !lcfg.laneOptionsConfig.ffmpegConfig.isEmpty()) {
+                            lanesWithCamera++;
+                        }
+                        if (lcfg.ocrConfig != null && lcfg.ocrConfig.enabled) {
+                            lanesWithOcr++;
+                        }
+                        if (lcfg.webRelayConfig != null && lcfg.webRelayConfig.enabled) {
+                            webRelayConfigured++;
+                            var wrCtrl = lane.getWebRelayController();
+                            if (wrCtrl != null && wrCtrl.getStatusSnapshot().primaryState().online()) {
+                                webRelayOnline++;
+                            }
+                        }
+                        if (lcfg.operationalViewKeys != null) {
+                            viewKeys.addAll(lcfg.operationalViewKeys);
+                        }
                     }
                 }
             }
@@ -980,6 +1029,9 @@ public final class TrainingSandboxManager implements Closeable {
         v.put("cargoUffIndexedCount", uffIndexedCount);
         v.put("webRelayConfiguredCount", webRelayConfigured);
         v.put("webRelayOnlineCount", webRelayOnline);
+        v.put("mobileDetectorCount", mobileDetectorCount);
+        v.put("onlineMobileDetectorCount", onlineMobileDetectorCount);
+        v.put("mobileDetectorConfigured", onlineMobileDetectorCount > 0);
         return v;
     }
 
@@ -1009,7 +1061,7 @@ public final class TrainingSandboxManager implements Closeable {
 
             Instant now = Instant.now();
             pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
-                    "OSCAR 3.11.15 Hands-On Training Completion Record",
+                    "OSCAR 3.12.0 Hands-On Training Completion Record",
                     nodeId,
                     "Trainee: " + safeTrainee,
                     TrainingSandboxEnvironment.WATERMARK_TEXT + "  |  Zero Production Database / Parquet Impact",
@@ -1113,6 +1165,10 @@ public final class TrainingSandboxManager implements Closeable {
         if (webrelay2 != null) {
             webrelay2.close();
             webrelay2 = null;
+        }
+        if (rs350Walker != null) {
+            rs350Walker.close();
+            rs350Walker = null;
         }
         if (rapiscan1 != null) {
             rapiscan1.close();

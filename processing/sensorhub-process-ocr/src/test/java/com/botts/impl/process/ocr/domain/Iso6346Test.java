@@ -71,6 +71,25 @@ class Iso6346Test {
         assertTrue(serialMisread.isPresent());
         assertEquals("NYKU1632774", serialMisread.get().compact());
         assertFalse(serialMisread.get().checksumValid());
+
+        // Serial digit misread as category letter 'Z' right after a known BIC prefix ("TGHU")
+        // must NOT slide 1 char into "GHUZ..." and synthesize a phantom check digit
+        Optional<Iso6346.Match> shiftedBicMisread = Iso6346.extractBest("TGHU Z87487 5");
+        assertTrue(shiftedBicMisread.isPresent());
+        assertEquals("TGHU2874875", shiftedBicMisread.get().compact());
+        assertFalse(shiftedBicMisread.get().checksumValid());
+
+        Optional<Iso6346.Match> shiftedBicExtended = Iso6346.extractBest("TGHU Z87487 5 I");
+        assertTrue(shiftedBicExtended.isPresent());
+        assertEquals("TGHU2874875", shiftedBicExtended.get().compact());
+        assertFalse(shiftedBicExtended.get().checksumValid());
+
+        // Leading noise character before a known BIC prefix still extracts the valid container ID
+        Optional<Iso6346.Match> leadingNoise = Iso6346.extractBest("XTGHU 887674 3");
+        assertTrue(leadingNoise.isPresent());
+        assertEquals("TGHU8876743", leadingNoise.get().compact());
+        assertTrue(leadingNoise.get().checksumValid());
+        assertFalse(leadingNoise.get().checkDigitRepaired());
     }
 
     @Test

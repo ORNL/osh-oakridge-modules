@@ -161,4 +161,25 @@ class CandidateAggregatorTest {
         ));
         assertTrue(bogusStack.isEmpty());
     }
+
+    @Test
+    void prefersOpticallyVerifiedRawTextAndCropBoxWhenExtendedSpanConfirmsCheckDigit() {
+        CandidateAggregator aggregator = new CandidateAggregator(0.50);
+
+        Rectangle clipped10Box = new Rectangle(200, 180, 180, 34);
+        Rectangle full11Box = new Rectangle(200, 180, 248, 34);
+        var upgraded = aggregator.aggregate(List.of(
+                new CandidateAggregator.FrameInput(0, 1280, 720, List.of(
+                        new OcrRead("SEGU 464776", 0.92, clipped10Box),
+                        new OcrRead("SEGU 464776 1", 0.8832, full11Box)
+                ))
+        ));
+        assertEquals(1, upgraded.size());
+        assertEquals("SEGU4647761", upgraded.get(0).normalizedValue());
+        assertEquals("SEGU 464776 1", upgraded.get(0).rawText());
+        assertEquals(full11Box, upgraded.get(0).bestBoundingBox());
+        assertEquals(0.92, upgraded.get(0).confidence(), 1e-6);
+        assertTrue(upgraded.get(0).checksumValid());
+        assertFalse(upgraded.get(0).checkDigitRepaired());
+    }
 }

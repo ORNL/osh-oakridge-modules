@@ -107,7 +107,7 @@ public final class VehicleIncidentAggregator {
     private static final String DEF_VEHICLE_ID = RADHelper.getRadUri("VehicleID");
     private static final String WEBID_OUTPUT_NAME = "webIdAnalysis";
     private static final String DEF_WEBID_ANALYSIS = RADHelper.getRadUri("WebIDAnalysis");
-    private static final int PROFILE_LOAD_PARALLELISM = 4;
+    private static final int PROFILE_LOAD_PARALLELISM = 2;
     private static final java.util.concurrent.atomic.AtomicInteger PROFILE_WORKER_SEQ =
             new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.ExecutorService PROFILE_LOAD_EXECUTOR =
@@ -588,7 +588,7 @@ public final class VehicleIncidentAggregator {
             boolean extendedSchema
     ) {}
 
-    private record LocalPassSelection(
+    record LocalPassSelection(
             List<VehiclePassRecord> passes,
             int preTruncatedCount
     ) {
@@ -607,8 +607,28 @@ public final class VehicleIncidentAggregator {
         if (module == null || module.getParentHub() == null || module.getParentHub().getDatabaseRegistry() == null) {
             return LocalPassSelection.EMPTY;
         }
-        IObsSystemDatabase db = resolveDatabase(module);
-        if (db == null || db.getObservationStore() == null) {
+        return collectLocalNodePasses(
+                module,
+                resolveDatabase(module),
+                localNodeId,
+                localNodeName,
+                spec,
+                start,
+                end,
+                cappedLimit);
+    }
+
+    static LocalPassSelection collectLocalNodePasses(
+            OSCARServiceModule module,
+            IObsSystemDatabase db,
+            String localNodeId,
+            String localNodeName,
+            VehicleIncidentSpec spec,
+            Instant start,
+            Instant end,
+            int cappedLimit
+    ) {
+        if (module == null || module.getParentHub() == null || db == null || db.getObservationStore() == null) {
             return LocalPassSelection.EMPTY;
         }
         IObsStore obsStore = db.getObservationStore();
@@ -660,6 +680,7 @@ public final class VehicleIncidentAggregator {
         Map<Integer, DispositionCodeSpec> dispSpecs = profileOnlyFastPath ? Map.of() : buildDispositionSpecs(module);
         Map<String, List<RawAdjudicationEntry>> rawAdjudicationsByObsId = new LinkedHashMap<>();
         Map<String, String> cmdStreamToLaneByKey = new HashMap<>();
+        Map<String, Set<BigId>> cmdStreamIdsByLaneUid = new HashMap<>();
         Set<String> adjMatchedObsIds = new LinkedHashSet<>();
         Map<String, OcrMatchSummary> ocrByObsId = new LinkedHashMap<>();
         Map<String, String> ocrLaneByObsId = new HashMap<>();
@@ -707,11 +728,13 @@ public final class VehicleIncidentAggregator {
             scanAdjudicationsSinglePass(
                     db,
                     candidateLanes,
+                    laneTopology,
                     start,
                     end,
                     spec,
                     rawAdjudicationsByObsId,
                     cmdStreamToLaneByKey,
+                    cmdStreamIdsByLaneUid,
                     adjMatchedObsIds
             );
 
@@ -899,10 +922,26 @@ public final class VehicleIncidentAggregator {
             }
         }
 
-        // 5b. Materialize AdjudicationDetailRecord entries ONLY for matched targetObsIds (avoiding N+1 CommandStore queries)
+        // 5b. Enrich blank-vehicleId adjudications (such as Code 9999 EML Non-Threat, Code 9998 Extended
+        // Occupancy, or blank-vehicleId operator dispositions) via direct commandId primary-key lookup
+        // on matched targetObsIds, then materialize AdjudicationDetailRecord entries.
         Map<String, List<AdjudicationDetailRecord>> adjudicationsByObsId = new LinkedHashMap<>();
         Map<String, String> fallbackLaneByObsId = new HashMap<>();
         if (!profileOnlyFastPath) {
+            IdEncoder cmdIdEncoder = module.getParentHub().getIdEncoders() != null
+                    ? module.getParentHub().getIdEncoders().getCommandIdEncoder()
+                    : null;
+            enrichMissingAdjudicationsForMatchedOccupancies(
+                    db,
+                    cmdIdEncoder,
+                    targetObsIds,
+                    loadedOccupancies,
+                    parsedOccupancies,
+                    occStreamByDsKey,
+                    ocrLaneByObsId,
+                    cmdStreamIdsByLaneUid,
+                    rawAdjudicationsByObsId
+            );
             materializeMatchedAdjudications(
                     db,
                     targetObsIds,
@@ -1250,72 +1289,133 @@ public final class VehicleIncidentAggregator {
         }
     }
 
-    private record RawAdjudicationEntry(
+    static final java.time.Duration HOT_CACHE_WINDOW = java.time.Duration.ofDays(30);
+    private static final java.time.Duration HOT_CACHE_BOUNDARY_SLACK = java.time.Duration.ofHours(2);
+    private static final Instant MAX_SAFE_SQL_INSTANT = Instant.parse("2999-12-31T23:59:59Z");
+    private static final int MAX_CACHED_ADJ_ENTRIES = 250_000;
+    private static final int MAX_CACHED_OCR_ENTRIES = 500_000;
+    private static final int DIRECT_CMD_STATUS_CHUNK_SIZE = 256;
+    private static final int MAX_DB_CACHE_SLOTS = 16;
+    private static final long ACTIVE_WATERMARK_COALESCE_SECONDS = 21_600L; // 6 hours
+
+    private static Instant clampSqlEnd(Instant instant) {
+        if (instant == null || instant.isAfter(MAX_SAFE_SQL_INSTANT)) {
+            return MAX_SAFE_SQL_INSTANT;
+        }
+        if (instant.isBefore(Instant.EPOCH)) {
+            return Instant.EPOCH;
+        }
+        return instant;
+    }
+
+    private static Instant subtractSecondsClamped(Instant base, long seconds) {
+        if (base == null || base.isBefore(Instant.EPOCH.plusSeconds(seconds))) {
+            return Instant.EPOCH;
+        }
+        return base.minusSeconds(seconds);
+    }
+
+    private static Instant addSecondsClamped(Instant base, long seconds) {
+        if (base == null) {
+            return MAX_SAFE_SQL_INSTANT;
+        }
+        if (base.isAfter(MAX_SAFE_SQL_INSTANT.minusSeconds(seconds))) {
+            return MAX_SAFE_SQL_INSTANT;
+        }
+        return base.plusSeconds(seconds);
+    }
+
+    record RawAdjudicationEntry(
+            String statusKey,
             int sequence,
             BigId commandId,
+            String cmdStreamKey,
             Instant reportTime,
             DataBlock block,
             String occupancyObsId,
             String vehicleId
-    ) {}
+    ) {
+        Instant effectiveTime() {
+            return reportTime != null ? reportTime : Instant.EPOCH;
+        }
+    }
 
-    private static final int INCREMENTAL_ADJ_CACHE_THRESHOLD = 1_000;
-    private static final int MAX_CACHED_ADJ_ENTRIES = 250_000;
-    private static final int MAX_CACHED_OCR_ENTRIES = 250_000;
-    private static final int MAX_DB_CACHE_SLOTS = 16;
-    private static final long ADJ_FULL_REFRESH_TTL_NS = 600_000_000_000L; // 10 minutes
-
-    private static final class AdjudicationSearchCacheSlot {
+    static final class AdjudicationSearchCacheSlot {
         final java.lang.ref.WeakReference<IObsSystemDatabase> dbRef;
+        final Set<String> loadedStreamKeys = new LinkedHashSet<>();
+        final Map<String, Instant> watermarkByStreamKey = new HashMap<>();
+        final Map<String, String> cmdIdToStreamKey = new HashMap<>();
         final Set<String> seenStatusIds = new LinkedHashSet<>();
         final List<RawAdjudicationEntry> allEntries = new ArrayList<>();
-        Instant watermarkReportTime = null;
-        long lastFullScanNano = 0L;
+        Instant hotWindowStart;
         int nextSeq = 1;
-        boolean overflowed = false;
+        int maxCachedEntries = MAX_CACHED_ADJ_ENTRIES;
 
         AdjudicationSearchCacheSlot(IObsSystemDatabase db) {
             this.dbRef = new java.lang.ref.WeakReference<>(db);
         }
+
+        void clear() {
+            loadedStreamKeys.clear();
+            watermarkByStreamKey.clear();
+            cmdIdToStreamKey.clear();
+            seenStatusIds.clear();
+            allEntries.clear();
+            hotWindowStart = null;
+            nextSeq = 1;
+        }
     }
 
-    private record CachedOcrObsRecord(
+    record CachedOcrObsRecord(
+            String obsKeyStr,
             String occObsId,
             OcrMatchSummary summary,
             String dsKey,
             Instant phenomenonTime,
             Instant resultTime
-    ) {}
+    ) {
+        Instant effectiveTime() {
+            return resultTime != null ? resultTime : (phenomenonTime != null ? phenomenonTime : Instant.EPOCH);
+        }
+    }
 
-    private static final class OcrSearchCacheSlot {
+    static final class OcrSearchCacheSlot {
         final java.lang.ref.WeakReference<IObsSystemDatabase> dbRef;
+        final Set<String> loadedStreamKeys = new LinkedHashSet<>();
+        final Map<String, Instant> watermarkByStreamKey = new HashMap<>();
         final Set<String> seenObsIds = new LinkedHashSet<>();
         final List<CachedOcrObsRecord> allRecords = new ArrayList<>();
         final Map<String, List<CachedOcrObsRecord>> byNormValue = new HashMap<>();
-        Instant watermarkResultTime = null;
-        long expectedStoreCount = -1L;
-        boolean overflowed = false;
+        final Map<String, CachedOcrObsRecord> bestByOccObsId = new HashMap<>();
+        Instant hotWindowStart;
+        int maxCachedEntries = MAX_CACHED_OCR_ENTRIES;
 
         OcrSearchCacheSlot(IObsSystemDatabase db) {
             this.dbRef = new java.lang.ref.WeakReference<>(db);
         }
 
         void clear() {
+            loadedStreamKeys.clear();
+            watermarkByStreamKey.clear();
             seenObsIds.clear();
             allRecords.clear();
             byNormValue.clear();
-            watermarkResultTime = null;
-            expectedStoreCount = -1L;
-            overflowed = false;
+            bestByOccObsId.clear();
+            hotWindowStart = null;
         }
     }
 
-    private static final java.util.concurrent.ConcurrentHashMap<String, AdjudicationSearchCacheSlot> ADJ_CACHE_BY_KEY =
+    static final java.util.concurrent.ConcurrentHashMap<String, AdjudicationSearchCacheSlot> ADJ_CACHE_BY_KEY =
             new java.util.concurrent.ConcurrentHashMap<>();
-    private static final java.util.concurrent.ConcurrentHashMap<String, OcrSearchCacheSlot> OCR_CACHE_BY_KEY =
+    static final java.util.concurrent.ConcurrentHashMap<String, OcrSearchCacheSlot> OCR_CACHE_BY_KEY =
             new java.util.concurrent.ConcurrentHashMap<>();
 
-    private static RawAdjudicationEntry parseRawAdjudicationStatus(ICommandStatus entry, int seq) {
+    private static RawAdjudicationEntry parseRawAdjudicationStatus(
+            ICommandStatus entry,
+            String statusKey,
+            int seq,
+            String cmdStreamKey
+    ) {
         if (entry == null || entry.getResult() == null || entry.getResult().getInlineRecords() == null) {
             return null;
         }
@@ -1335,8 +1435,10 @@ public final class VehicleIncidentAggregator {
                 occupancyObsId = "adj-cmd-" + (entry.getCommandID() != null ? entry.getCommandID().toString() : seq);
             }
             return new RawAdjudicationEntry(
+                    nonNull(statusKey),
                     seq,
                     entry.getCommandID(),
+                    nonNull(cmdStreamKey),
                     entry.getReportTime(),
                     block,
                     occupancyObsId,
@@ -1347,21 +1449,219 @@ public final class VehicleIncidentAggregator {
         }
     }
 
+    private static void resolveCommandStreamKeysIntoMap(
+            IObsSystemDatabase db,
+            Set<BigId> missingCommandIds,
+            Map<String, String> targetMap
+    ) {
+        if (missingCommandIds == null || missingCommandIds.isEmpty() || db.getCommandStore() == null) {
+            return;
+        }
+        if (missingCommandIds.size() == 1) {
+            BigId singleId = missingCommandIds.iterator().next();
+            try {
+                ICommandData cmd = db.getCommandStore().get(singleId);
+                if (cmd != null && cmd.getCommandStreamID() != null) {
+                    targetMap.put(bigIdLookupKey(singleId), bigIdLookupKey(cmd.getCommandStreamID()));
+                }
+            } catch (Exception ignored) {
+            }
+            return;
+        }
+        List<BigId> allIds = new ArrayList<>(missingCommandIds);
+        for (int offset = 0; offset < allIds.size(); offset += DIRECT_CMD_STATUS_CHUNK_SIZE) {
+            List<BigId> chunk = allIds.subList(offset, Math.min(allIds.size(), offset + DIRECT_CMD_STATUS_CHUNK_SIZE));
+            try (var cmdEntries = db.getCommandStore().selectEntries(
+                    new CommandFilter.Builder().withInternalIDs(chunk).build())) {
+                cmdEntries.forEach(kv -> {
+                    if (kv != null && kv.getKey() != null && kv.getValue() != null
+                            && kv.getValue().getCommandStreamID() != null) {
+                        targetMap.put(
+                                bigIdLookupKey(kv.getKey()),
+                                bigIdLookupKey(kv.getValue().getCommandStreamID()));
+                    }
+                });
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private static void pruneAdjudicationEntriesBefore(AdjudicationSearchCacheSlot slot, Instant cutoffFloor) {
+        if (cutoffFloor == null || slot.allEntries.isEmpty()) {
+            return;
+        }
+        boolean anyExpired = false;
+        for (RawAdjudicationEntry e : slot.allEntries) {
+            if (e.effectiveTime().isBefore(cutoffFloor)) {
+                anyExpired = true;
+                break;
+            }
+        }
+        if (!anyExpired) {
+            return;
+        }
+        List<RawAdjudicationEntry> surviving = new ArrayList<>(slot.allEntries.size());
+        for (RawAdjudicationEntry e : slot.allEntries) {
+            if (!e.effectiveTime().isBefore(cutoffFloor)) {
+                surviving.add(e);
+            }
+        }
+        rebuildAdjudicationSlotIndexes(slot, surviving);
+    }
+
+    private static void evictOldestAdjudicationEntries(AdjudicationSearchCacheSlot slot) {
+        int currentSize = slot.allEntries.size();
+        if (currentSize <= slot.maxCachedEntries) {
+            return;
+        }
+        slot.allEntries.sort(Comparator.comparing(RawAdjudicationEntry::effectiveTime)
+                .thenComparingInt(RawAdjudicationEntry::sequence));
+        int targetSize = Math.max(1, slot.maxCachedEntries - Math.max(1, slot.maxCachedEntries / 8));
+        if (targetSize >= currentSize) {
+            targetSize = slot.maxCachedEntries;
+        }
+        int evictCount = currentSize - targetSize;
+        List<RawAdjudicationEntry> surviving = new ArrayList<>(slot.allEntries.subList(evictCount, currentSize));
+        Instant newFloor = surviving.get(0).effectiveTime();
+        if (slot.hotWindowStart == null || newFloor.isAfter(slot.hotWindowStart)) {
+            slot.hotWindowStart = newFloor;
+        }
+        rebuildAdjudicationSlotIndexes(slot, surviving);
+    }
+
+    private static void rebuildAdjudicationSlotIndexes(
+            AdjudicationSearchCacheSlot slot,
+            List<RawAdjudicationEntry> surviving
+    ) {
+        slot.allEntries.clear();
+        slot.allEntries.addAll(surviving);
+        slot.seenStatusIds.clear();
+        slot.cmdIdToStreamKey.clear();
+        for (RawAdjudicationEntry e : surviving) {
+            if (!e.statusKey().isEmpty()) {
+                slot.seenStatusIds.add(e.statusKey());
+            }
+            if (e.commandId() != null && !e.cmdStreamKey().isEmpty()) {
+                slot.cmdIdToStreamKey.putIfAbsent(bigIdLookupKey(e.commandId()), e.cmdStreamKey());
+            }
+        }
+    }
+
+    private static void ingestAdjudicationBatch(
+            IObsSystemDatabase db,
+            AdjudicationSearchCacheSlot slot,
+            List<Map.Entry<BigId, ICommandStatus>> rawBatch,
+            String knownSingleStreamKey
+    ) {
+        if (rawBatch == null || rawBatch.isEmpty()) {
+            return;
+        }
+        Map<String, String> batchCmdToStreamKey = Map.of();
+        if (knownSingleStreamKey == null || knownSingleStreamKey.isEmpty()) {
+            Set<BigId> missingCmdIds = new LinkedHashSet<>();
+            for (var kv : rawBatch) {
+                if (kv != null && kv.getValue() != null && kv.getValue().getCommandID() != null) {
+                    String cmdKey = bigIdLookupKey(kv.getValue().getCommandID());
+                    if (!slot.cmdIdToStreamKey.containsKey(cmdKey)) {
+                        missingCmdIds.add(kv.getValue().getCommandID());
+                    }
+                }
+            }
+            if (!missingCmdIds.isEmpty()) {
+                Map<String, String> resolved = new HashMap<>(missingCmdIds.size() * 2);
+                resolveCommandStreamKeysIntoMap(db, missingCmdIds, resolved);
+                batchCmdToStreamKey = resolved;
+            }
+        }
+        for (var kv : rawBatch) {
+            if (kv == null || kv.getValue() == null) {
+                continue;
+            }
+            ICommandStatus status = kv.getValue();
+            String cmdKey = status.getCommandID() != null ? bigIdLookupKey(status.getCommandID()) : "";
+            String csKey;
+            if (knownSingleStreamKey != null && !knownSingleStreamKey.isEmpty()) {
+                csKey = knownSingleStreamKey;
+            } else if (!cmdKey.isEmpty()) {
+                csKey = slot.cmdIdToStreamKey.getOrDefault(cmdKey, batchCmdToStreamKey.getOrDefault(cmdKey, ""));
+            } else {
+                csKey = "";
+            }
+            if (!csKey.isEmpty()) {
+                Instant rt = status.getReportTime();
+                if (rt != null) {
+                    slot.watermarkByStreamKey.merge(csKey, rt, (prev, curr) -> curr.isAfter(prev) ? curr : prev);
+                }
+            }
+            String statusKey = kv.getKey() != null ? bigIdLookupKey(kv.getKey()) : ("seq-" + slot.nextSeq);
+            if (slot.seenStatusIds.contains(statusKey)) {
+                continue;
+            }
+            RawAdjudicationEntry parsed = parseRawAdjudicationStatus(status, statusKey, slot.nextSeq, csKey);
+            if (parsed == null || normalizeVehicleId(parsed.vehicleId()).isEmpty()) {
+                // Automated Code 9999 (EML Non-Threat), Code 9998 (Extended Occupancy), and other
+                // blank-vehicleId dispositions never match vehicle-ID queries; skip caching them
+                // while keeping watermarkByStreamKey advanced so delta scans never re-read them.
+                continue;
+            }
+            slot.nextSeq++;
+            slot.seenStatusIds.add(statusKey);
+            if (!cmdKey.isEmpty() && !csKey.isEmpty()) {
+                slot.cmdIdToStreamKey.putIfAbsent(cmdKey, csKey);
+            }
+            slot.allEntries.add(parsed);
+            if (slot.allEntries.size() > slot.maxCachedEntries) {
+                evictOldestAdjudicationEntries(slot);
+            }
+        }
+    }
+
+    private static void scanCommandStatusFilterIntoSlot(
+            IObsSystemDatabase db,
+            AdjudicationSearchCacheSlot slot,
+            CommandStatusFilter filter,
+            String knownSingleStreamKey
+    ) {
+        List<Map.Entry<BigId, ICommandStatus>> batch = new ArrayList<>();
+        try (var stream = db.getCommandStatusStore().selectEntries(filter)) {
+            var it = stream.iterator();
+            while (it.hasNext()) {
+                var kv = it.next();
+                if (kv == null || kv.getValue() == null) {
+                    continue;
+                }
+                String statusKey = kv.getKey() != null ? bigIdLookupKey(kv.getKey()) : null;
+                if (statusKey != null && slot.seenStatusIds.contains(statusKey)) {
+                    continue;
+                }
+                batch.add(kv);
+                if (batch.size() >= 1_024) {
+                    ingestAdjudicationBatch(db, slot, batch, knownSingleStreamKey);
+                    batch.clear();
+                }
+            }
+        }
+        if (!batch.isEmpty()) {
+            ingestAdjudicationBatch(db, slot, batch, knownSingleStreamKey);
+        }
+    }
+
     private static void scanAdjudicationsSinglePass(
             IObsSystemDatabase db,
             Set<String> candidateLanes,
+            LaneTopology laneTopology,
             Instant start,
             Instant end,
             VehicleIncidentSpec spec,
             Map<String, List<RawAdjudicationEntry>> rawAdjudicationsByObsId,
             Map<String, String> cmdStreamToLaneByKey,
+            Map<String, Set<BigId>> cmdStreamIdsByLaneUid,
             Set<String> adjMatchedObsIds
     ) {
         if (db.getCommandStatusStore() == null || db.getCommandStore() == null || candidateLanes.isEmpty()) {
             return;
         }
         Set<BigId> cmdStreamBigIds = new LinkedHashSet<>();
-        List<String> sortedStreamKeys = new ArrayList<>();
         try (var csEntries = db.getCommandStore().getCommandStreams().selectEntries(
                 new CommandStreamFilter.Builder()
                         .withSystems().withUniqueIDs(candidateLanes).includeMembers(true).done()
@@ -1373,9 +1673,17 @@ public final class VehicleIncidentAggregator {
                     BigId csId = entry.getKey().getInternalID();
                     if (csId != null) {
                         cmdStreamBigIds.add(csId);
+                        String sysUid = entry.getValue().getSystemID().getUniqueID();
+                        String resolvedLaneUid = resolveOwningLaneUid(sysUid, laneTopology);
+                        String effectiveLaneUid = !resolvedLaneUid.isBlank() ? resolvedLaneUid : sysUid;
                         String k = bigIdLookupKey(csId);
-                        sortedStreamKeys.add(k);
-                        cmdStreamToLaneByKey.put(k, entry.getValue().getSystemID().getUniqueID());
+                        cmdStreamToLaneByKey.put(k, effectiveLaneUid);
+                        if (effectiveLaneUid != null && !effectiveLaneUid.isBlank()) {
+                            cmdStreamIdsByLaneUid.computeIfAbsent(effectiveLaneUid, ignored -> new LinkedHashSet<>()).add(csId);
+                        }
+                        if (sysUid != null && !sysUid.isBlank()) {
+                            cmdStreamIdsByLaneUid.computeIfAbsent(sysUid, ignored -> new LinkedHashSet<>()).add(csId);
+                        }
                     }
                 }
             });
@@ -1385,15 +1693,9 @@ public final class VehicleIncidentAggregator {
             return;
         }
 
-        Instant widenedEnd = null;
-        if (start != null && end != null) {
-            widenedEnd = end.isAfter(Instant.MAX.minusSeconds(86_400L * 30L))
-                    ? end
-                    : end.plusSeconds(86_400L * 30L);
-        }
+        Instant widenedEnd = end != null ? addSecondsClamped(end, 86_400L * 30L) : null;
 
-        Collections.sort(sortedStreamKeys);
-        String cacheKey = System.identityHashCode(db) + "|" + String.join(",", sortedStreamKeys);
+        String cacheKey = String.valueOf(System.identityHashCode(db));
         if (ADJ_CACHE_BY_KEY.size() > MAX_DB_CACHE_SLOTS) {
             ADJ_CACHE_BY_KEY.entrySet().removeIf(e -> e.getValue().dbRef.get() == null);
             if (ADJ_CACHE_BY_KEY.size() > MAX_DB_CACHE_SLOTS) {
@@ -1403,117 +1705,163 @@ public final class VehicleIncidentAggregator {
         AdjudicationSearchCacheSlot slot = ADJ_CACHE_BY_KEY.compute(cacheKey, (k, existing) ->
                 (existing == null || existing.dbRef.get() != db) ? new AdjudicationSearchCacheSlot(db) : existing);
 
-        List<RawAdjudicationEntry> snapshotEntries = null;
-        synchronized (slot) {
-            long nowNano = System.nanoTime();
-            boolean needsFullLoad = slot.watermarkReportTime == null
-                    || slot.seenStatusIds.size() < INCREMENTAL_ADJ_CACHE_THRESHOLD
-                    || (nowNano - slot.lastFullScanNano) > ADJ_FULL_REFRESH_TTL_NS;
+        Instant nowWall = Instant.now();
+        Instant anchorEnd = (end != null && end.isBefore(MAX_SAFE_SQL_INSTANT) && end.isAfter(nowWall))
+                ? end
+                : nowWall;
+        Instant warmupReportEnd = addSecondsClamped(anchorEnd, 86_400L * 31L);
+        Instant rollingFloor = subtractSecondsClamped(
+                nowWall.minus(HOT_CACHE_WINDOW), HOT_CACHE_BOUNDARY_SLACK.getSeconds());
 
-            if (!slot.overflowed) {
-                if (needsFullLoad) {
-                    // Only build the full unbounded cache when caller is already scanning from EPOCH
-                    // or cache was previously promoted past INCREMENTAL_ADJ_CACHE_THRESHOLD.
-                    boolean unboundedCaller = (start == null || start.equals(Instant.EPOCH));
-                    if (unboundedCaller || slot.seenStatusIds.size() >= INCREMENTAL_ADJ_CACHE_THRESHOLD) {
-                        slot.seenStatusIds.clear();
-                        slot.allEntries.clear();
-                        slot.nextSeq = 1;
-                        Instant maxRt = Instant.EPOCH;
-                        CommandStatusFilter fullFilter = new CommandStatusFilter.Builder()
-                                .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
-                                .withCommands(new CommandFilter.Builder()
-                                        .withCommandStreams(cmdStreamBigIds)
-                                        .build())
-                                .build();
-                        try (var stream = db.getCommandStatusStore().selectEntries(fullFilter)) {
-                            var it = stream.iterator();
-                            while (it.hasNext()) {
-                                var kv = it.next();
-                                if (kv == null || kv.getValue() == null) {
-                                    continue;
-                                }
-                                String statusKey = kv.getKey() != null ? bigIdLookupKey(kv.getKey()) : ("seq-" + slot.nextSeq);
-                                if (!slot.seenStatusIds.add(statusKey)) {
-                                    continue;
-                                }
-                                if (slot.seenStatusIds.size() > MAX_CACHED_ADJ_ENTRIES) {
-                                    slot.overflowed = true;
-                                    slot.seenStatusIds.clear();
-                                    slot.allEntries.clear();
-                                    break;
-                                }
-                                RawAdjudicationEntry parsed = parseRawAdjudicationStatus(kv.getValue(), slot.nextSeq++);
-                                if (parsed != null) {
-                                    slot.allEntries.add(parsed);
-                                }
-                                Instant rt = kv.getValue().getReportTime();
-                                if (rt != null && rt.isAfter(maxRt)) {
-                                    maxRt = rt;
-                                }
-                            }
+        List<RawAdjudicationEntry> snapshotEntries = null;
+        Instant slotHotStart = null;
+        boolean cacheReady = false;
+        synchronized (slot) {
+            try {
+                if (slot.hotWindowStart == null) {
+                    slot.hotWindowStart = rollingFloor;
+                } else if (rollingFloor.isAfter(slot.hotWindowStart.plusSeconds(ACTIVE_WATERMARK_COALESCE_SECONDS))) {
+                    slot.hotWindowStart = rollingFloor;
+                    pruneAdjudicationEntriesBefore(slot, slot.hotWindowStart);
+                }
+
+                Set<BigId> unseenStreamIds = new LinkedHashSet<>();
+                Set<BigId> emptyWarmedStreamIds = new LinkedHashSet<>();
+                Map<BigId, Instant> activeWarmedStreams = new LinkedHashMap<>();
+                for (BigId csId : cmdStreamBigIds) {
+                    String csKey = bigIdLookupKey(csId);
+                    if (!slot.loadedStreamKeys.contains(csKey)) {
+                        unseenStreamIds.add(csId);
+                    } else {
+                        Instant wm = slot.watermarkByStreamKey.get(csKey);
+                        if (wm == null) {
+                            emptyWarmedStreamIds.add(csId);
+                        } else {
+                            activeWarmedStreams.put(csId, wm);
                         }
-                        if (!slot.overflowed) {
-                            slot.watermarkReportTime = maxRt.equals(Instant.EPOCH) ? Instant.now() : maxRt;
-                            slot.lastFullScanNano = nowNano;
-                            snapshotEntries = new ArrayList<>(slot.allEntries);
-                        }
-                    }
-                } else {
-                    // Fast incremental tail scan (last 120s relative to watermark)
-                    Instant deltaStart = slot.watermarkReportTime.isBefore(Instant.EPOCH.plusSeconds(120L))
-                            ? Instant.EPOCH
-                            : slot.watermarkReportTime.minusSeconds(120L);
-                    Instant deltaEnd = Instant.now().plusSeconds(86_400L * 31L);
-                    CommandStatusFilter deltaFilter = new CommandStatusFilter.Builder()
-                            .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
-                            .withCommands(new CommandFilter.Builder()
-                                    .withCommandStreams(cmdStreamBigIds)
-                                    .build())
-                            .withReportTimeDuring(deltaStart, deltaEnd)
-                            .build();
-                    Instant maxRt = slot.watermarkReportTime;
-                    try (var stream = db.getCommandStatusStore().selectEntries(deltaFilter)) {
-                        var it = stream.iterator();
-                        while (it.hasNext()) {
-                            var kv = it.next();
-                            if (kv == null || kv.getValue() == null) {
-                                continue;
-                            }
-                            String statusKey = kv.getKey() != null ? bigIdLookupKey(kv.getKey()) : ("seq-" + slot.nextSeq);
-                            if (slot.seenStatusIds.add(statusKey)) {
-                                if (slot.seenStatusIds.size() > MAX_CACHED_ADJ_ENTRIES) {
-                                    slot.overflowed = true;
-                                    slot.seenStatusIds.clear();
-                                    slot.allEntries.clear();
-                                    break;
-                                }
-                                RawAdjudicationEntry parsed = parseRawAdjudicationStatus(kv.getValue(), slot.nextSeq++);
-                                if (parsed != null) {
-                                    slot.allEntries.add(parsed);
-                                }
-                            }
-                            Instant rt = kv.getValue().getReportTime();
-                            if (rt != null && rt.isAfter(maxRt)) {
-                                maxRt = rt;
-                            }
-                        }
-                    }
-                    if (!slot.overflowed) {
-                        slot.watermarkReportTime = maxRt;
-                        snapshotEntries = new ArrayList<>(slot.allEntries);
                     }
                 }
+
+                Instant warmupIssueStart = subtractSecondsClamped(slot.hotWindowStart, 3_600L);
+                if (!unseenStreamIds.isEmpty()) {
+                    String singleKey = unseenStreamIds.size() == 1
+                            ? bigIdLookupKey(unseenStreamIds.iterator().next())
+                            : null;
+                    CommandStatusFilter unseenFilter = new CommandStatusFilter.Builder()
+                            .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
+                            .withReportTimeDuring(slot.hotWindowStart, warmupReportEnd)
+                            .withCommands(new CommandFilter.Builder()
+                                    .withCommandStreams(unseenStreamIds)
+                                    .withIssueTimeDuring(warmupIssueStart, warmupReportEnd)
+                                    .build())
+                            .build();
+                    scanCommandStatusFilterIntoSlot(db, slot, unseenFilter, singleKey);
+                    for (BigId csId : unseenStreamIds) {
+                        slot.loadedStreamKeys.add(bigIdLookupKey(csId));
+                    }
+                }
+
+                if (!emptyWarmedStreamIds.isEmpty()) {
+                    String singleKey = emptyWarmedStreamIds.size() == 1
+                            ? bigIdLookupKey(emptyWarmedStreamIds.iterator().next())
+                            : null;
+                    CommandStatusFilter emptyFilter = new CommandStatusFilter.Builder()
+                            .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
+                            .withReportTimeDuring(slot.hotWindowStart, warmupReportEnd)
+                            .withCommands(new CommandFilter.Builder()
+                                    .withCommandStreams(emptyWarmedStreamIds)
+                                    .withIssueTimeDuring(warmupIssueStart, warmupReportEnd)
+                                    .build())
+                            .build();
+                    scanCommandStatusFilterIntoSlot(db, slot, emptyFilter, singleKey);
+                }
+
+                if (!activeWarmedStreams.isEmpty()) {
+                    Instant maxWm = Instant.EPOCH;
+                    for (Instant wm : activeWarmedStreams.values()) {
+                        if (wm.isAfter(maxWm)) {
+                            maxWm = wm;
+                        }
+                    }
+                    Instant baseEnd = maxWm.isAfter(anchorEnd) ? maxWm : anchorEnd;
+                    Instant deltaEnd = addSecondsClamped(baseEnd, 86_400L * 31L);
+                    Instant recentCutoff = subtractSecondsClamped(maxWm, ACTIVE_WATERMARK_COALESCE_SECONDS);
+
+                    Set<BigId> recentStreams = new LinkedHashSet<>();
+                    Instant minRecentWm = null;
+                    Map<BigId, Instant> idleStreams = new LinkedHashMap<>();
+                    for (Map.Entry<BigId, Instant> e : activeWarmedStreams.entrySet()) {
+                        Instant wm = e.getValue();
+                        if (!wm.isBefore(recentCutoff)) {
+                            recentStreams.add(e.getKey());
+                            if (minRecentWm == null || wm.isBefore(minRecentWm)) {
+                                minRecentWm = wm;
+                            }
+                        } else {
+                            idleStreams.put(e.getKey(), wm);
+                        }
+                    }
+
+                    if (!recentStreams.isEmpty() && minRecentWm != null) {
+                        Instant deltaStart = subtractSecondsClamped(minRecentWm, 120L);
+                        Instant deltaIssueStart = subtractSecondsClamped(deltaStart, 86_400L);
+                        String singleKey = recentStreams.size() == 1
+                                ? bigIdLookupKey(recentStreams.iterator().next())
+                                : null;
+                        CommandStatusFilter deltaFilter = new CommandStatusFilter.Builder()
+                                .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
+                                .withCommands(new CommandFilter.Builder()
+                                        .withCommandStreams(recentStreams)
+                                        .withIssueTimeDuring(deltaIssueStart, deltaEnd)
+                                        .build())
+                                .withReportTimeDuring(deltaStart, deltaEnd)
+                                .build();
+                        scanCommandStatusFilterIntoSlot(db, slot, deltaFilter, singleKey);
+                    }
+
+                    for (Map.Entry<BigId, Instant> idle : idleStreams.entrySet()) {
+                        Instant idleStart = idle.getValue().plusMillis(1L);
+                        if (idleStart.isAfter(deltaEnd)) {
+                            continue;
+                        }
+                        Instant idleIssueStart = subtractSecondsClamped(idleStart, 86_400L);
+                        String singleKey = bigIdLookupKey(idle.getKey());
+                        CommandStatusFilter idleFilter = new CommandStatusFilter.Builder()
+                                .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
+                                .withCommands(new CommandFilter.Builder()
+                                        .withCommandStreams(Set.of(idle.getKey()))
+                                        .withIssueTimeDuring(idleIssueStart, deltaEnd)
+                                        .build())
+                                .withReportTimeDuring(idleStart, deltaEnd)
+                                .build();
+                        scanCommandStatusFilterIntoSlot(db, slot, idleFilter, singleKey);
+                    }
+                }
+
+                snapshotEntries = new ArrayList<>(slot.allEntries);
+                slotHotStart = slot.hotWindowStart;
+                cacheReady = true;
+            } catch (Exception ignored) {
+                snapshotEntries = null;
+                cacheReady = false;
             }
         }
 
-        if (snapshotEntries != null) {
+        if (cacheReady && snapshotEntries != null && slotHotStart != null) {
+            Set<String> seenCmdKeys = new java.util.HashSet<>();
             for (RawAdjudicationEntry parsed : snapshotEntries) {
+                if (!parsed.cmdStreamKey().isEmpty() && !cmdStreamToLaneByKey.containsKey(parsed.cmdStreamKey())) {
+                    continue;
+                }
                 Instant rt = parsed.reportTime();
-                if (start != null && widenedEnd != null && rt != null) {
-                    if (rt.isBefore(start) || rt.isAfter(widenedEnd)) {
-                        continue;
-                    }
+                if (start != null && rt != null && rt.isBefore(start)) {
+                    continue;
+                }
+                if (widenedEnd != null && rt != null && rt.isAfter(widenedEnd)) {
+                    continue;
+                }
+                if (parsed.commandId() != null) {
+                    seenCmdKeys.add(bigIdLookupKey(parsed.commandId()));
                 }
                 rawAdjudicationsByObsId.computeIfAbsent(parsed.occupancyObsId(), k -> new ArrayList<>())
                         .add(parsed);
@@ -1522,24 +1870,81 @@ public final class VehicleIncidentAggregator {
                     adjMatchedObsIds.add(parsed.occupancyObsId());
                 }
             }
+
+            boolean isWarmupProbe = "__WARMUP__".equals(spec.rawVehicleId());
+            boolean needsPreHotScan = !isWarmupProbe
+                    && (start == null || start.equals(Instant.EPOCH) || start.isBefore(slotHotStart));
+            if (needsPreHotScan) {
+                Instant effectiveStart = (start == null || start.isBefore(Instant.EPOCH)) ? Instant.EPOCH : start;
+                Instant effectiveEnd = (widenedEnd != null && widenedEnd.isBefore(slotHotStart))
+                        ? widenedEnd
+                        : slotHotStart;
+                if (!effectiveEnd.isBefore(effectiveStart)) {
+                    Instant preIssueStart = subtractSecondsClamped(effectiveStart, 86_400L);
+                    Instant preIssueEnd = addSecondsClamped(effectiveEnd, 3_600L);
+                    CommandStatusFilter preFilter = new CommandStatusFilter.Builder()
+                            .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
+                            .withReportTimeDuring(effectiveStart, clampSqlEnd(effectiveEnd))
+                            .withCommands(new CommandFilter.Builder()
+                                    .withCommandStreams(cmdStreamBigIds)
+                                    .withIssueTimeDuring(preIssueStart, preIssueEnd)
+                                    .build())
+                            .build();
+                    String singleStreamKey = cmdStreamBigIds.size() == 1
+                            ? bigIdLookupKey(cmdStreamBigIds.iterator().next())
+                            : "";
+                    int preSeq = 1;
+                    try (var stream = db.getCommandStatusStore().select(preFilter)) {
+                        var it = stream.iterator();
+                        while (it.hasNext()) {
+                            ICommandStatus st = it.next();
+                            RawAdjudicationEntry parsed = parseRawAdjudicationStatus(
+                                    st, "pre-" + preSeq, preSeq, singleStreamKey);
+                            preSeq++;
+                            if (parsed == null) {
+                                continue;
+                            }
+                            String normVehicle = normalizeVehicleId(parsed.vehicleId());
+                            if (normVehicle.isEmpty()) {
+                                continue;
+                            }
+                            if (parsed.commandId() != null && !seenCmdKeys.add(bigIdLookupKey(parsed.commandId()))) {
+                                continue;
+                            }
+                            rawAdjudicationsByObsId.computeIfAbsent(parsed.occupancyObsId(), k -> new ArrayList<>())
+                                    .add(parsed);
+                            if (spec.matchMode().matches(normVehicle, spec.normalizedVehicleId())) {
+                                adjMatchedObsIds.add(parsed.occupancyObsId());
+                            }
+                        }
+                    }
+                }
+            }
             return;
         }
 
+        CommandFilter.Builder fallbackCmdFilter = new CommandFilter.Builder()
+                .withCommandStreams(cmdStreamBigIds);
         CommandStatusFilter.Builder statusFilter = new CommandStatusFilter.Builder()
-                .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
-                .withCommands(new CommandFilter.Builder()
-                        .withCommandStreams(cmdStreamBigIds)
-                        .build());
+                .withStatus(ICommandStatus.CommandStatusCode.COMPLETED);
         if (start != null && widenedEnd != null) {
-            statusFilter.withReportTimeDuring(start, widenedEnd);
+            Instant safeEnd = clampSqlEnd(widenedEnd);
+            fallbackCmdFilter.withIssueTimeDuring(subtractSecondsClamped(start, 86_400L), addSecondsClamped(safeEnd, 3_600L));
+            statusFilter.withReportTimeDuring(start, safeEnd);
         }
+        statusFilter.withCommands(fallbackCmdFilter.build());
 
+        String singleStreamKey = cmdStreamBigIds.size() == 1
+                ? bigIdLookupKey(cmdStreamBigIds.iterator().next())
+                : "";
         int seq = 1;
         try (var stream = db.getCommandStatusStore().select(statusFilter.build())) {
             var it = stream.iterator();
             while (it.hasNext()) {
-                RawAdjudicationEntry parsed = parseRawAdjudicationStatus(it.next(), seq++);
-                if (parsed == null) {
+                RawAdjudicationEntry parsed = parseRawAdjudicationStatus(
+                        it.next(), "fb-" + seq, seq, singleStreamKey);
+                seq++;
+                if (parsed == null || normalizeVehicleId(parsed.vehicleId()).isEmpty()) {
                     continue;
                 }
                 rawAdjudicationsByObsId.computeIfAbsent(parsed.occupancyObsId(), k -> new ArrayList<>())
@@ -1548,6 +1953,206 @@ public final class VehicleIncidentAggregator {
                 if (spec.matchMode().matches(normVehicle, spec.normalizedVehicleId())) {
                     adjMatchedObsIds.add(parsed.occupancyObsId());
                 }
+            }
+        }
+    }
+
+    private static void enrichMissingAdjudicationsForMatchedOccupancies(
+            IObsSystemDatabase db,
+            IdEncoder cmdIdEncoder,
+            Set<String> targetObsIds,
+            Map<String, IObsData> loadedOccupancies,
+            Map<String, Occupancy> parsedOccupancies,
+            Map<String, LaneStreamMetadata> occStreamByDsKey,
+            Map<String, String> ocrLaneByObsId,
+            Map<String, Set<BigId>> cmdStreamIdsByLaneUid,
+            Map<String, List<RawAdjudicationEntry>> rawAdjudicationsByObsId
+    ) {
+        if (db.getCommandStatusStore() == null || db.getCommandStore() == null || targetObsIds.isEmpty()) {
+            return;
+        }
+        Set<String> alreadyLoadedCmdKeys = new java.util.HashSet<>();
+        for (String obsId : targetObsIds) {
+            List<RawAdjudicationEntry> existing = rawAdjudicationsByObsId.get(obsId);
+            if (existing != null) {
+                for (RawAdjudicationEntry raw : existing) {
+                    if (raw.commandId() != null) {
+                        alreadyLoadedCmdKeys.add(bigIdLookupKey(raw.commandId()));
+                    }
+                }
+            }
+        }
+
+        Set<BigId> missingCmdBigIds = new LinkedHashSet<>();
+        Set<String> syntheticMarkerOnlyObsIds = new LinkedHashSet<>();
+        Set<String> unlinkedObsIds = new LinkedHashSet<>();
+
+        for (String obsId : targetObsIds) {
+            Occupancy occ = parsedOccupancies.get(obsId);
+            List<RawAdjudicationEntry> existing = rawAdjudicationsByObsId.get(obsId);
+            boolean hasExisting = existing != null && !existing.isEmpty();
+            boolean decodedAnyCmdId = false;
+            boolean hasSyntheticMarker = false;
+
+            if (occ != null && occ.getAdjudicatedIds() != null) {
+                for (String rawAdjId : occ.getAdjudicatedIds()) {
+                    if (rawAdjId == null || rawAdjId.isBlank()) {
+                        continue;
+                    }
+                    if (Adjudication.isSyntheticMarker(rawAdjId)) {
+                        hasSyntheticMarker = true;
+                        continue;
+                    }
+                    if (cmdIdEncoder != null) {
+                        try {
+                            BigId decodedCmdId = cmdIdEncoder.decodeID(rawAdjId.trim());
+                            if (decodedCmdId != null) {
+                                decodedAnyCmdId = true;
+                                if (!alreadyLoadedCmdKeys.contains(bigIdLookupKey(decodedCmdId))) {
+                                    missingCmdBigIds.add(decodedCmdId);
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+
+            if (!decodedAnyCmdId && !hasExisting && occ != null) {
+                if (hasSyntheticMarker) {
+                    syntheticMarkerOnlyObsIds.add(obsId);
+                } else {
+                    unlinkedObsIds.add(obsId);
+                }
+            }
+        }
+
+        if (!missingCmdBigIds.isEmpty()) {
+            List<BigId> idList = new ArrayList<>(missingCmdBigIds);
+            int seqBase = 1_000_000;
+            for (int offset = 0; offset < idList.size(); offset += DIRECT_CMD_STATUS_CHUNK_SIZE) {
+                List<BigId> chunk = idList.subList(offset, Math.min(idList.size(), offset + DIRECT_CMD_STATUS_CHUNK_SIZE));
+                CommandStatusFilter directFilter = new CommandStatusFilter.Builder()
+                        .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
+                        .withCommands(new CommandFilter.Builder()
+                                .withInternalIDs(chunk)
+                                .build())
+                        .build();
+                try (var stream = db.getCommandStatusStore().selectEntries(directFilter)) {
+                    var it = stream.iterator();
+                    while (it.hasNext()) {
+                        var kv = it.next();
+                        if (kv == null || kv.getValue() == null) {
+                            continue;
+                        }
+                        ICommandStatus status = kv.getValue();
+                        String statusKey = kv.getKey() != null ? bigIdLookupKey(kv.getKey()) : ("direct-" + seqBase);
+                        RawAdjudicationEntry parsed = parseRawAdjudicationStatus(status, statusKey, seqBase++, "");
+                        if (parsed == null || !targetObsIds.contains(parsed.occupancyObsId())) {
+                            continue;
+                        }
+                        if (parsed.commandId() != null && !alreadyLoadedCmdKeys.add(bigIdLookupKey(parsed.commandId()))) {
+                            continue;
+                        }
+                        rawAdjudicationsByObsId
+                                .computeIfAbsent(parsed.occupancyObsId(), ignored -> new ArrayList<>())
+                                .add(parsed);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        // Tiny bounded fallback for synthetic tests where a CommandStatus points to obsId without
+        // an encoded commandId in Occupancy.adjudicatedIds.
+        Set<String> fallbackObsIds = !syntheticMarkerOnlyObsIds.isEmpty()
+                ? syntheticMarkerOnlyObsIds
+                : (unlinkedObsIds.size() <= MAX_PROFILED_PASSES ? unlinkedObsIds : Set.of());
+        if (fallbackObsIds.isEmpty()) {
+            return;
+        }
+        long postHorizonSeconds = !syntheticMarkerOnlyObsIds.isEmpty() ? (86_400L * 30L) : 3_600L;
+        record BoundedSpan(Instant start, Instant end) {}
+        List<BoundedSpan> rawSpans = new ArrayList<>(fallbackObsIds.size());
+        Set<BigId> scopedCmdStreamIds = new LinkedHashSet<>();
+
+        for (String obsId : fallbackObsIds) {
+            IObsData occObs = loadedOccupancies.get(obsId);
+            Occupancy occ = parsedOccupancies.get(obsId);
+            if (occObs == null) {
+                continue;
+            }
+            LaneStreamMetadata meta = occStreamByDsKey.get(bigIdLookupKey(occObs.getDataStreamID()));
+            String laneUid = meta != null && !meta.laneUid().isBlank()
+                    ? meta.laneUid()
+                    : ocrLaneByObsId.getOrDefault(obsId, "");
+            if (!laneUid.isBlank()) {
+                Set<BigId> laneCs = cmdStreamIdsByLaneUid.get(laneUid);
+                if (laneCs != null) {
+                    scopedCmdStreamIds.addAll(laneCs);
+                }
+            }
+            Instant occStart = occ != null
+                    ? epochSecondsToInstant(occ.getStartTime(), occObs.getPhenomenonTime())
+                    : occObs.getPhenomenonTime();
+            Instant occEnd = occ != null
+                    ? epochSecondsToInstant(occ.getEndTime(), occObs.getResultTime())
+                    : occObs.getResultTime();
+            if (occStart != null && occEnd != null) {
+                rawSpans.add(new BoundedSpan(
+                        subtractSecondsClamped(occStart, 300L),
+                        addSecondsClamped(occEnd, postHorizonSeconds)));
+            }
+        }
+        if (rawSpans.isEmpty() || scopedCmdStreamIds.isEmpty()) {
+            return;
+        }
+        rawSpans.sort(Comparator.comparing(BoundedSpan::start));
+        List<BoundedSpan> mergedSpans = new ArrayList<>();
+        BoundedSpan cur = rawSpans.get(0);
+        for (int i = 1; i < rawSpans.size(); i++) {
+            BoundedSpan next = rawSpans.get(i);
+            if (!next.start().isAfter(addSecondsClamped(cur.end(), 3_600L))) {
+                cur = new BoundedSpan(cur.start(), next.end().isAfter(cur.end()) ? next.end() : cur.end());
+            } else {
+                mergedSpans.add(cur);
+                cur = next;
+            }
+        }
+        mergedSpans.add(cur);
+
+        String singleCsKey = scopedCmdStreamIds.size() == 1
+                ? bigIdLookupKey(scopedCmdStreamIds.iterator().next())
+                : "";
+        int fbSeq = 2_000_000;
+        for (BoundedSpan span : mergedSpans) {
+            CommandStatusFilter spanFilter = new CommandStatusFilter.Builder()
+                    .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
+                    .withReportTimeDuring(span.start(), clampSqlEnd(span.end()))
+                    .withCommands(new CommandFilter.Builder()
+                            .withCommandStreams(scopedCmdStreamIds)
+                            .withIssueTimeDuring(
+                                    subtractSecondsClamped(span.start(), 86_400L),
+                                    addSecondsClamped(span.end(), 3_600L))
+                            .build())
+                    .build();
+            try (var stream = db.getCommandStatusStore().select(spanFilter)) {
+                var it = stream.iterator();
+                while (it.hasNext()) {
+                    RawAdjudicationEntry parsed = parseRawAdjudicationStatus(
+                            it.next(), "span-" + fbSeq, fbSeq, singleCsKey);
+                    fbSeq++;
+                    if (parsed == null || !fallbackObsIds.contains(parsed.occupancyObsId())) {
+                        continue;
+                    }
+                    if (parsed.commandId() != null && !alreadyLoadedCmdKeys.add(bigIdLookupKey(parsed.commandId()))) {
+                        continue;
+                    }
+                    rawAdjudicationsByObsId
+                            .computeIfAbsent(parsed.occupancyObsId(), ignored -> new ArrayList<>())
+                            .add(parsed);
+                }
+            } catch (Exception ignored) {
             }
         }
     }
@@ -1603,6 +2208,9 @@ public final class VehicleIncidentAggregator {
                     }
 
                     String laneUid = knownLaneUid;
+                    if (laneUid.isBlank() && !raw.cmdStreamKey().isEmpty()) {
+                        laneUid = cmdStreamToLaneByKey.getOrDefault(raw.cmdStreamKey(), "");
+                    }
                     if (laneUid.isBlank() && raw.commandId() != null && db.getCommandStore() != null) {
                         BigId cmdId = raw.commandId();
                         laneUid = cmdIdToLaneCache.computeIfAbsent(bigIdLookupKey(cmdId), ignored -> {
@@ -1686,22 +2294,80 @@ public final class VehicleIncidentAggregator {
                 && RADHelper.DEF_ADJUDICATION.equals(cs.getRecordStructure().getDefinition());
     }
 
+    private static void pruneOcrRecordsBefore(OcrSearchCacheSlot slot, Instant cutoffFloor) {
+        if (cutoffFloor == null || slot.allRecords.isEmpty()) {
+            return;
+        }
+        boolean anyExpired = false;
+        for (CachedOcrObsRecord rec : slot.allRecords) {
+            if (rec.effectiveTime().isBefore(cutoffFloor)) {
+                anyExpired = true;
+                break;
+            }
+        }
+        if (!anyExpired) {
+            return;
+        }
+        List<CachedOcrObsRecord> surviving = new ArrayList<>(slot.allRecords.size());
+        for (CachedOcrObsRecord rec : slot.allRecords) {
+            if (!rec.effectiveTime().isBefore(cutoffFloor)) {
+                surviving.add(rec);
+            }
+        }
+        rebuildOcrSlotIndexes(slot, surviving);
+    }
+
+    private static void evictOldestOcrRecords(OcrSearchCacheSlot slot) {
+        int currentSize = slot.allRecords.size();
+        if (currentSize <= slot.maxCachedEntries) {
+            return;
+        }
+        slot.allRecords.sort(Comparator.comparing(CachedOcrObsRecord::effectiveTime));
+        int targetSize = Math.max(1, slot.maxCachedEntries - Math.max(1, slot.maxCachedEntries / 8));
+        if (targetSize >= currentSize) {
+            targetSize = slot.maxCachedEntries;
+        }
+        int evictCount = currentSize - targetSize;
+        List<CachedOcrObsRecord> surviving = new ArrayList<>(slot.allRecords.subList(evictCount, currentSize));
+        Instant newFloor = surviving.get(0).effectiveTime();
+        if (slot.hotWindowStart == null || newFloor.isAfter(slot.hotWindowStart)) {
+            slot.hotWindowStart = newFloor;
+        }
+        rebuildOcrSlotIndexes(slot, surviving);
+    }
+
+    private static void rebuildOcrSlotIndexes(OcrSearchCacheSlot slot, List<CachedOcrObsRecord> surviving) {
+        slot.allRecords.clear();
+        slot.allRecords.addAll(surviving);
+        slot.seenObsIds.clear();
+        slot.byNormValue.clear();
+        slot.bestByOccObsId.clear();
+        for (CachedOcrObsRecord rec : surviving) {
+            if (!rec.obsKeyStr().isEmpty()) {
+                slot.seenObsIds.add(rec.obsKeyStr());
+            }
+            slot.byNormValue.computeIfAbsent(rec.summary().normalizedValue(), k -> new ArrayList<>()).add(rec);
+            CachedOcrObsRecord prevBest = slot.bestByOccObsId.get(rec.occObsId());
+            if (prevBest == null || rec.summary().confidence() >= prevBest.summary().confidence()) {
+                slot.bestByOccObsId.put(rec.occObsId(), rec);
+            }
+        }
+    }
+
     private static void ingestCachedOcrRecord(OcrSearchCacheSlot slot, BigId obsKey, IObsData obs) {
         if (obs == null || obs.getResult() == null) {
             return;
         }
+        String dsKey = bigIdLookupKey(obs.getDataStreamID());
+        if (!dsKey.isEmpty()) {
+            Instant rt = obs.getResultTime() != null ? obs.getResultTime() : obs.getPhenomenonTime();
+            if (rt != null) {
+                slot.watermarkByStreamKey.merge(dsKey, rt, (prev, curr) -> curr.isAfter(prev) ? curr : prev);
+            }
+        }
         String keyStr = obsKey != null ? bigIdLookupKey(obsKey) : null;
-        if (keyStr != null && !slot.seenObsIds.add(keyStr)) {
+        if (keyStr != null && slot.seenObsIds.contains(keyStr)) {
             return;
-        }
-        if (slot.seenObsIds.size() > MAX_CACHED_OCR_ENTRIES) {
-            slot.clear();
-            slot.overflowed = true;
-            return;
-        }
-        Instant rt = obs.getResultTime() != null ? obs.getResultTime() : obs.getPhenomenonTime();
-        if (rt != null && (slot.watermarkResultTime == null || rt.isAfter(slot.watermarkResultTime))) {
-            slot.watermarkResultTime = rt;
         }
         try {
             VehicleOcrResult ocr = VehicleOcrResult.toVehicleOcrResult(obs.getResult());
@@ -1709,179 +2375,76 @@ public final class VehicleIncidentAggregator {
             if (occObsId.isEmpty()) {
                 return;
             }
+            if (keyStr != null) {
+                slot.seenObsIds.add(keyStr);
+            }
             String candNorm = !ocr.getNormalizedValue().isBlank()
                     ? normalizeVehicleId(ocr.getNormalizedValue())
                     : normalizeVehicleId(ocr.getValue());
             OcrMatchSummary summary = toOcrSummary(ocr, candNorm);
             CachedOcrObsRecord rec = new CachedOcrObsRecord(
+                    keyStr != null ? keyStr : "",
                     occObsId,
                     summary,
-                    bigIdLookupKey(obs.getDataStreamID()),
+                    dsKey,
                     obs.getPhenomenonTime(),
                     obs.getResultTime()
             );
             slot.allRecords.add(rec);
             slot.byNormValue.computeIfAbsent(candNorm, k -> new ArrayList<>()).add(rec);
+            CachedOcrObsRecord prevBest = slot.bestByOccObsId.get(occObsId);
+            if (prevBest == null || summary.confidence() >= prevBest.summary().confidence()) {
+                slot.bestByOccObsId.put(occObsId, rec);
+            }
+            if (slot.allRecords.size() > slot.maxCachedEntries) {
+                evictOldestOcrRecords(slot);
+            }
         } catch (Exception ignored) {
         }
     }
 
-    private static void scanVehicleOcrObservations(
-            IObsSystemDatabase db,
+    private static void scanOcrFilterIntoSlot(IObsStore obsStore, OcrSearchCacheSlot slot, ObsFilter filter) {
+        try (var stream = obsStore.selectEntries(filter)) {
+            stream.forEach(kv -> {
+                if (kv != null) {
+                    ingestCachedOcrRecord(slot, kv.getKey(), kv.getValue());
+                }
+            });
+        }
+    }
+
+    private static void applyOcrCqlPushdown(ObsFilter.Builder filterBuilder, VehicleIncidentSpec spec) {
+        String normQuery = normalizeVehicleId(spec.normalizedVehicleId());
+        if (normQuery.isEmpty()) {
+            return;
+        }
+        switch (spec.matchMode()) {
+            case EQUALS -> filterBuilder.withCQLFilter("normalizedValue = '" + normQuery + "'");
+            case STARTS_WITH -> {
+                if (normQuery.length() >= 2) {
+                    filterBuilder.withCQLFilter("normalizedValue LIKE '" + normQuery + "%'");
+                }
+            }
+            case CONTAINS -> {
+                if (normQuery.length() >= 2) {
+                    filterBuilder.withCQLFilter("normalizedValue LIKE '%" + normQuery + "%'");
+                }
+            }
+            default -> {
+            }
+        }
+    }
+
+    private static void collectMatchingOcrFromStore(
             IObsStore obsStore,
-            String[] explicitLanes,
-            Set<String> allowedLaneFilter,
-            LaneTopology laneTopology,
-            Instant start,
-            Instant end,
+            ObsFilter filter,
             VehicleIncidentSpec spec,
+            Map<String, String> ocrStreamToLaneByKey,
             Map<String, OcrMatchSummary> ocrByObsId,
             Map<String, String> ocrLaneByObsId,
             Set<String> ocrMatchedObsIds
     ) {
-        Map<BigId, String> ocrStreamToLane = findVehicleOcrStreams(db, explicitLanes, allowedLaneFilter, laneTopology);
-        if (ocrStreamToLane.isEmpty()) {
-            return;
-        }
-        Map<String, String> ocrStreamToLaneByKey = new HashMap<>(ocrStreamToLane.size() * 2);
-        List<String> sortedOcrKeys = new ArrayList<>(ocrStreamToLane.size());
-        for (Map.Entry<BigId, String> e : ocrStreamToLane.entrySet()) {
-            String k = bigIdLookupKey(e.getKey());
-            ocrStreamToLaneByKey.put(k, e.getValue());
-            sortedOcrKeys.add(k);
-        }
-        Collections.sort(sortedOcrKeys);
-
-        Instant widenedStart = null;
-        Instant widenedEnd = null;
-        if (start != null && end != null) {
-            widenedStart = start.isBefore(Instant.MIN.plusSeconds(3_600L)) ? start : start.minusSeconds(3_600L);
-            widenedEnd = end.isAfter(Instant.MAX.minusSeconds(120L)) ? end : end.plusSeconds(120L);
-        }
-
-        // Count-verified incremental cache for unbounded / node-wide searches so concurrent
-        // Cold Parquet / USB backup I/O never stalls interactive vehicle-search requests.
-        boolean eligibleForIncrementalCache = (start == null || start.equals(Instant.EPOCH));
-        if (eligibleForIncrementalCache) {
-            String cacheKey = System.identityHashCode(db) + "|" + String.join(",", sortedOcrKeys);
-            if (OCR_CACHE_BY_KEY.size() > MAX_DB_CACHE_SLOTS) {
-                OCR_CACHE_BY_KEY.entrySet().removeIf(e -> e.getValue().dbRef.get() == null);
-                if (OCR_CACHE_BY_KEY.size() > MAX_DB_CACHE_SLOTS) {
-                    OCR_CACHE_BY_KEY.clear();
-                }
-            }
-            OcrSearchCacheSlot slot = OCR_CACHE_BY_KEY.compute(cacheKey, (k, existing) ->
-                    (existing == null || existing.dbRef.get() != db) ? new OcrSearchCacheSlot(db) : existing);
-
-            List<CachedOcrObsRecord> candidates = null;
-            synchronized (slot) {
-                if (!slot.overflowed) {
-                    try {
-                        ObsFilter countFilter = new ObsFilter.Builder()
-                                .withDataStreams(ocrStreamToLane.keySet())
-                                .build();
-                        long storeCount = obsStore.countMatchingEntries(countFilter);
-                        if (slot.expectedStoreCount >= 0 && storeCount > slot.expectedStoreCount && slot.watermarkResultTime != null) {
-                            Instant deltaStart = slot.watermarkResultTime.isBefore(Instant.EPOCH.plusSeconds(120L))
-                                    ? Instant.EPOCH
-                                    : slot.watermarkResultTime.minusSeconds(120L);
-                            Instant deltaEnd = Instant.now().plusSeconds(3_600L);
-                            ObsFilter deltaFilter = new ObsFilter.Builder()
-                                    .withDataStreams(ocrStreamToLane.keySet())
-                                    .withResultTimeDuring(deltaStart, deltaEnd)
-                                    .build();
-                            try (var deltaStream = obsStore.selectEntries(deltaFilter)) {
-                                deltaStream.forEach(kv -> {
-                                    if (!slot.overflowed && kv != null) {
-                                        ingestCachedOcrRecord(slot, kv.getKey(), kv.getValue());
-                                    }
-                                });
-                            }
-                            if (!slot.overflowed && slot.seenObsIds.size() == storeCount) {
-                                slot.expectedStoreCount = storeCount;
-                            }
-                        }
-                        if (!slot.overflowed && slot.expectedStoreCount != storeCount) {
-                            slot.clear();
-                            try (var fullStream = obsStore.selectEntries(countFilter)) {
-                                fullStream.forEach(kv -> {
-                                    if (!slot.overflowed && kv != null) {
-                                        ingestCachedOcrRecord(slot, kv.getKey(), kv.getValue());
-                                    }
-                                });
-                            }
-                            if (!slot.overflowed) {
-                                slot.expectedStoreCount = slot.seenObsIds.size();
-                                if (slot.watermarkResultTime == null) {
-                                    slot.watermarkResultTime = Instant.now();
-                                }
-                            }
-                        }
-                        if (!slot.overflowed) {
-                            if (spec.matchMode() == MatchMode.EQUALS) {
-                                List<CachedOcrObsRecord> exact = slot.byNormValue.get(spec.normalizedVehicleId());
-                                candidates = exact != null ? new ArrayList<>(exact) : List.of();
-                            } else {
-                                candidates = new ArrayList<>(slot.allRecords);
-                            }
-                        }
-                    } catch (Exception ignored) {
-                        candidates = null;
-                    }
-                }
-            }
-
-            if (candidates != null) {
-                for (CachedOcrObsRecord rec : candidates) {
-                    if (widenedStart != null && widenedEnd != null) {
-                        Instant pt = rec.phenomenonTime();
-                        Instant rt = rec.resultTime();
-                        if (pt != null && (pt.isBefore(widenedStart) || pt.isAfter(widenedEnd))) {
-                            continue;
-                        }
-                        if (rt != null && (rt.isBefore(start) || rt.isAfter(widenedEnd))) {
-                            continue;
-                        }
-                    }
-                    String candNorm = rec.summary().normalizedValue();
-                    if (!spec.matchMode().matches(candNorm, spec.normalizedVehicleId())) {
-                        continue;
-                    }
-                    String occObsId = rec.occObsId();
-                    OcrMatchSummary prev = ocrByObsId.get(occObsId);
-                    if (prev == null || rec.summary().confidence() >= prev.confidence()) {
-                        ocrByObsId.put(occObsId, rec.summary());
-                    }
-                    String laneUid = ocrStreamToLaneByKey.getOrDefault(rec.dsKey(), "");
-                    if (!laneUid.isBlank()) {
-                        ocrLaneByObsId.putIfAbsent(occObsId, laneUid);
-                    }
-                    ocrMatchedObsIds.add(occObsId);
-                }
-                return;
-            }
-        }
-
-        ObsFilter.Builder filterBuilder = new ObsFilter.Builder()
-                .withDataStreams(ocrStreamToLane.keySet());
-        if (widenedStart != null && widenedEnd != null) {
-            filterBuilder.withPhenomenonTimeDuring(widenedStart, widenedEnd);
-            filterBuilder.withResultTimeDuring(start, widenedEnd);
-        }
-
-        // Safe OGC CQL2 pushdown on canonical uppercase alphanumeric normalizedValue
-        String normQuery = spec.normalizedVehicleId();
-        if (normQuery != null && normQuery.length() >= 2) {
-            switch (spec.matchMode()) {
-                case EQUALS -> filterBuilder.withCQLFilter("normalizedValue = '" + normQuery + "'");
-                case STARTS_WITH -> filterBuilder.withCQLFilter("normalizedValue LIKE '" + normQuery + "%'");
-                case CONTAINS -> filterBuilder.withCQLFilter("normalizedValue LIKE '%" + normQuery + "%'");
-                default -> {
-                }
-            }
-        }
-
-        try (var stream = obsStore.select(filterBuilder.build())) {
+        try (var stream = obsStore.select(filter)) {
             stream.forEach(obs -> {
                 if (obs == null || obs.getResult() == null) {
                     return;
@@ -1912,6 +2475,254 @@ public final class VehicleIncidentAggregator {
                 }
             });
         }
+    }
+
+    private static void scanVehicleOcrObservations(
+            IObsSystemDatabase db,
+            IObsStore obsStore,
+            String[] explicitLanes,
+            Set<String> allowedLaneFilter,
+            LaneTopology laneTopology,
+            Instant start,
+            Instant end,
+            VehicleIncidentSpec spec,
+            Map<String, OcrMatchSummary> ocrByObsId,
+            Map<String, String> ocrLaneByObsId,
+            Set<String> ocrMatchedObsIds
+    ) {
+        Map<BigId, String> ocrStreamToLane = findVehicleOcrStreams(db, explicitLanes, allowedLaneFilter, laneTopology);
+        if (ocrStreamToLane.isEmpty()) {
+            return;
+        }
+        Map<String, String> ocrStreamToLaneByKey = new HashMap<>(ocrStreamToLane.size() * 2);
+        for (Map.Entry<BigId, String> e : ocrStreamToLane.entrySet()) {
+            ocrStreamToLaneByKey.put(bigIdLookupKey(e.getKey()), e.getValue());
+        }
+
+        Instant widenedStart = start != null ? subtractSecondsClamped(start, 3_600L) : null;
+        Instant widenedEnd = end != null ? addSecondsClamped(end, 120L) : null;
+
+        // Per-database bounded rolling hot-window cache with per-stream watermarks so enabling OCR on
+        // a new lane, restarting after years of operation, or running 15m..30d searches never scans
+        // multi-year cold Parquet archives on warmup.
+        String cacheKey = String.valueOf(System.identityHashCode(db));
+        if (OCR_CACHE_BY_KEY.size() > MAX_DB_CACHE_SLOTS) {
+            OCR_CACHE_BY_KEY.entrySet().removeIf(e -> e.getValue().dbRef.get() == null);
+            if (OCR_CACHE_BY_KEY.size() > MAX_DB_CACHE_SLOTS) {
+                OCR_CACHE_BY_KEY.clear();
+            }
+        }
+        OcrSearchCacheSlot slot = OCR_CACHE_BY_KEY.compute(cacheKey, (k, existing) ->
+                (existing == null || existing.dbRef.get() != db) ? new OcrSearchCacheSlot(db) : existing);
+
+        Instant nowWall = Instant.now();
+        Instant anchorEnd = (end != null && end.isBefore(MAX_SAFE_SQL_INSTANT) && end.isAfter(nowWall))
+                ? end
+                : nowWall;
+        Instant warmupEnd = addSecondsClamped(anchorEnd, 3_600L);
+        Instant rollingFloor = subtractSecondsClamped(
+                nowWall.minus(HOT_CACHE_WINDOW), HOT_CACHE_BOUNDARY_SLACK.getSeconds());
+
+        List<CachedOcrObsRecord> candidates = null;
+        Instant slotHotStart = null;
+        boolean cacheReady = false;
+        synchronized (slot) {
+            try {
+                if (slot.hotWindowStart == null) {
+                    slot.hotWindowStart = rollingFloor;
+                } else if (rollingFloor.isAfter(slot.hotWindowStart.plusSeconds(ACTIVE_WATERMARK_COALESCE_SECONDS))) {
+                    slot.hotWindowStart = rollingFloor;
+                    pruneOcrRecordsBefore(slot, slot.hotWindowStart);
+                }
+
+                Set<BigId> unseenStreamIds = new LinkedHashSet<>();
+                Set<BigId> emptyWarmedStreamIds = new LinkedHashSet<>();
+                Map<BigId, Instant> activeWarmedStreams = new LinkedHashMap<>();
+                for (BigId dsId : ocrStreamToLane.keySet()) {
+                    String dsKey = bigIdLookupKey(dsId);
+                    if (!slot.loadedStreamKeys.contains(dsKey)) {
+                        unseenStreamIds.add(dsId);
+                    } else {
+                        Instant wm = slot.watermarkByStreamKey.get(dsKey);
+                        if (wm == null) {
+                            emptyWarmedStreamIds.add(dsId);
+                        } else {
+                            activeWarmedStreams.put(dsId, wm);
+                        }
+                    }
+                }
+
+                Instant hotPhenStart = subtractSecondsClamped(slot.hotWindowStart, 3_600L);
+                if (!unseenStreamIds.isEmpty()) {
+                    ObsFilter unseenFilter = new ObsFilter.Builder()
+                            .withDataStreams(unseenStreamIds)
+                            .withPhenomenonTimeDuring(hotPhenStart, warmupEnd)
+                            .withResultTimeDuring(slot.hotWindowStart, warmupEnd)
+                            .build();
+                    scanOcrFilterIntoSlot(obsStore, slot, unseenFilter);
+                    for (BigId dsId : unseenStreamIds) {
+                        slot.loadedStreamKeys.add(bigIdLookupKey(dsId));
+                    }
+                }
+
+                if (!emptyWarmedStreamIds.isEmpty()) {
+                    ObsFilter emptyFilter = new ObsFilter.Builder()
+                            .withDataStreams(emptyWarmedStreamIds)
+                            .withPhenomenonTimeDuring(hotPhenStart, warmupEnd)
+                            .withResultTimeDuring(slot.hotWindowStart, warmupEnd)
+                            .build();
+                    scanOcrFilterIntoSlot(obsStore, slot, emptyFilter);
+                }
+
+                if (!activeWarmedStreams.isEmpty()) {
+                    Instant maxWm = Instant.EPOCH;
+                    for (Instant wm : activeWarmedStreams.values()) {
+                        if (wm.isAfter(maxWm)) {
+                            maxWm = wm;
+                        }
+                    }
+                    Instant baseEnd = maxWm.isAfter(anchorEnd) ? maxWm : anchorEnd;
+                    Instant deltaEnd = addSecondsClamped(baseEnd, 3_600L);
+                    Instant recentCutoff = subtractSecondsClamped(maxWm, ACTIVE_WATERMARK_COALESCE_SECONDS);
+
+                    Set<BigId> recentStreams = new LinkedHashSet<>();
+                    Instant minRecentWm = null;
+                    Map<BigId, Instant> idleStreams = new LinkedHashMap<>();
+                    for (Map.Entry<BigId, Instant> e : activeWarmedStreams.entrySet()) {
+                        Instant wm = e.getValue();
+                        if (!wm.isBefore(recentCutoff)) {
+                            recentStreams.add(e.getKey());
+                            if (minRecentWm == null || wm.isBefore(minRecentWm)) {
+                                minRecentWm = wm;
+                            }
+                        } else {
+                            idleStreams.put(e.getKey(), wm);
+                        }
+                    }
+
+                    if (!recentStreams.isEmpty() && minRecentWm != null) {
+                        Instant deltaStart = subtractSecondsClamped(minRecentWm, 120L);
+                        Instant deltaPhenStart = subtractSecondsClamped(deltaStart, 3_600L);
+                        ObsFilter deltaFilter = new ObsFilter.Builder()
+                                .withDataStreams(recentStreams)
+                                .withPhenomenonTimeDuring(deltaPhenStart, deltaEnd)
+                                .withResultTimeDuring(deltaStart, deltaEnd)
+                                .build();
+                        scanOcrFilterIntoSlot(obsStore, slot, deltaFilter);
+                    }
+
+                    for (Map.Entry<BigId, Instant> idle : idleStreams.entrySet()) {
+                        Instant idleStart = idle.getValue().plusMillis(1L);
+                        if (idleStart.isAfter(deltaEnd)) {
+                            continue;
+                        }
+                        Instant idlePhenStart = subtractSecondsClamped(idleStart, 3_600L);
+                        ObsFilter idleFilter = new ObsFilter.Builder()
+                                .withDataStreams(Set.of(idle.getKey()))
+                                .withPhenomenonTimeDuring(idlePhenStart, deltaEnd)
+                                .withResultTimeDuring(idleStart, deltaEnd)
+                                .build();
+                        scanOcrFilterIntoSlot(obsStore, slot, idleFilter);
+                    }
+                }
+
+                if (spec.matchMode() == MatchMode.EQUALS) {
+                    List<CachedOcrObsRecord> exact = slot.byNormValue.get(normalizeVehicleId(spec.normalizedVehicleId()));
+                    candidates = exact != null ? new ArrayList<>(exact) : List.of();
+                } else {
+                    candidates = new ArrayList<>(slot.allRecords);
+                }
+                slotHotStart = slot.hotWindowStart;
+                cacheReady = true;
+            } catch (Exception ignored) {
+                candidates = null;
+                cacheReady = false;
+            }
+        }
+
+        if (cacheReady && candidates != null && slotHotStart != null) {
+            if (widenedEnd == null || !widenedEnd.isBefore(slotHotStart)) {
+                for (CachedOcrObsRecord rec : candidates) {
+                    String laneUid = ocrStreamToLaneByKey.get(rec.dsKey());
+                    if (laneUid == null) {
+                        continue;
+                    }
+                    Instant pt = rec.phenomenonTime();
+                    Instant rt = rec.resultTime();
+                    if (widenedStart != null && pt != null && pt.isBefore(widenedStart)) {
+                        continue;
+                    }
+                    if (widenedEnd != null && pt != null && pt.isAfter(widenedEnd)) {
+                        continue;
+                    }
+                    if (start != null && rt != null && rt.isBefore(start)) {
+                        continue;
+                    }
+                    if (widenedEnd != null && rt != null && rt.isAfter(widenedEnd)) {
+                        continue;
+                    }
+                    String candNorm = rec.summary().normalizedValue();
+                    if (!spec.matchMode().matches(candNorm, spec.normalizedVehicleId())) {
+                        continue;
+                    }
+                    String occObsId = rec.occObsId();
+                    OcrMatchSummary prev = ocrByObsId.get(occObsId);
+                    if (prev == null || rec.summary().confidence() >= prev.confidence()) {
+                        ocrByObsId.put(occObsId, rec.summary());
+                    }
+                    if (!laneUid.isBlank()) {
+                        ocrLaneByObsId.putIfAbsent(occObsId, laneUid);
+                    }
+                    ocrMatchedObsIds.add(occObsId);
+                }
+            }
+
+            boolean isWarmupProbe = "__WARMUP__".equals(spec.rawVehicleId());
+            boolean needsPreHotScan = !isWarmupProbe
+                    && (start == null || start.equals(Instant.EPOCH) || start.isBefore(slotHotStart));
+            if (needsPreHotScan) {
+                Instant effectivePreStart = (start == null || start.isBefore(Instant.EPOCH)) ? Instant.EPOCH : start;
+                Instant effectivePreEnd = (widenedEnd != null && widenedEnd.isBefore(slotHotStart))
+                        ? widenedEnd
+                        : slotHotStart;
+                if (!effectivePreEnd.isBefore(effectivePreStart)) {
+                    Instant prePhenStart = subtractSecondsClamped(effectivePreStart, 3_600L);
+                    Instant prePhenEnd = addSecondsClamped(effectivePreEnd, 120L);
+                    ObsFilter.Builder preFilterBuilder = new ObsFilter.Builder()
+                            .withDataStreams(ocrStreamToLane.keySet())
+                            .withPhenomenonTimeDuring(prePhenStart, prePhenEnd)
+                            .withResultTimeDuring(effectivePreStart, clampSqlEnd(effectivePreEnd));
+                    applyOcrCqlPushdown(preFilterBuilder, spec);
+                    collectMatchingOcrFromStore(
+                            obsStore,
+                            preFilterBuilder.build(),
+                            spec,
+                            ocrStreamToLaneByKey,
+                            ocrByObsId,
+                            ocrLaneByObsId,
+                            ocrMatchedObsIds
+                    );
+                }
+            }
+            return;
+        }
+
+        ObsFilter.Builder filterBuilder = new ObsFilter.Builder()
+                .withDataStreams(ocrStreamToLane.keySet());
+        if (widenedStart != null && widenedEnd != null) {
+            filterBuilder.withPhenomenonTimeDuring(widenedStart, widenedEnd);
+            filterBuilder.withResultTimeDuring(start, clampSqlEnd(widenedEnd));
+        }
+        applyOcrCqlPushdown(filterBuilder, spec);
+        collectMatchingOcrFromStore(
+                obsStore,
+                filterBuilder.build(),
+                spec,
+                ocrStreamToLaneByKey,
+                ocrByObsId,
+                ocrLaneByObsId,
+                ocrMatchedObsIds
+        );
     }
 
     private static void enrichMissingOcrForMatchedOccupancies(
@@ -1973,6 +2784,32 @@ public final class VehicleIncidentAggregator {
         if (ocrStreamToLane.isEmpty()) {
             return;
         }
+
+        // Satisfy any missing OCR summaries from the warm node-wide OCR cache first.
+        OcrSearchCacheSlot warmSlot = OCR_CACHE_BY_KEY.get(String.valueOf(System.identityHashCode(db)));
+        if (warmSlot != null) {
+            Set<String> allowedDsKeys = new LinkedHashSet<>();
+            for (BigId dsId : ocrStreamToLane.keySet()) {
+                allowedDsKeys.add(bigIdLookupKey(dsId));
+            }
+            synchronized (warmSlot) {
+                if (!warmSlot.bestByOccObsId.isEmpty()) {
+                    var iter = missingOcrObsIds.iterator();
+                    while (iter.hasNext()) {
+                        String obsId = iter.next();
+                        CachedOcrObsRecord cached = warmSlot.bestByOccObsId.get(obsId);
+                        if (cached != null && allowedDsKeys.contains(cached.dsKey())) {
+                            ocrByObsId.put(obsId, cached.summary());
+                            iter.remove();
+                        }
+                    }
+                }
+            }
+            if (missingOcrObsIds.isEmpty()) {
+                return;
+            }
+        }
+
         List<String> safeClauses = new ArrayList<>();
         for (String obsId : missingOcrObsIds) {
             if (obsId != null && obsId.matches("^[A-Za-z0-9_-]{3,64}$")) {

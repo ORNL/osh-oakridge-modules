@@ -1131,6 +1131,837 @@ public class VehicleIncidentSearchAndReportTest {
         assertEquals(17, rsProfile.get(0).getAsJsonObject().get("neutronCounts").getAsInt());
     }
 
+    @Test
+    public void dynamicOcrStreamAdditionScansOnlyNewStreamAndScopesLaneQueriesWithoutFullRescan() throws Exception {
+        var parallelismField = VehicleIncidentAggregator.class.getDeclaredField("PROFILE_LOAD_PARALLELISM");
+        parallelismField.setAccessible(true);
+        assertTrue("Profile loader parallelism must stay <= 2 to honor DuckDB session cap",
+                parallelismField.getInt(null) <= 2);
+
+        var sml = new SMLHelper();
+        RADHelper rad = new RADHelper();
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        DataComponent occStruct = new OccupancyOutput(new SensorSystem()).getRecordDescription();
+        DataComponent ocrStruct = rad.createVehicleOcrRecord();
+
+        LaneSystem dummyLane = new LaneSystem();
+        dummyLane.setParentHub(hub);
+        AdjudicationControl adjControl = new AdjudicationControl(dummyLane) {};
+        Method createResultMethod = AdjudicationControl.class.getDeclaredMethod(
+                "createResultData", Adjudication.class, String.class);
+        createResultMethod.setAccessible(true);
+
+        String lane41Uid = "urn:osh:system:lane:lane-41";
+        BigId lane41SysId = db.getSystemDescStore().add(new SystemWrapper(
+                sml.createPhysicalSystem().uniqueID(lane41Uid).name("Lane 41").build())).getInternalID();
+        BigId lane41OccDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(lane41SysId, lane41Uid))
+                .withName("occupancy")
+                .withRecordDescription(occStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+        BigId lane41OcrDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(lane41SysId, lane41Uid))
+                .withName("vehicleOcr")
+                .withRecordDescription(ocrStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+        BigId lane41CmdStream = db.getCommandStore().getCommandStreams().add(new CommandStreamInfo.Builder()
+                .withSystem(new FeatureId(lane41SysId, lane41Uid))
+                .withName(AdjudicationControl.NAME)
+                .withRecordDescription(adjControl.getCommandDescription())
+                .withRecordEncoding(new TextEncodingImpl())
+                .withResultDescription(adjControl.getResultDescription())
+                .withResultEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+
+        String lane42Uid = "urn:osh:system:lane:lane-42";
+        BigId lane42SysId = db.getSystemDescStore().add(new SystemWrapper(
+                sml.createPhysicalSystem().uniqueID(lane42Uid).name("Lane 42").build())).getInternalID();
+        BigId lane42OccDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(lane42SysId, lane42Uid))
+                .withName("occupancy")
+                .withRecordDescription(occStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+        BigId lane42OcrDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(lane42SysId, lane42Uid))
+                .withName("vehicleOcr")
+                .withRecordDescription(ocrStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+        BigId lane42CmdStream = db.getCommandStore().getCommandStreams().add(new CommandStreamInfo.Builder()
+                .withSystem(new FeatureId(lane42SysId, lane42Uid))
+                .withName(AdjudicationControl.NAME)
+                .withRecordDescription(adjControl.getCommandDescription())
+                .withRecordEncoding(new TextEncodingImpl())
+                .withResultDescription(adjControl.getResultDescription())
+                .withResultEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+
+        Instant t0 = Instant.now().minus(java.time.Duration.ofDays(2))
+                .truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String occ41Id = addSimpleOccupancyAndOcr(
+                lane41OccDs, lane41OcrDs, ocrStruct, 4101, t0, "CSQU3054383");
+        String occ42Id = addSimpleOccupancyAndOcr(
+                lane42OccDs, lane42OcrDs, ocrStruct, 4201, t0.plusSeconds(30), "HLXU8123450");
+
+        Adjudication adj42 = new Adjudication.Builder()
+                .feedback("Secondary manifest check")
+                .adjudicationCode(4)
+                .isotopes(List.of())
+                .secondaryInspectionStatus(Adjudication.SecondaryInspectionStatus.NONE)
+                .filePaths(List.of())
+                .occupancyObsId(occ42Id)
+                .vehicleId("HLXU8123450")
+                .build();
+        recordCompletedAdjudication(lane42CmdStream, adjControl, createResultMethod, adj42, "gate-op", t0.plusSeconds(40));
+
+        // Wrap IObsSystemDatabase + IObsStore to record every selectEntries / select ObsFilter
+        List<org.sensorhub.api.datastore.obs.ObsFilter> recordedObsFilters = new ArrayList<>();
+        List<org.sensorhub.api.datastore.obs.ObsFilter> recordedSelectEntriesFilters = new ArrayList<>();
+        org.sensorhub.api.datastore.obs.IObsStore realObsStore = db.getObservationStore();
+        org.sensorhub.api.datastore.obs.IObsStore instrumentedObsStore =
+                (org.sensorhub.api.datastore.obs.IObsStore) java.lang.reflect.Proxy.newProxyInstance(
+                        org.sensorhub.api.datastore.obs.IObsStore.class.getClassLoader(),
+                        new Class<?>[]{org.sensorhub.api.datastore.obs.IObsStore.class},
+                        (proxy, method, args) -> {
+                            String name = method.getName();
+                            if (("selectEntries".equals(name) || "select".equals(name))
+                                    && args != null && args.length == 1
+                                    && args[0] instanceof org.sensorhub.api.datastore.obs.ObsFilter f) {
+                                recordedObsFilters.add(f);
+                                if ("selectEntries".equals(name)) {
+                                    recordedSelectEntriesFilters.add(f);
+                                }
+                            }
+                            return method.invoke(realObsStore, args);
+                        });
+        IObsSystemDatabase instrumentedDb = (IObsSystemDatabase) java.lang.reflect.Proxy.newProxyInstance(
+                IObsSystemDatabase.class.getClassLoader(),
+                new Class<?>[]{IObsSystemDatabase.class},
+                (proxy, method, args) -> {
+                    if ("getObservationStore".equals(method.getName())) {
+                        return instrumentedObsStore;
+                    }
+                    return method.invoke(db, args);
+                });
+
+        // 1. Initial node-wide warmup loads lane 41 and lane 42 once
+        var allSpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "", "", VehicleIncidentAggregator.MatchMode.IS_NOT_EMPTY, "", false, List.of());
+        var warmResult = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate", allSpec, null, null, 200);
+        assertEquals(2, warmResult.passes().size());
+
+        // 2. Scoped lane queries reuse the node-wide cache with zero unbounded IObsStore scans
+        recordedObsFilters.clear();
+        var lane41OnlySpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "", "", VehicleIncidentAggregator.MatchMode.IS_NOT_EMPTY, lane41Uid, false, List.of());
+        var lane41Result = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate", lane41OnlySpec, null, null, 200);
+        assertEquals(1, lane41Result.passes().size());
+        assertEquals(occ41Id, lane41Result.passes().get(0).occupancyObsId());
+        assertEquals("CSQU3054383", lane41Result.passes().get(0).normalizedVehicleId());
+        for (var f : recordedObsFilters) {
+            if (f.getInternalIDs() == null) {
+                assertNotNull("Scoped query on warm cache must never issue an unbounded stream scan",
+                        f.getResultTime());
+            }
+        }
+
+        var lane42OnlySpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "", "", VehicleIncidentAggregator.MatchMode.IS_NOT_EMPTY, lane42Uid, false, List.of());
+        var lane42Result = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate", lane42OnlySpec, null, null, 200);
+        assertEquals(1, lane42Result.passes().size());
+        assertEquals(occ42Id, lane42Result.passes().get(0).occupancyObsId());
+        assertEquals("HLXU8123450", lane42Result.passes().get(0).normalizedVehicleId());
+
+        // 3. Dynamically add Lane 50 with a brand-new vehicleOcr stream (2 hot rows) + 1 new row on Lane 41
+        String lane50Uid = "urn:osh:system:lane:lane-50";
+        BigId lane50SysId = db.getSystemDescStore().add(new SystemWrapper(
+                sml.createPhysicalSystem().uniqueID(lane50Uid).name("Lane 50").build())).getInternalID();
+        BigId lane50OccDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(lane50SysId, lane50Uid))
+                .withName("occupancy")
+                .withRecordDescription(occStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+        BigId lane50OcrDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(lane50SysId, lane50Uid))
+                .withName("vehicleOcr")
+                .withRecordDescription(ocrStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+        BigId lane50CmdStream = db.getCommandStore().getCommandStreams().add(new CommandStreamInfo.Builder()
+                .withSystem(new FeatureId(lane50SysId, lane50Uid))
+                .withName(AdjudicationControl.NAME)
+                .withRecordDescription(adjControl.getCommandDescription())
+                .withRecordEncoding(new TextEncodingImpl())
+                .withResultDescription(adjControl.getResultDescription())
+                .withResultEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+
+        String occ50A = addSimpleOccupancyAndOcr(
+                lane50OccDs, lane50OcrDs, ocrStruct, 5001, t0.plusSeconds(120), "MAEU9988776");
+        String occ50B = addSimpleOccupancyAndOcr(
+                lane50OccDs, lane50OcrDs, ocrStruct, 5002, t0.plusSeconds(150), "TGHU4455660");
+        String occ41New = addSimpleOccupancyAndOcr(
+                lane41OccDs, lane41OcrDs, ocrStruct, 4102, t0.plusSeconds(180), "OOLU7766554");
+
+        Adjudication adj50 = new Adjudication.Builder()
+                .feedback("New lane 50 clearance")
+                .adjudicationCode(4)
+                .isotopes(List.of())
+                .secondaryInspectionStatus(Adjudication.SecondaryInspectionStatus.NONE)
+                .filePaths(List.of())
+                .occupancyObsId(occ50B)
+                .vehicleId("TGHU4455660")
+                .build();
+        recordCompletedAdjudication(lane50CmdStream, adjControl, createResultMethod, adj50, "gate-op", t0.plusSeconds(160));
+
+        recordedObsFilters.clear();
+        recordedSelectEntriesFilters.clear();
+        var afterLane50Result = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate", allSpec, null, null, 200);
+        assertEquals(5, afterLane50Result.passes().size());
+
+        List<org.sensorhub.api.datastore.obs.ObsFilter> unboundedStreamScans = recordedObsFilters.stream()
+                .filter(f -> f.getInternalIDs() == null && f.getResultTime() == null && f.getPhenomenonTime() == null)
+                .toList();
+        assertEquals("Zero unbounded OCR stream scans may run during warmup or dynamic stream addition",
+                0, unboundedStreamScans.size());
+
+        List<org.sensorhub.api.datastore.obs.ObsFilter> hotWarmupScans = recordedSelectEntriesFilters.stream()
+                .filter(f -> f.getInternalIDs() == null
+                        && f.getResultTime() != null
+                        && java.time.Duration.between(f.getResultTime().getMin(), f.getResultTime().getMax()).toDays() >= 29)
+                .toList();
+        assertEquals("Exactly one 30-day hot-window warmup scan should run for newly added Lane 50 only",
+                1, hotWarmupScans.size());
+        var scannedDsIds = hotWarmupScans.get(0).getDataStreamFilter().getInternalIDs();
+        assertEquals("30-day hot-window warmup scan must target ONLY newly added Lane 50 stream, never previously warmed streams",
+                java.util.Set.of(lane50OcrDs), scannedDsIds);
+
+        // Verify exact match on both newly added Lane 50 and incrementally updated Lane 41, plus HTTP lanes filter
+        var exact50Spec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "MAEU9988776", "MAEU9988776", VehicleIncidentAggregator.MatchMode.EQUALS, "", false, List.of());
+        var exact50 = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate", exact50Spec, null, null, 200);
+        assertEquals(1, exact50.passes().size());
+        assertEquals(occ50A, exact50.passes().get(0).occupancyObsId());
+
+        var exact41DeltaSpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "OOLU7766554", "OOLU7766554", VehicleIncidentAggregator.MatchMode.EQUALS, "", false, List.of());
+        var exact41Delta = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate", exact41DeltaSpec, null, null, 200);
+        assertEquals(1, exact41Delta.passes().size());
+        assertEquals(occ41New, exact41Delta.passes().get(0).occupancyObsId());
+
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> httpScoped = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(bucketEndpoint + "/adjudication/vehicle-search?matchMode=isNotEmpty&laneUIDs="
+                        + URLEncoder.encode(lane50Uid, StandardCharsets.UTF_8)))
+                .header("Authorization", basicAuth())
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, httpScoped.statusCode());
+        JsonObject httpScopedJson = JsonParser.parseString(httpScoped.body()).getAsJsonObject();
+        assertEquals(2, httpScopedJson.get("totalMatched").getAsInt());
+    }
+
+    @Test
+    public void rollingHotOcrWindowAndColdCqlMergeServeMultiYearSearchesAndEvictOldestWithoutWipingCache() throws Exception {
+        var sml = new SMLHelper();
+        RADHelper rad = new RADHelper();
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        DataComponent occStruct = new OccupancyOutput(new SensorSystem()).getRecordDescription();
+        DataComponent ocrStruct = rad.createVehicleOcrRecord();
+
+        String laneUid = "urn:osh:system:lane:multiyear-ocr-lane";
+        BigId laneSysId = db.getSystemDescStore().add(new SystemWrapper(
+                sml.createPhysicalSystem().uniqueID(laneUid).name("Multi-Year OCR Lane").build())).getInternalID();
+        BigId occDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(laneSysId, laneUid))
+                .withName("occupancy")
+                .withRecordDescription(occStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+        BigId ocrDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(laneSysId, laneUid))
+                .withName("vehicleOcr")
+                .withRecordDescription(ocrStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+
+        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        Instant ancientStart = now.minus(java.time.Duration.ofDays(420));
+        Instant historicalStart = now.minus(java.time.Duration.ofDays(75));
+        Instant recentStart = now.minus(java.time.Duration.ofDays(3));
+
+        // 1. Pre-hot-window historical transits (> 30d ago: 420d and 75d)
+        String ancientObsId = addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 7001, ancientStart, "MSCU7766550");
+        // Lower-confidence duplicate read on ancientObsId to verify highest-confidence deduplication on cold CQL merge
+        VehicleOcrResult lowConfAncient = new VehicleOcrResult.Builder()
+                .sampleTime(ancientStart.plusSeconds(4))
+                .occupancyObsId(ancientObsId)
+                .idType(VehicleOcrResult.ID_TYPE_CONTAINER)
+                .value("MSCU 776655-0")
+                .normalizedValue("MSCU7766550")
+                .checksumValid(true)
+                .confidence(0.61f)
+                .readCount(1)
+                .cameraUid("urn:osh:sensor:cam-test")
+                .frameTime(ancientStart.plusSeconds(1))
+                .build();
+        db.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(ocrDs)
+                .withPhenomenonTime(ancientStart.plusSeconds(4))
+                .withResultTime(ancientStart.plusSeconds(4))
+                .withResult(VehicleOcrResult.createDataBlock(ocrStruct, lowConfAncient))
+                .build());
+
+        String historicalObsId = addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 7002, historicalStart, "MSCU7766550");
+        addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 7003, historicalStart.plusSeconds(120), "ZIMU1122334");
+        String singleCharHistoricalObsId = addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 7004, historicalStart.plusSeconds(240), "Q");
+
+        // 2. Recent hot-window transits (< 30d ago)
+        String recentObsId = addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 8001, recentStart, "MSCU7766550");
+        addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 8002, recentStart.plusSeconds(60), "TCNU4400112");
+        addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 8003, recentStart.plusSeconds(120), "OOLU5500228");
+
+        List<org.sensorhub.api.datastore.obs.ObsFilter> coldSelectFilters = new ArrayList<>();
+        org.sensorhub.api.datastore.obs.IObsStore realObsStore = db.getObservationStore();
+        org.sensorhub.api.datastore.obs.IObsStore instrumentedObsStore =
+                (org.sensorhub.api.datastore.obs.IObsStore) java.lang.reflect.Proxy.newProxyInstance(
+                        org.sensorhub.api.datastore.obs.IObsStore.class.getClassLoader(),
+                        new Class<?>[]{org.sensorhub.api.datastore.obs.IObsStore.class},
+                        (proxy, method, args) -> {
+                            if ("select".equals(method.getName())
+                                    && args != null && args.length == 1
+                                    && args[0] instanceof org.sensorhub.api.datastore.obs.ObsFilter f
+                                    && f.getInternalIDs() == null) {
+                                coldSelectFilters.add(f);
+                            }
+                            return method.invoke(realObsStore, args);
+                        });
+        IObsSystemDatabase instrumentedDb = (IObsSystemDatabase) java.lang.reflect.Proxy.newProxyInstance(
+                IObsSystemDatabase.class.getClassLoader(),
+                new Class<?>[]{IObsSystemDatabase.class},
+                (proxy, method, args) -> {
+                    if ("getObservationStore".equals(method.getName())) {
+                        return instrumentedObsStore;
+                    }
+                    return method.invoke(db, args);
+                });
+
+        String cacheKey = String.valueOf(System.identityHashCode(instrumentedDb));
+
+        // 3. 30-day search warms ONLY the 30-day hot window and issues ZERO cold obsStore.select calls
+        var equalsSpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "MSCU 776655-0", "MSCU7766550", VehicleIncidentAggregator.MatchMode.EQUALS, "", false, List.of());
+        var hot30dResult = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule,
+                instrumentedDb,
+                "primary-gate-node",
+                "Primary Gate",
+                equalsSpec,
+                now.minus(java.time.Duration.ofDays(30)),
+                now.plusSeconds(60),
+                200);
+        assertEquals(1, hot30dResult.passes().size());
+        assertEquals(recentObsId, hot30dResult.passes().get(0).occupancyObsId());
+        assertEquals("30-day search must be served 100% from hot cache with 0 cold select calls",
+                0, coldSelectFilters.size());
+
+        VehicleIncidentAggregator.OcrSearchCacheSlot ocrSlot = VehicleIncidentAggregator.OCR_CACHE_BY_KEY.get(cacheKey);
+        assertNotNull(ocrSlot);
+        assertEquals("Warmup must load only the 3 recent (<30d) OCR records, never 420d/75d cold history",
+                3, ocrSlot.allRecords.size());
+
+        // Subsequent 7-day STARTS_WITH search also hits 100% hot cache with 0 cold select calls
+        var startsWithSpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "MSCU77", "MSCU77", VehicleIncidentAggregator.MatchMode.STARTS_WITH, "", false, List.of());
+        var hot7dResult = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule,
+                instrumentedDb,
+                "primary-gate-node",
+                "Primary Gate",
+                startsWithSpec,
+                now.minus(java.time.Duration.ofDays(7)),
+                now.plusSeconds(60),
+                200);
+        assertEquals(1, hot7dResult.passes().size());
+        assertEquals(recentObsId, hot7dResult.passes().get(0).occupancyObsId());
+        assertEquals(0, coldSelectFilters.size());
+
+        // 4. All-Time / multi-year EQUALS, STARTS_WITH, CONTAINS, and 1-char EQUALS merge hot cache + bounded pre-hot CQL2
+        coldSelectFilters.clear();
+        var allTimeEquals = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate",
+                equalsSpec, Instant.EPOCH, now.plusSeconds(60), 200);
+        assertEquals(3, allTimeEquals.passes().size());
+        List<String> matchedIds = allTimeEquals.passes().stream()
+                .map(VehicleIncidentAggregator.VehiclePassRecord::occupancyObsId)
+                .toList();
+        assertTrue(matchedIds.containsAll(List.of(ancientObsId, historicalObsId, recentObsId)));
+        VehicleIncidentAggregator.VehiclePassRecord ancientPass = allTimeEquals.passes().stream()
+                .filter(p -> ancientObsId.equals(p.occupancyObsId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("Highest confidence OCR read must win on cold deduplication",
+                0.95f, ancientPass.ocr().confidence(), 0.001f);
+        assertEquals("Exactly 1 pre-hot-window cold CQL select should execute", 1, coldSelectFilters.size());
+        assertEquals(ocrSlot.hotWindowStart, coldSelectFilters.get(0).getResultTime().getMax());
+        assertNotNull("Cold pre-window EQUALS filter must carry CQL2 pushdown", coldSelectFilters.get(0).getCQLFilter());
+        assertTrue(coldSelectFilters.get(0).getCQLFilter().toString().contains("MSCU7766550"));
+
+        coldSelectFilters.clear();
+        var allTimeStartsWith = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate",
+                startsWithSpec, Instant.EPOCH, now.plusSeconds(60), 200);
+        assertEquals(3, allTimeStartsWith.passes().size());
+        assertEquals(1, coldSelectFilters.size());
+        assertNotNull(coldSelectFilters.get(0).getCQLFilter());
+
+        coldSelectFilters.clear();
+        var containsSpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "776655", "776655", VehicleIncidentAggregator.MatchMode.CONTAINS, "", false, List.of());
+        var allTimeContains = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate",
+                containsSpec, Instant.EPOCH, now.plusSeconds(60), 200);
+        assertEquals(3, allTimeContains.passes().size());
+        assertEquals(1, coldSelectFilters.size());
+        assertNotNull(coldSelectFilters.get(0).getCQLFilter());
+
+        coldSelectFilters.clear();
+        var oneCharEqualsSpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "Q", "Q", VehicleIncidentAggregator.MatchMode.EQUALS, "", false, List.of());
+        var oneCharResult = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate",
+                oneCharEqualsSpec, Instant.EPOCH, now.plusSeconds(60), 200);
+        assertEquals(1, oneCharResult.passes().size());
+        assertEquals(singleCharHistoricalObsId, oneCharResult.passes().get(0).occupancyObsId());
+        assertNotNull("1-character EQUALS must push down normalizedValue = 'Q'", coldSelectFilters.get(0).getCQLFilter());
+
+        // 5. Bounded oldest-first eviction advances hotWindowStart without wiping recent cache entries
+        Instant initialHotStart = ocrSlot.hotWindowStart;
+        synchronized (ocrSlot) {
+            ocrSlot.maxCachedEntries = 4;
+        }
+        String newestTargetObsId = addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 8010, now.minusSeconds(180), "MSCU7766550");
+        addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 8011, now.minusSeconds(120), "EVIC1000001");
+        String veryLatestObsId = addSimpleOccupancyAndOcr(
+                occDs, ocrDs, ocrStruct, 8012, now.minusSeconds(60), "EVIC2000002");
+
+        // Trigger incremental delta ingestion + oldest-first eviction via a 5-minute hot query
+        var latestSpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "EVIC2000002", "EVIC2000002", VehicleIncidentAggregator.MatchMode.EQUALS, "", false, List.of());
+        var latestHot = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate",
+                latestSpec, now.minusSeconds(100), now.plusSeconds(60), 200);
+        assertEquals(1, latestHot.passes().size());
+        assertEquals(veryLatestObsId, latestHot.passes().get(0).occupancyObsId());
+
+        assertTrue("Eviction must retain recent entries instead of wiping the cache",
+                !ocrSlot.allRecords.isEmpty() && ocrSlot.allRecords.size() <= 4);
+        assertTrue("hotWindowStart must advance monotonically to the oldest surviving hot record",
+                ocrSlot.hotWindowStart.isAfter(initialHotStart));
+        assertNotNull("Newest record must remain indexed in bestByOccObsId",
+                ocrSlot.bestByOccObsId.get(veryLatestObsId));
+
+        // All-Time search after eviction seamlessly merges newly evicted records (< hotWindowStart) + hot records
+        var postEvictAllTime = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate",
+                equalsSpec, Instant.EPOCH, now.plusSeconds(60), 200);
+        assertEquals(4, postEvictAllTime.passes().size());
+        List<String> postEvictIds = postEvictAllTime.passes().stream()
+                .map(VehicleIncidentAggregator.VehiclePassRecord::occupancyObsId)
+                .toList();
+        assertTrue(postEvictIds.containsAll(List.of(ancientObsId, historicalObsId, recentObsId, newestTargetObsId)));
+    }
+
+    @Test
+    public void highVolumeEmlCode9999AutoAdjudicationsNeverBloatCacheAndMaterializeDirectCommandIds() throws Exception {
+        var sml = new SMLHelper();
+        RADHelper rad = new RADHelper();
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        DataComponent occStruct = new OccupancyOutput(new SensorSystem()).getRecordDescription();
+        DataComponent ocrStruct = rad.createVehicleOcrRecord();
+
+        LaneSystem dummyLane = new LaneSystem();
+        dummyLane.setParentHub(hub);
+        AdjudicationControl adjControl = new AdjudicationControl(dummyLane) {};
+        Method createResultMethod = AdjudicationControl.class.getDeclaredMethod(
+                "createResultData", Adjudication.class, String.class);
+        createResultMethod.setAccessible(true);
+
+        String laneUid = "urn:osh:system:lane:eml-scale-lane";
+        BigId laneSysId = db.getSystemDescStore().add(new SystemWrapper(
+                sml.createPhysicalSystem().uniqueID(laneUid).name("EML Scale Lane").build())).getInternalID();
+        BigId occDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(laneSysId, laneUid))
+                .withName("occupancy")
+                .withRecordDescription(occStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+        BigId ocrDs = db.getObservationStore().getDataStreams().add(new DataStreamInfo.Builder()
+                .withSystem(new FeatureId(laneSysId, laneUid))
+                .withName("vehicleOcr")
+                .withRecordDescription(ocrStruct)
+                .withRecordEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+        BigId cmdStream = db.getCommandStore().getCommandStreams().add(new CommandStreamInfo.Builder()
+                .withSystem(new FeatureId(laneSysId, laneUid))
+                .withName(AdjudicationControl.NAME)
+                .withRecordDescription(adjControl.getCommandDescription())
+                .withRecordEncoding(new TextEncodingImpl())
+                .withResultDescription(adjControl.getResultDescription())
+                .withResultEncoding(new TextEncodingImpl())
+                .build()).getInternalID();
+
+        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        Instant bulkBase = now.minus(java.time.Duration.ofDays(2));
+
+        // 1. Insert 150 automated Code 9999 (EML Non-Threat, vehicleId="") + 10 Code 9998 (vehicleId="") records
+        String sampleEmlFeedback = "Automated EML release " + Adjudication.EML_METADATA_PREFIX
+                + "{\"result\":\"RELEASE\",\"overallSourceType\":\"NORM\",\"probabilityNORM\":0.952,\"probabilityThreat\":0.009}";
+        Instant latestBulkReportTime = bulkBase;
+        for (int i = 0; i < 160; i++) {
+            Instant rt = bulkBase.plusSeconds(i * 10L);
+            latestBulkReportTime = rt;
+            int code = (i % 16 == 0)
+                    ? Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE
+                    : Adjudication.EML_NON_THREAT_CODE;
+            String sender = (code == Adjudication.EXTENDED_OCCUPANCY_GAMMA_CODE)
+                    ? Adjudication.EXTENDED_OCCUPANCY_AUTO_ADJUDICATOR_USERNAME
+                    : Adjudication.EML_AUTO_ADJUDICATOR_USERNAME;
+            Adjudication autoAdj = new Adjudication.Builder()
+                    .feedback(code == Adjudication.EML_NON_THREAT_CODE ? sampleEmlFeedback : "Extended occupancy auto-adj")
+                    .adjudicationCode(code)
+                    .isotopes(List.of())
+                    .secondaryInspectionStatus(Adjudication.SecondaryInspectionStatus.NONE)
+                    .filePaths(List.of())
+                    .occupancyObsId("synthetic-eml-occ-" + i)
+                    .vehicleId("")
+                    .build();
+            recordCompletedAdjudication(cmdStream, adjControl, createResultMethod, autoAdj, sender, rt);
+        }
+
+        // 2. Insert 1 operator adjudication with a non-empty vehicleId ("TRK-5501")
+        Adjudication taggedAdj = new Adjudication.Builder()
+                .feedback("Tagged commercial truck")
+                .adjudicationCode(6)
+                .isotopes(List.of())
+                .secondaryInspectionStatus(Adjudication.SecondaryInspectionStatus.NONE)
+                .filePaths(List.of())
+                .occupancyObsId("tagged-occ-1")
+                .vehicleId("TRK-5501")
+                .build();
+        recordCompletedAdjudication(cmdStream, adjControl, createResultMethod, taggedAdj, "gate-op", bulkBase.plusSeconds(2000));
+
+        // 3. Target Pass B (historical >30d ago): OCR-matched occupancy with a blank-vehicleId operator Code 4 adjudication
+        Instant histPassStart = now.minus(java.time.Duration.ofDays(65));
+        Instant histPassEnd = histPassStart.plusSeconds(6);
+        BigId histOccBigId = db.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(occDs)
+                .withPhenomenonTime(histPassStart)
+                .withResultTime(histPassEnd)
+                .withResult(Occupancy.fromOccupancy(new Occupancy.Builder()
+                        .samplingTime(histPassEnd.getEpochSecond())
+                        .occupancyCount(9101)
+                        .startTime(histPassStart.getEpochSecond())
+                        .endTime(histPassEnd.getEpochSecond())
+                        .gammaAlarm(true)
+                        .maxGammaCount(2150)
+                        .build()))
+                .build());
+        String histPassObsId = hub.getIdEncoders().getObsIdEncoder().encodeID(histOccBigId);
+
+        Adjudication histBlankVehicleAdj = new Adjudication.Builder()
+                .feedback("Manifest verified potash shipment")
+                .adjudicationCode(4)
+                .isotopes(List.of("Potassium"))
+                .secondaryInspectionStatus(Adjudication.SecondaryInspectionStatus.NONE)
+                .filePaths(List.of())
+                .occupancyObsId(histPassObsId)
+                .vehicleId("")
+                .build();
+        BigId histCmdKey = recordCompletedAdjudicationWithKey(
+                cmdStream, adjControl, createResultMethod, histBlankVehicleAdj, "gate-op", histPassEnd.plusSeconds(25));
+        String encodedHistCmdId = hub.getIdEncoders().getCommandIdEncoder().encodeID(histCmdKey);
+        db.getObservationStore().put(histOccBigId, new ObsData.Builder()
+                .withDataStream(occDs)
+                .withPhenomenonTime(histPassStart)
+                .withResultTime(histPassEnd)
+                .withResult(Occupancy.fromOccupancy(new Occupancy.Builder()
+                        .samplingTime(histPassEnd.getEpochSecond())
+                        .occupancyCount(9101)
+                        .startTime(histPassStart.getEpochSecond())
+                        .endTime(histPassEnd.getEpochSecond())
+                        .gammaAlarm(true)
+                        .maxGammaCount(2150)
+                        .adjudicatedIds(List.of(encodedHistCmdId, "code:4"))
+                        .build()))
+                .build());
+        db.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(ocrDs)
+                .withPhenomenonTime(histPassEnd)
+                .withResultTime(histPassEnd)
+                .withResult(VehicleOcrResult.createDataBlock(ocrStruct, new VehicleOcrResult.Builder()
+                        .sampleTime(histPassEnd)
+                        .occupancyObsId(histPassObsId)
+                        .idType(VehicleOcrResult.ID_TYPE_CONTAINER)
+                        .value("CMAU 908070-3")
+                        .normalizedValue("CMAU9080703")
+                        .checksumValid(true)
+                        .confidence(0.96f)
+                        .readCount(3)
+                        .cameraUid("urn:osh:sensor:cam-eml")
+                        .frameTime(histPassStart.plusSeconds(2))
+                        .build()))
+                .build());
+
+        // 4. Target Pass A (recent <30d): OCR-matched occupancy with Code 9999 EML Non-Threat auto-adjudication (vehicleId="")
+        Instant emlPassStart = now.minusSeconds(1800);
+        Instant emlPassEnd = emlPassStart.plusSeconds(5);
+        BigId emlOccBigId = db.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(occDs)
+                .withPhenomenonTime(emlPassStart)
+                .withResultTime(emlPassEnd)
+                .withResult(Occupancy.fromOccupancy(new Occupancy.Builder()
+                        .samplingTime(emlPassEnd.getEpochSecond())
+                        .occupancyCount(9202)
+                        .startTime(emlPassStart.getEpochSecond())
+                        .endTime(emlPassEnd.getEpochSecond())
+                        .gammaAlarm(true)
+                        .maxGammaCount(1980)
+                        .adjudicatedIds(List.of(Adjudication.EML_NON_THREAT_MARKER))
+                        .build()))
+                .build());
+        String emlPassObsId = hub.getIdEncoders().getObsIdEncoder().encodeID(emlOccBigId);
+
+        String targetEmlFeedback = "EML automatic non-threat release " + Adjudication.EML_METADATA_PREFIX
+                + "{\"result\":\"RELEASE\",\"overallSourceType\":\"NORM\",\"probabilityNORM\":0.965,\"probabilityThreat\":0.011}";
+        Adjudication targetEmlAdj = new Adjudication.Builder()
+                .feedback(targetEmlFeedback)
+                .adjudicationCode(Adjudication.EML_NON_THREAT_CODE)
+                .isotopes(List.of())
+                .secondaryInspectionStatus(Adjudication.SecondaryInspectionStatus.NONE)
+                .filePaths(List.of())
+                .occupancyObsId(emlPassObsId)
+                .vehicleId("")
+                .build();
+        Instant emlAdjReportTime = emlPassEnd.plusSeconds(2);
+        BigId emlCmdKey = recordCompletedAdjudicationWithKey(
+                cmdStream, adjControl, createResultMethod, targetEmlAdj,
+                Adjudication.EML_AUTO_ADJUDICATOR_USERNAME, emlAdjReportTime);
+        String encodedEmlCmdId = hub.getIdEncoders().getCommandIdEncoder().encodeID(emlCmdKey);
+
+        // Update occupancy with encoded commandId + code:9999 marker exactly as AdjudicationControl does
+        db.getObservationStore().put(emlOccBigId, new ObsData.Builder()
+                .withDataStream(occDs)
+                .withPhenomenonTime(emlPassStart)
+                .withResultTime(emlPassEnd)
+                .withResult(Occupancy.fromOccupancy(new Occupancy.Builder()
+                        .samplingTime(emlPassEnd.getEpochSecond())
+                        .occupancyCount(9202)
+                        .startTime(emlPassStart.getEpochSecond())
+                        .endTime(emlPassEnd.getEpochSecond())
+                        .gammaAlarm(true)
+                        .maxGammaCount(1980)
+                        .adjudicatedIds(List.of(Adjudication.EML_NON_THREAT_MARKER, encodedEmlCmdId, "code:9999"))
+                        .build()))
+                .build());
+        db.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(ocrDs)
+                .withPhenomenonTime(emlPassEnd)
+                .withResultTime(emlPassEnd)
+                .withResult(VehicleOcrResult.createDataBlock(ocrStruct, new VehicleOcrResult.Builder()
+                        .sampleTime(emlPassEnd)
+                        .occupancyObsId(emlPassObsId)
+                        .idType(VehicleOcrResult.ID_TYPE_CONTAINER)
+                        .value("CMAU 908070-3")
+                        .normalizedValue("CMAU9080703")
+                        .checksumValid(true)
+                        .confidence(0.98f)
+                        .readCount(4)
+                        .cameraUid("urn:osh:sensor:cam-eml")
+                        .frameTime(emlPassStart.plusSeconds(2))
+                        .build()))
+                .build());
+
+        // Instrument CommandStatusStore to inspect filters and pre-cap AdjudicationSearchCacheSlot to 10 entries
+        List<org.sensorhub.api.datastore.command.CommandStatusFilter> recordedStatusFilters = new ArrayList<>();
+        org.sensorhub.api.datastore.command.ICommandStatusStore realStatusStore = db.getCommandStatusStore();
+        org.sensorhub.api.datastore.command.ICommandStatusStore instrumentedStatusStore =
+                (org.sensorhub.api.datastore.command.ICommandStatusStore) java.lang.reflect.Proxy.newProxyInstance(
+                        org.sensorhub.api.datastore.command.ICommandStatusStore.class.getClassLoader(),
+                        new Class<?>[]{org.sensorhub.api.datastore.command.ICommandStatusStore.class},
+                        (proxy, method, args) -> {
+                            String name = method.getName();
+                            if (("selectEntries".equals(name) || "select".equals(name))
+                                    && args != null && args.length >= 1
+                                    && args[0] instanceof org.sensorhub.api.datastore.command.CommandStatusFilter f) {
+                                recordedStatusFilters.add(f);
+                            }
+                            return method.invoke(realStatusStore, args);
+                        });
+        IObsSystemDatabase instrumentedDb = (IObsSystemDatabase) java.lang.reflect.Proxy.newProxyInstance(
+                IObsSystemDatabase.class.getClassLoader(),
+                new Class<?>[]{IObsSystemDatabase.class},
+                (proxy, method, args) -> {
+                    if ("getCommandStatusStore".equals(method.getName())) {
+                        return instrumentedStatusStore;
+                    }
+                    return method.invoke(db, args);
+                });
+
+        String adjCacheKey = String.valueOf(System.identityHashCode(instrumentedDb));
+        var preSlot = new VehicleIncidentAggregator.AdjudicationSearchCacheSlot(instrumentedDb);
+        preSlot.maxCachedEntries = 10;
+        VehicleIncidentAggregator.ADJ_CACHE_BY_KEY.put(adjCacheKey, preSlot);
+
+        var searchSpec = new VehicleIncidentAggregator.VehicleIncidentSpec(
+                "CMAU 908070-3", "CMAU9080703", VehicleIncidentAggregator.MatchMode.EQUALS, "", false, List.of());
+        var searchResult = VehicleIncidentAggregator.collectLocalNodePasses(
+                oscarModule, instrumentedDb, "primary-gate-node", "Primary Gate",
+                searchSpec, Instant.EPOCH, now.plusSeconds(60), 200);
+
+        // Verify AdjudicationSearchCacheSlot excluded all 161+ blank-vehicleId rows while advancing stream watermark
+        assertEquals("Only the single non-empty-vehicleId adjudication should occupy AdjudicationSearchCacheSlot",
+                1, preSlot.allEntries.size());
+        assertEquals("TRK-5501", preSlot.allEntries.get(0).vehicleId());
+        assertEquals(1, preSlot.seenStatusIds.size());
+        final Instant expectedBulkWatermark = latestBulkReportTime;
+        assertTrue("Stream watermark must still advance to the latest blank-vehicleId Code 9999 reportTime",
+                preSlot.watermarkByStreamKey.values().stream()
+                        .anyMatch(wm -> !wm.isBefore(emlAdjReportTime) && !wm.isBefore(expectedBulkWatermark)));
+
+        // Verify direct commandId batch lookup materialized both blank-vehicleId adjudications (Code 4 + Code 9999 EML)
+        List<org.sensorhub.api.datastore.command.CommandStatusFilter> directIdLookups = recordedStatusFilters.stream()
+                .filter(f -> f.getCommandFilter() != null && f.getCommandFilter().getInternalIDs() != null)
+                .toList();
+        assertEquals("Both matched occupancies' adjudications must be fetched in a single batched internal-ID query",
+                1, directIdLookups.size());
+        assertEquals(
+                java.util.Set.of(histCmdKey.toString(), emlCmdKey.toString()),
+                directIdLookups.get(0).getCommandFilter().getInternalIDs().stream()
+                        .map(Object::toString)
+                        .collect(java.util.stream.Collectors.toSet()));
+
+        assertEquals(2, searchResult.passes().size());
+        VehicleIncidentAggregator.VehiclePassRecord matHist = searchResult.passes().stream()
+                .filter(p -> histPassObsId.equals(p.occupancyObsId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("ocr", matHist.vehicleIdSource());
+        assertEquals(1, matHist.adjudications().size());
+        assertEquals(4, matHist.latestAdjudication().adjudicationCode());
+        assertTrue(matHist.confirmedIsotopes().contains("Potassium"));
+
+        VehicleIncidentAggregator.VehiclePassRecord matEml = searchResult.passes().stream()
+                .filter(p -> emlPassObsId.equals(p.occupancyObsId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("ocr", matEml.vehicleIdSource());
+        assertTrue("EML auto-released flag must be true", matEml.emlAutoReleased());
+        assertFalse("EML auto-released pass must not be counted as an open alarm", matEml.isOpenAlarm());
+        assertEquals(1, matEml.adjudications().size());
+        assertEquals(Adjudication.EML_NON_THREAT_CODE, matEml.latestAdjudication().adjudicationCode());
+        assertEquals("9999 (EML Non-Threat)", matEml.latestAdjudication().dispositionLabel());
+        assertEquals("RELEASE", matEml.emlDecision());
+        assertEquals("NORM", matEml.emlSourceType());
+        assertNotNull(matEml.emlNormProbPct());
+        assertEquals(96.5, matEml.emlNormProbPct(), 0.01);
+        assertNotNull(matEml.emlThreatProbPct());
+        assertEquals(1.1, matEml.emlThreatProbPct(), 0.01);
+
+        // Also verify HTTP /adjudication/vehicle-search JSON summary reflects emlAutoReleasePasses=1, openAlarmPasses=0
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> httpResp = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(bucketEndpoint + "/adjudication/vehicle-search?vehicleId=CMAU9080703&matchMode=equals"))
+                .header("Authorization", basicAuth())
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, httpResp.statusCode());
+        JsonObject httpJson = JsonParser.parseString(httpResp.body()).getAsJsonObject();
+        assertEquals(2, httpJson.get("totalMatched").getAsInt());
+        JsonObject summary = httpJson.getAsJsonObject("summary");
+        assertEquals(1, summary.get("emlAutoReleasePasses").getAsInt());
+        assertEquals(0, summary.get("openAlarmPasses").getAsInt());
+
+        // Also verify Utils.countStatusResults and Utils.queryCommandStatus date-bounded issueTime pushdown via ADJUDICATION_JSON report
+        DataComponent cmdDesc = reportControl.getCommandDescription().copy();
+        String adjReportPath = submitReport(
+                cmdDesc,
+                601,
+                ReportCmdType.ADJUDICATION_JSON,
+                bulkBase.minusSeconds(60),
+                now.plusSeconds(60),
+                laneUid
+        );
+        try (InputStream in = readReportObject(adjReportPath)) {
+            JsonObject adjReportJson = JsonParser.parseString(new String(in.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+            assertEquals(162L, adjReportJson.getAsJsonObject("summary").get("totalRecords").getAsLong());
+        }
+    }
+
+    private String addSimpleOccupancyAndOcr(
+            BigId occDs,
+            BigId ocrDs,
+            DataComponent ocrStruct,
+            int occCount,
+            Instant start,
+            String containerCode
+    ) {
+        Instant end = start.plusSeconds(5);
+        Occupancy occ = new Occupancy.Builder()
+                .samplingTime(end.getEpochSecond())
+                .occupancyCount(occCount)
+                .startTime(start.getEpochSecond())
+                .endTime(end.getEpochSecond())
+                .gammaAlarm(true)
+                .maxGammaCount(1900)
+                .build();
+        BigId occBigId = db.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(occDs)
+                .withPhenomenonTime(start)
+                .withResultTime(end)
+                .withResult(Occupancy.fromOccupancy(occ))
+                .build());
+        String encodedObsId = hub.getIdEncoders().getObsIdEncoder().encodeID(occBigId);
+
+        VehicleOcrResult ocr = new VehicleOcrResult.Builder()
+                .sampleTime(end)
+                .occupancyObsId(encodedObsId)
+                .idType(VehicleOcrResult.ID_TYPE_CONTAINER)
+                .value(containerCode)
+                .normalizedValue(containerCode)
+                .checksumValid(true)
+                .confidence(0.95f)
+                .readCount(3)
+                .cameraUid("urn:osh:sensor:cam-test")
+                .frameTime(start.plusSeconds(2))
+                .evidenceImagePath("ocr/" + occCount + ".jpg")
+                .build();
+        db.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(ocrDs)
+                .withPhenomenonTime(end)
+                .withResultTime(end)
+                .withResult(VehicleOcrResult.createDataBlock(ocrStruct, ocr))
+                .build());
+        return encodedObsId;
+    }
+
     private static DataBlock buildRs350SpectrumBlock(
             DataComponent struct,
             Instant ts,
@@ -1173,6 +2004,17 @@ public class VehicleIncidentSearchAndReportTest {
             String sender,
             Instant reportTime
     ) throws Exception {
+        recordCompletedAdjudicationWithKey(cmdStreamId, adjControl, createResultMethod, adj, sender, reportTime);
+    }
+
+    private BigId recordCompletedAdjudicationWithKey(
+            BigId cmdStreamId,
+            AdjudicationControl adjControl,
+            Method createResultMethod,
+            Adjudication adj,
+            String sender,
+            Instant reportTime
+    ) throws Exception {
         BigId cmdKey = db.getCommandStore().add(new CommandData.Builder()
                 .withCommandStream(cmdStreamId)
                 .withIssueTime(reportTime.minusSeconds(2))
@@ -1186,6 +2028,7 @@ public class VehicleIncidentSearchAndReportTest {
                 .withStatusCode(ICommandStatus.CommandStatusCode.COMPLETED)
                 .withResult(CommandResult.withData(resBlock))
                 .build());
+        return cmdKey;
     }
 
     private String submitReport(

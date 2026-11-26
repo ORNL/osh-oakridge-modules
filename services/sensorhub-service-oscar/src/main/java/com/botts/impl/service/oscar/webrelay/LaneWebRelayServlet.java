@@ -418,7 +418,12 @@ public final class LaneWebRelayServlet extends HttpServlet {
         if (hub.getModuleRegistry() == null) {
             return List.of();
         }
-        List<LaneSystem> lanes = new ArrayList<>(hub.getModuleRegistry().getLoadedModules(LaneSystem.class));
+        List<LaneSystem> lanes = new ArrayList<>();
+        for (LaneSystem lane : hub.getModuleRegistry().getLoadedModules(LaneSystem.class)) {
+            if (lane != null && !(lane instanceof com.botts.impl.system.lane.mobile.MobileDetectorSystem)) {
+                lanes.add(lane);
+            }
+        }
         lanes.sort(Comparator.comparing(
                 l -> l.getConfiguration() != null && l.getConfiguration().name != null ? l.getConfiguration().name : "",
                 String.CASE_INSENSITIVE_ORDER

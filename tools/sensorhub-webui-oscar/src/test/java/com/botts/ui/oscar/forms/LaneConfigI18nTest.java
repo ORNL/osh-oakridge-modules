@@ -22,6 +22,7 @@ import com.botts.impl.system.lane.config.AspectRPMConfig;
 import com.botts.impl.system.lane.config.AxisCameraConfig;
 import com.botts.impl.system.lane.config.ConnectionConfig;
 import com.botts.impl.system.lane.config.CustomCameraConfig;
+import com.botts.impl.system.lane.config.D5RPMConfig;
 import com.botts.impl.system.lane.config.FFMpegConfig;
 import com.botts.impl.system.lane.config.LaneConfig;
 import com.botts.impl.system.lane.config.LaneOptionsConfig;
@@ -30,6 +31,7 @@ import com.botts.impl.system.lane.config.RPMConfig;
 import com.botts.impl.system.lane.config.RapiscanRPMConfig;
 import com.botts.impl.system.lane.config.WebRelayConfig;
 import com.botts.impl.system.lane.config.WebRelayOperatingMode;
+import com.botts.impl.system.lane.mobile.config.MobileDetectorConfig;
 
 
 public class LaneConfigI18nTest
@@ -59,6 +61,12 @@ public class LaneConfigI18nTest
         assertEquals(
             "Ενεργοποίηση ανάλυσης EML",
             AdminI18n.trConfig(new Locale("el"), RapiscanRPMConfig.EMLConfig.class, "emlEnabled.label", "Enable EML Analysis"));
+        assertEquals(
+            "Kromek D5",
+            AdminI18n.trConfig(Locale.ENGLISH, D5RPMConfig.class, "type.name", null));
+        assertEquals(
+            "Sistema de detector móvil",
+            AdminI18n.trConfig(new Locale("es"), MobileDetectorConfig.class, "module.name", null));
     }
 
 
@@ -100,6 +108,8 @@ public class LaneConfigI18nTest
             AspectRPMConfig.AddressRange.class,
             RapiscanRPMConfig.class,
             RapiscanRPMConfig.EMLConfig.class,
+            D5RPMConfig.class,
+            MobileDetectorConfig.class,
             AxisCameraConfig.class,
             CustomCameraConfig.class))
         {

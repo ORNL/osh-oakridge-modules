@@ -155,14 +155,15 @@ public class Rs350OccupancyProcessModule extends AbstractProcessModule<Rs350Occu
         var db = getParentHub().getDatabaseRegistry().getFederatedDatabase();
 
         for (String dsName : dataStreamNames) {
-            var matchingDs = db.getDataStreamStore().select(new DataStreamFilter.Builder()
+            List<IDataStreamInfo> dsList;
+            try (var matchingDs = db.getDataStreamStore().select(new DataStreamFilter.Builder()
                     .withSystems(sysFilter)
                     .withCurrentVersion()
                     .withOutputNames(dsName)
                     .withLimit(1)
-                    .build());
-
-            var dsList = matchingDs.toList();
+                    .build())) {
+                dsList = matchingDs.toList();
+            }
             if (dsList.size() != 1)
                 throw new SensorHubException("Unable to find RPM datastream " + dsName + " in system");
             dataStreams.add(dsList.get(0));

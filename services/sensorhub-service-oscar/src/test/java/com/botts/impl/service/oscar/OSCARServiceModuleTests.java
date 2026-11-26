@@ -1,16 +1,56 @@
 package com.botts.impl.service.oscar;
 
+import com.botts.api.service.bucket.IBucketService;
+import com.botts.impl.service.bucket.BucketService;
+import com.botts.impl.service.bucket.BucketServiceConfig;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.sensorhub.api.common.SensorHubException;
+import org.sensorhub.api.module.ModuleEvent;
+import org.sensorhub.impl.SensorHub;
+import org.sensorhub.impl.service.HttpServer;
+import org.sensorhub.impl.service.HttpServerConfig;
 
+import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class OSCARServiceModuleTests {
+
+    @Rule
+    public TemporaryFolder tempFolder = new TemporaryFolder();
+
+    public static class SlowStartingBucketService extends BucketService {
+        static volatile long artificialStartDelayMs = 220L;
+
+        @Override
+        protected void doStart() throws SensorHubException {
+            try {
+                Thread.sleep(artificialStartDelayMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new SensorHubException("Interrupted slow bucket startup", e);
+            }
+            super.doStart();
+        }
+    }
+
+    public static class FailingBucketService extends BucketService {
+        @Override
+        public void doInit() throws SensorHubException {
+            throw new SensorHubException("Simulated cold-disk mount failure");
+        }
+    }
 
     @Test
     public void readinessIsWithdrawnBeforeBaseShutdown() throws SensorHubException {
@@ -146,5 +186,150 @@ public class OSCARServiceModuleTests {
         assertTrue("OSCAR must retain headroom inside the core ten-second stop timeout",
                 OSCARServiceModule.STOP_BUDGET_NANOS <
                         java.util.concurrent.TimeUnit.SECONDS.toNanos(10));
+    }
+
+    @Test
+    public void waitsForSlowStartingBucketServiceBeyondInitialBudgetAndStartsCleanly() throws Exception {
+        assertTrue("Default BucketService wait budget must exceed legacy 10s cap",
+                OSCARServiceModule.BUCKET_SERVICE_WAIT_TIMEOUT_MS >= 60_000L);
+
+        SensorHub hub = new SensorHub();
+        hub.start();
+        try {
+            var reg = hub.getModuleRegistry();
+
+            HttpServerConfig httpCfg = new HttpServerConfig();
+            httpCfg.id = UUID.randomUUID().toString();
+            httpCfg.autoStart = true;
+            try (ServerSocket ss = new ServerSocket(0)) {
+                httpCfg.httpPort = ss.getLocalPort();
+            }
+            HttpServer http = (HttpServer) reg.loadModule(httpCfg);
+            assertTrue(http.waitForState(ModuleEvent.ModuleState.STARTED, 5_000));
+
+            BucketServiceConfig bucketCfg = new BucketServiceConfig();
+            bucketCfg.id = UUID.randomUUID().toString();
+            bucketCfg.moduleClass = SlowStartingBucketService.class.getName();
+            bucketCfg.autoStart = false;
+            bucketCfg.fileStoreRootDir = tempFolder.newFolder("slow-buckets").getAbsolutePath();
+            bucketCfg.initialBuckets = new ArrayList<>(List.of("reports", "videos", "sitemap", "adjudication"));
+            SlowStartingBucketService bucket = (SlowStartingBucketService) reg.loadModule(bucketCfg);
+            bucket.init();
+            assertTrue(bucket.waitForState(ModuleEvent.ModuleState.INITIALIZED, 5_000));
+
+            Thread delayedStartThread = new Thread(() -> {
+                try {
+                    bucket.start();
+                } catch (SensorHubException ignored) {
+                }
+            }, "slow-bucket-starter");
+            delayedStartThread.setDaemon(true);
+            delayedStartThread.start();
+
+            OSCARServiceModule module = new OSCARServiceModule() {
+                @Override long bucketServiceWaitTimeoutMs() { return 60L; }
+                @Override long bucketServiceActiveStartExtensionMs() { return 3_000L; }
+                @Override long bucketServicePollSliceMs() { return 20L; }
+            };
+            module.setParentHub(hub);
+            OSCARServiceConfig cfg = new OSCARServiceConfig();
+            cfg.id = UUID.randomUUID().toString();
+            cfg.nodeId = "resilient-bucket-boot-node";
+            module.setConfiguration(cfg);
+            module.init();
+            assertTrue(module.waitForState(ModuleEvent.ModuleState.INITIALIZED, 5_000));
+            module.start();
+            assertTrue(module.waitForState(ModuleEvent.ModuleState.STARTED, 5_000));
+            try {
+                assertTrue(module.isStarted());
+                IBucketService attached = module.getBucketService();
+                assertSame(bucket, attached);
+                assertNotNull(attached.getBucketStore());
+            } finally {
+                module.stop();
+            }
+        } finally {
+            hub.stop();
+        }
+    }
+
+    @Test
+    public void exitsPromptlyWhenStoppingOrInterruptedAndFailsFastWhenBucketServiceErrors() throws Exception {
+        SensorHub hub = new SensorHub();
+        hub.start();
+        try {
+            // 1. Prompt exit when stoppingRequested transitions true
+            OSCARServiceModule stoppingModule = new OSCARServiceModule() {
+                @Override long bucketServiceWaitTimeoutMs() { return 30_000L; }
+                @Override long bucketServicePollSliceMs() { return 25L; }
+            };
+            stoppingModule.setParentHub(hub);
+
+            CountDownLatch enteredWait = new CountDownLatch(1);
+            Thread stopper = new Thread(() -> {
+                try {
+                    enteredWait.await(2, TimeUnit.SECONDS);
+                    Thread.sleep(50L);
+                    stoppingModule.stoppingRequested = true;
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "oscar-stop-trigger");
+            stopper.setDaemon(true);
+            stopper.start();
+
+            long t0 = System.nanoTime();
+            enteredWait.countDown();
+            SensorHubException stopErr = assertThrows(SensorHubException.class, stoppingModule::resolveBucketServiceReady);
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+            assertTrue("Expected prompt exit on stop (< 2000ms), took " + elapsedMs + " ms", elapsedMs < 2_000L);
+            assertTrue(stopErr.getMessage().contains("stopped"));
+
+            // 2. Prompt exit when calling thread is interrupted
+            OSCARServiceModule interruptedModule = new OSCARServiceModule() {
+                @Override long bucketServiceWaitTimeoutMs() { return 30_000L; }
+                @Override long bucketServicePollSliceMs() { return 25L; }
+            };
+            interruptedModule.setParentHub(hub);
+            Thread.currentThread().interrupt();
+            try {
+                assertThrows(SensorHubException.class, interruptedModule::resolveBucketServiceReady);
+            } finally {
+                Thread.interrupted(); // clear interrupt status for subsequent assertions
+            }
+
+            // 3. Fast failure when BucketService permanently fails with an error
+            var reg = hub.getModuleRegistry();
+            BucketServiceConfig failingCfg = new BucketServiceConfig();
+            failingCfg.id = UUID.randomUUID().toString();
+            failingCfg.moduleClass = FailingBucketService.class.getName();
+            failingCfg.autoStart = false;
+            failingCfg.fileStoreRootDir = tempFolder.newFolder("failing-buckets").getAbsolutePath();
+            FailingBucketService failingBucket = (FailingBucketService) reg.loadModule(failingCfg);
+            try {
+                failingBucket.init();
+            } catch (SensorHubException expectedSync) {
+                // Synchronous init path
+            }
+            long waitErrDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (failingBucket.getCurrentError() == null && System.nanoTime() < waitErrDeadline) {
+                Thread.sleep(20L);
+            }
+            assertNotNull("Expected failing bucket service to record module error", failingBucket.getCurrentError());
+
+            OSCARServiceModule fastFailModule = new OSCARServiceModule() {
+                @Override long bucketServiceWaitTimeoutMs() { return 30_000L; }
+                @Override long bucketServicePollSliceMs() { return 25L; }
+            };
+            fastFailModule.setParentHub(hub);
+            long errStart = System.nanoTime();
+            SensorHubException failErr = assertThrows(SensorHubException.class, fastFailModule::resolveBucketServiceReady);
+            long errElapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - errStart);
+            assertTrue("Expected fast failure on errored BucketService (< 2000ms), took " + errElapsedMs + " ms",
+                    errElapsedMs < 2_000L);
+            assertTrue(failErr.getMessage().contains("Bucket Service"));
+        } finally {
+            hub.stop();
+        }
     }
 }

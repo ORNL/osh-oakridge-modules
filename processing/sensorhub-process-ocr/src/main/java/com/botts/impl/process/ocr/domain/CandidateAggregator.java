@@ -550,14 +550,20 @@ public final class CandidateAggregator {
                      int frameIndex,
                      Rectangle box) {
             boolean first = framesSeen.isEmpty();
+            boolean hadDirectValid = !first && this.checksumValid && !this.checkDigitRepaired;
+            boolean incomingDirectValid = validChecksum && !repaired;
             framesSeen.add(frameIndex);
             this.checksumValid |= validChecksum;
             this.checkDigitRepaired = first ? repaired : (this.checkDigitRepaired && repaired);
-            if (conf > bestConfidence) {
-                this.bestConfidence = conf;
+            boolean upgradeToDirectValid = incomingDirectValid && !hadDirectValid;
+            boolean preserveDirectValid = hadDirectValid && !incomingDirectValid;
+            if (first || upgradeToDirectValid || (!preserveDirectValid && conf > bestConfidence)) {
                 this.bestRawText = raw;
                 this.bestFrameIndex = frameIndex;
                 this.bestBox = box == null ? null : new Rectangle(box);
+            }
+            if (conf > bestConfidence) {
+                this.bestConfidence = conf;
             }
         }
 

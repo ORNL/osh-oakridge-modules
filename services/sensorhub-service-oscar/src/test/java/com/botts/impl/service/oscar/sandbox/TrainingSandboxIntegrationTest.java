@@ -14,7 +14,15 @@ import com.botts.impl.service.oscar.uff.UffZipReader;
 import com.botts.impl.service.oscar.uff.WcoUffModels;
 import com.botts.impl.service.oscar.uff.WcoUffParser;
 import com.botts.impl.system.lane.config.LaneConfig;
+import com.botts.impl.system.lane.config.RS350RPMConfig;
 import com.botts.impl.system.lane.helpers.webrelay.WebRelayQuadClient;
+import com.botts.impl.system.lane.mobile.MobileDetectorDescriptor;
+import com.botts.impl.system.lane.mobile.MobileDetectorSystem;
+import com.botts.impl.system.lane.mobile.config.MobileDetectorConfig;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.apache.pdfbox.Loader;
@@ -23,8 +31,11 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.After;
 import org.junit.Test;
 import org.sensorhub.api.ISensorHub;
+import org.sensorhub.api.module.ModuleEvent;
 import org.sensorhub.api.security.ISecurityManager;
 import org.sensorhub.api.security.IUserInfo;
+import org.sensorhub.impl.SensorHub;
+import org.sensorhub.impl.utils.rad.RADHelper;
 import org.sensorhub.impl.utils.rad.eml.EmlEvaluationResult;
 import org.sensorhub.impl.utils.rad.eml.EmlLaneParameters;
 import org.slf4j.LoggerFactory;
@@ -35,23 +46,31 @@ import javax.servlet.ServletOutputStream;
 import javax.servlet.WriteListener;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.io.StringReader;
 import java.io.StringWriter;
 import java.lang.reflect.Proxy;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.Principal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.Assert.*;
 
@@ -68,6 +87,7 @@ public class TrainingSandboxIntegrationTest {
         System.clearProperty("oscar.sandbox.rapiscanPort2");
         System.clearProperty("oscar.sandbox.webRelayPort1");
         System.clearProperty("oscar.sandbox.webRelayPort2");
+        System.clearProperty("oscar.sandbox.rs350Port");
         System.clearProperty("oscar.sandbox.skipRtsp");
         System.clearProperty("oscar.sandbox.skipAutoStage");
         if (tempRoot != null && Files.exists(tempRoot)) {
@@ -460,6 +480,200 @@ public class TrainingSandboxIntegrationTest {
                 assertTrue(text.contains("Priority Queue"));
             }
         }
+    }
+
+    @Test
+    public void sandboxRs350LoopbackStreamsValidStxEtxN42FramesAndReportsMobileDetectorConfigured() throws Exception {
+        tempRoot = Files.createTempDirectory("oscar-sandbox-rs350-test-");
+        var logger = LoggerFactory.getLogger(TrainingSandboxIntegrationTest.class);
+
+        // 1. Strictly inert outside OSCAR_SANDBOX_MODE=true (never binds any port)
+        System.setProperty(TrainingSandboxEnvironment.PROP_SANDBOX_MODE, "false");
+        try (SandboxRs350LoopbackServer inert = new SandboxRs350LoopbackServer(0, "InertWalker", logger)) {
+            inert.start();
+            assertFalse("Expected RS-350 loopback server to stay inert outside sandbox mode", inert.isRunning());
+        }
+
+        // 2. Occupy a loopback port to verify collision-safe ephemeral port fallback
+        try (ServerSocket occupiedSocket = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"))) {
+            int occupiedPort = occupiedSocket.getLocalPort();
+            System.setProperty(TrainingSandboxEnvironment.PROP_SANDBOX_MODE, "true");
+            System.setProperty(TrainingSandboxManager.PROP_WORK_DIR, tempRoot.resolve("work").toString());
+            System.setProperty("oscar.sandbox.rapiscanPort1", "0");
+            System.setProperty("oscar.sandbox.rapiscanPort2", "0");
+            System.setProperty("oscar.sandbox.webRelayPort1", "0");
+            System.setProperty("oscar.sandbox.webRelayPort2", "0");
+            System.setProperty("oscar.sandbox.rs350Port", String.valueOf(occupiedPort));
+            System.setProperty("oscar.sandbox.skipRtsp", "true");
+            System.setProperty("oscar.sandbox.skipAutoStage", "true");
+
+            SensorHub realHub = new SensorHub();
+            realHub.start();
+            try {
+                OSCARServiceConfig cfg = new OSCARServiceConfig();
+                cfg.nodeId = "sandbox-rs350-node";
+                RuntimeExtensionsManager extMgr = new RuntimeExtensionsManager(
+                        realHub,
+                        cfg,
+                        new EmlPluginHandler(realHub, logger, cfg, tempRoot.resolve("eml")),
+                        logger,
+                        tempRoot.resolve("ext"),
+                        tempRoot.resolve("maps"),
+                        () -> {});
+
+                try (TrainingSandboxManager manager = new TrainingSandboxManager(realHub, null, extMgr, logger)) {
+                    manager.start();
+                    TrainingSandboxServlet servlet = new TrainingSandboxServlet(realHub, manager, logger);
+
+                    int rs350Port = manager.getRs350Port();
+                    assertTrue(rs350Port > 0);
+                    assertNotEquals("Expected fallback port when requested port is busy", occupiedPort, rs350Port);
+
+                    // 3. Read live STX..ETX frames over TCP and unmarshal via RADHelper + namespace-aware DOM
+                    RADHelper radHelper = new RADHelper();
+                    try (Socket sock = new Socket("127.0.0.1", rs350Port)) {
+                        sock.setSoTimeout(5_000);
+                        InputStream in = sock.getInputStream();
+
+                        String frame1Xml = readSingleStxEtxFrame(in);
+                        String frame2Xml = readSingleStxEtxFrame(in);
+                        assertNotNull(radHelper.getRadInstrumentData(frame1Xml));
+                        assertNotNull(radHelper.getRadInstrumentData(frame2Xml));
+
+                        Document dom1 = parseXmlDom(frame1Xml);
+                        Document dom2 = parseXmlDom(frame2Xml);
+                        assertEquals(SandboxRs350LoopbackServer.N42_NAMESPACE, dom1.getDocumentElement().getNamespaceURI());
+                        assertEquals("WALKER1", firstTagText(dom1, "RadInstrumentIdentifier"));
+                        assertEquals("RS-350", firstTagText(dom1, "RadInstrumentModelName"));
+
+                        NodeList spectra1 = dom1.getElementsByTagNameNS(SandboxRs350LoopbackServer.N42_NAMESPACE, "Spectrum");
+                        assertTrue("Initial bootstrap frame must carry Background + Foreground spectra", spectra1.getLength() >= 4);
+                        String fgLinChannels = firstSpectrumChannelDataById(dom1, "FgLin");
+                        String fgCmpChannels = firstSpectrumChannelDataById(dom1, "FgCmp");
+                        assertEquals(1024, fgLinChannels.trim().split("\\s+").length);
+                        assertEquals(256, fgCmpChannels.trim().split("\\s+").length);
+
+                        double lat1 = Double.parseDouble(firstTagText(dom1, "LatitudeValue"));
+                        double lon1 = Double.parseDouble(firstTagText(dom1, "LongitudeValue"));
+                        double lat2 = Double.parseDouble(firstTagText(dom2, "LatitudeValue"));
+                        double lon2 = Double.parseDouble(firstTagText(dom2, "LongitudeValue"));
+                        assertTrue(lat1 > 35.92);
+                        assertTrue(lon1 < -84.30);
+                        boolean moved = Math.abs(lat2 - lat1) > 1e-6 || Math.abs(lon2 - lon1) > 1e-6;
+                        assertTrue("Expected walker GPS position to advance across 1 Hz frames", moved);
+                    }
+
+                    // 4. Verify Cs-137 hotspot frame emits <DerivedData> + <AnalysisResults><RadAlarm> and unmarshals cleanly
+                    SandboxRs350LoopbackServer walkerServer = manager.getRs350LoopbackServer();
+                    assertNotNull(walkerServer);
+                    String hotspotXml = walkerServer.buildDocumentXml(
+                            SandboxRs350LoopbackServer.HOTSPOT_LAT,
+                            SandboxRs350LoopbackServer.HOTSPOT_LON,
+                            96.0,
+                            false,
+                            Instant.parse("2026-10-18T12:00:05Z"));
+                    assertNotNull(radHelper.getRadInstrumentData(hotspotXml));
+                    Document alarmDom = parseXmlDom(hotspotXml);
+                    assertEquals("Alarm", firstTagText(alarmDom, "Remark"));
+                    assertEquals("Gamma", firstTagText(alarmDom, "RadAlarmCategoryCode"));
+                    assertEquals("Cs-137", firstTagText(alarmDom, "RadAlarmDescription"));
+
+                    // 5. Verify mobileDetectorConfigured is false before adding/starting MobileDetectorSystem,
+                    // remains false when loaded unstarted, and becomes true once MobileDetectorSystem is started
+                    MockResp beforeResp = invoke(servlet, "GET", "/active", "admin", Map.of(), null);
+                    assertEquals(200, beforeResp.status);
+                    JsonObject beforeVer = JsonParser.parseString(beforeResp.bodyString())
+                            .getAsJsonObject()
+                            .getAsJsonObject("verification");
+                    assertFalse(beforeVer.get("mobileDetectorConfigured").getAsBoolean());
+                    assertEquals(0, beforeVer.get("mobileDetectorCount").getAsInt());
+
+                    var reg = realHub.getModuleRegistry();
+                    MobileDetectorConfig mobileCfg = (MobileDetectorConfig) reg.createModuleConfig(new MobileDetectorDescriptor());
+                    mobileCfg.id = UUID.randomUUID().toString();
+                    mobileCfg.name = "PatrolRS350";
+                    mobileCfg.uniqueID = "patrol-rs350";
+                    mobileCfg.autoStart = false;
+                    RS350RPMConfig rs350Cfg = new RS350RPMConfig();
+                    rs350Cfg.remoteHost = "127.0.0.1";
+                    rs350Cfg.remotePort = rs350Port;
+                    mobileCfg.detectorConfig = rs350Cfg;
+
+                    MobileDetectorSystem mobile = (MobileDetectorSystem) reg.loadModule(mobileCfg);
+                    MockResp loadedNotStartedResp = invoke(servlet, "GET", "/active", "admin", Map.of(), null);
+                    JsonObject loadedVer = JsonParser.parseString(loadedNotStartedResp.bodyString())
+                            .getAsJsonObject()
+                            .getAsJsonObject("verification");
+                    assertFalse("Unstarted MobileDetectorSystem must not prematurely verify lab",
+                            loadedVer.get("mobileDetectorConfigured").getAsBoolean());
+                    assertEquals(1, loadedVer.get("mobileDetectorCount").getAsInt());
+
+                    reg.startModule(mobileCfg.id);
+                    assertTrue(mobile.waitForState(ModuleEvent.ModuleState.STARTED, 10_000L));
+
+                    MockResp startedResp = invoke(servlet, "GET", "/active", "admin", Map.of(), null);
+                    JsonObject startedJson = JsonParser.parseString(startedResp.bodyString()).getAsJsonObject();
+                    JsonObject startedVer = startedJson.getAsJsonObject("verification");
+                    assertTrue("Started MobileDetectorSystem must report mobileDetectorConfigured=true",
+                            startedVer.get("mobileDetectorConfigured").getAsBoolean());
+                    assertEquals(1, startedVer.get("onlineMobileDetectorCount").getAsInt());
+                    assertEquals(rs350Port, startedJson.getAsJsonObject("loopbackEndpoints").get("rs350Port").getAsInt());
+                }
+            } finally {
+                realHub.stop();
+            }
+        }
+    }
+
+    private static String readSingleStxEtxFrame(InputStream in) throws IOException {
+        int ch;
+        do {
+            ch = in.read();
+            if (ch == -1) {
+                throw new IOException("EOF before STX (0x02)");
+            }
+        } while (ch != SandboxRs350LoopbackServer.STX);
+
+        ByteArrayOutputStream buf = new ByteArrayOutputStream(8_192);
+        while (true) {
+            ch = in.read();
+            if (ch == -1) {
+                throw new IOException("EOF before ETX (0x03)");
+            }
+            if (ch == SandboxRs350LoopbackServer.ETX) {
+                break;
+            }
+            buf.write(ch);
+        }
+        return buf.toString(StandardCharsets.UTF_8);
+    }
+
+    private static Document parseXmlDom(String xml) throws Exception {
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        dbf.setNamespaceAware(true);
+        return dbf.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+    }
+
+    private static String firstTagText(Document doc, String localName) {
+        NodeList nodes = doc.getElementsByTagNameNS(SandboxRs350LoopbackServer.N42_NAMESPACE, localName);
+        if (nodes.getLength() == 0) {
+            return "";
+        }
+        return nodes.item(0).getTextContent().trim();
+    }
+
+    private static String firstSpectrumChannelDataById(Document doc, String spectrumId) {
+        NodeList nodes = doc.getElementsByTagNameNS(SandboxRs350LoopbackServer.N42_NAMESPACE, "Spectrum");
+        for (int i = 0; i < nodes.getLength(); i++) {
+            Element el = (Element) nodes.item(i);
+            if (spectrumId.equals(el.getAttribute("id"))) {
+                NodeList ch = el.getElementsByTagNameNS(SandboxRs350LoopbackServer.N42_NAMESPACE, "ChannelData");
+                if (ch.getLength() > 0) {
+                    return ch.item(0).getTextContent();
+                }
+            }
+        }
+        return "";
     }
 
     private static ISensorHub buildMockHub(Map<String, List<String>> userRoles) {

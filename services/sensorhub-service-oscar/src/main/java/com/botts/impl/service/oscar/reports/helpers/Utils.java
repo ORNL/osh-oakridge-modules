@@ -113,14 +113,35 @@ public class Utils {
         return module.getParentHub().getDatabaseRegistry().getFederatedDatabase().getObservationStore().countMatchingEntries(builder.build());
     }
 
+    private static final Instant MAX_SAFE_COMMAND_INSTANT = Instant.parse("2999-12-31T23:59:59Z");
+
+    private static CommandFilter buildDateBoundedLaneCommandFilter(String laneUID, Instant begin, Instant end) {
+        CommandFilter.Builder cmdFilter = new CommandFilter.Builder()
+                .withSystems().withUniqueIDs(laneUID).done();
+        if (begin != null && end != null) {
+            Instant issueStart = begin.isBefore(Instant.EPOCH.plusSeconds(86_400L))
+                    ? Instant.EPOCH
+                    : begin.minusSeconds(86_400L);
+            Instant issueEnd = end.isAfter(MAX_SAFE_COMMAND_INSTANT.minusSeconds(3_600L))
+                    ? (end.isAfter(MAX_SAFE_COMMAND_INSTANT) ? MAX_SAFE_COMMAND_INSTANT : end)
+                    : end.plusSeconds(3_600L);
+            cmdFilter.withIssueTimeDuring(issueStart, issueEnd);
+        }
+        return cmdFilter.build();
+    }
+
     public static long countStatusResults(String laneUID, OSCARServiceModule module, Predicate<ICommandStatus> valuePredicate, Instant begin, Instant end) {
-        return module.getParentHub().getDatabaseRegistry().getFederatedDatabase().getCommandStatusStore().select(new CommandStatusFilter.Builder()
-                        .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
-                        .withReportTimeDuring(begin, end)
-                        .withValuePredicate(valuePredicate)
-                        .withCommands(new CommandFilter.Builder().withSystems().withUniqueIDs(laneUID).done().build())
-                        .build())
-                .count();
+        CommandStatusFilter.Builder statusFilter = new CommandStatusFilter.Builder()
+                .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
+                .withValuePredicate(valuePredicate)
+                .withCommands(buildDateBoundedLaneCommandFilter(laneUID, begin, end));
+        if (begin != null && end != null) {
+            statusFilter.withReportTimeDuring(begin, end);
+        }
+        try (var stream = module.getParentHub().getDatabaseRegistry().getFederatedDatabase()
+                .getCommandStatusStore().select(statusFilter.build())) {
+            return stream.count();
+        }
     }
 
     // suppressed : RPM Gamma Alert = true but the EML Gamma Alert = false (release)
@@ -185,10 +206,15 @@ public class Utils {
     }
 
     public static Iterator<ICommandStatus> queryCommandStatus(OSCARServiceModule module, String laneUID, Instant begin, Instant end) {
-        return module.getParentHub().getDatabaseRegistry().getFederatedDatabase().getCommandStatusStore().select(new CommandStatusFilter.Builder()
+        CommandStatusFilter.Builder statusFilter = new CommandStatusFilter.Builder()
                 .withStatus(ICommandStatus.CommandStatusCode.COMPLETED)
-                .withReportTimeDuring(begin, end)
-                .withCommands(new CommandFilter.Builder().withSystems().withUniqueIDs(laneUID).done()
-                        .build()).build()).iterator();
+                .withCommands(buildDateBoundedLaneCommandFilter(laneUID, begin, end));
+        if (begin != null && end != null) {
+            statusFilter.withReportTimeDuring(begin, end);
+        }
+        try (var stream = module.getParentHub().getDatabaseRegistry().getFederatedDatabase()
+                .getCommandStatusStore().select(statusFilter.build())) {
+            return stream.toList().iterator();
+        }
     }
 }

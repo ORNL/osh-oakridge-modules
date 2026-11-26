@@ -66,10 +66,7 @@ public class OccupancyProcessInterface extends OccupancyOutput<IDataProducer> {
 
             if (lastOccupancy == null || lastOccupancy.getSamplingTime() != occupancy.getSamplingTime()) {
                 lastOccupancy = occupancy;
-                // This handles publishing too (parent setData → augmentPublish,
-                // which we override below to serialize extended datablocks).
                 setData(occupancy);
-                eventHandler.publish(new DataEvent(System.currentTimeMillis(), OccupancyProcessInterface.this, dataBlock));
                 doPublish = false;
             }
         }
@@ -156,10 +153,12 @@ public class OccupancyProcessInterface extends OccupancyOutput<IDataProducer> {
 
         dataStruct.setData(dataBlock);
         latestRecord = dataBlock;
+        lastRecord = dataBlock;
 
         long now = System.currentTimeMillis();
         updateSamplingPeriod(now);
         latestRecordTime = now;
+        lastRecordTime = now;
 
         eventHandler.publish(new DataEvent(now, this, dataBlock));
     }

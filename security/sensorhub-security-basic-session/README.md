@@ -24,7 +24,7 @@ Some browsers or site policies block third-party cookies even with `SameSite=Non
 
 ## Logout
 
-`GET /logout` invalidates the server-side session, expires the cookie, and redirects to `/`. Non-GET logout requests return `204 No Content`.
+`GET /logout` invalidates the server-side session, expires the cookie, and redirects to `/login` (preserving `?continue=/sensorhub/admin` when initiated from SensorHub Admin, or landing on `/` when initiated from OSCAR Viewer). Non-GET logout requests return `204 No Content`.
 
 ## Current user
 

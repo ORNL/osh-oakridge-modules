@@ -168,6 +168,9 @@ public final class Iso6346 {
         Match patternOnly = null;
 
         for (int i = 0; i + CODE_LENGTH <= normalized.length(); i++) {
+            if (i > 0 && overlapsPrecedingKnownBicPrefix(normalized, i)) {
+                continue;
+            }
             String source = normalized.substring(i, i + CODE_LENGTH);
             String coerced = coerceByPosition(source);
             String validVariant = findChecksumValidVariant(source, coerced);
@@ -204,6 +207,9 @@ public final class Iso6346 {
         // Check-digit box missed altogether leaving a clean 10-character owner+category+serial read
         if (repaired == null) {
             for (int i = 0; i + CODE_LENGTH - 1 <= normalized.length(); i++) {
+                if (i > 0 && overlapsPrecedingKnownBicPrefix(normalized, i)) {
+                    continue;
+                }
                 String source = normalized.substring(i, i + CODE_LENGTH - 1);
                 boolean hasEleventhDigit = (i + CODE_LENGTH - 1 < normalized.length())
                         && Character.isDigit(normalized.charAt(i + CODE_LENGTH - 1));
@@ -216,6 +222,34 @@ public final class Iso6346 {
         }
 
         return Optional.ofNullable(repaired != null ? repaired : patternOnly);
+    }
+
+    private static boolean overlapsPrecedingKnownBicPrefix(String normalized, int index) {
+        if (index <= 0 || index + 4 > normalized.length()) {
+            return false;
+        }
+        String currentPrefix = coerceOwnerPrefix4(normalized.substring(index, index + 4));
+        if (isKnownBicPrefix(currentPrefix)) {
+            return false;
+        }
+        int minPrev = Math.max(0, index - 3);
+        for (int prev = minPrev; prev < index; prev++) {
+            if (prev + 4 <= normalized.length()) {
+                String prevPrefix = coerceOwnerPrefix4(normalized.substring(prev, prev + 4));
+                if (isKnownBicPrefix(prevPrefix)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String coerceOwnerPrefix4(String raw4) {
+        char[] out = new char[4];
+        for (int i = 0; i < 4; i++) {
+            out[i] = digitToLetter(raw4.charAt(i));
+        }
+        return new String(out);
     }
 
     private static boolean prefixReadCleanly(String source) {
