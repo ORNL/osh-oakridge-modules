@@ -540,7 +540,7 @@ public final class TrainingSandboxManager implements Closeable {
             cam.streamPath = camPath;
             cam.username = "";
             cam.password = "";
-            cfg.laneOptionsConfig.ffmpegConfig = List.of(cam);
+            cfg.laneOptionsConfig.ffmpegConfig = new ArrayList<>(List.of(cam));
         }
 
         cfg.ocrConfig = new OcrConfig();
@@ -1061,7 +1061,7 @@ public final class TrainingSandboxManager implements Closeable {
 
             Instant now = Instant.now();
             pdf.drawReportBanner(new PdfDocumentBuilder.HeaderMetadata(
-                    "OSCAR 3.11.15 Hands-On Training Completion Record",
+                    "OSCAR 3.12.0 Hands-On Training Completion Record",
                     nodeId,
                     "Trainee: " + safeTrainee,
                     TrainingSandboxEnvironment.WATERMARK_TEXT + "  |  Zero Production Database / Parquet Impact",
