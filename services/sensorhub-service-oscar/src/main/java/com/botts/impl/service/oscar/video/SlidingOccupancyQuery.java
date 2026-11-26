@@ -70,6 +70,8 @@ public final class SlidingOccupancyQuery {
     private final Object operationLock = new Object();
     private volatile boolean stopRequested;
     private ICancellableDataStore.CancellableOperation activeOperation;
+    private boolean inDurableAction;
+    private boolean deferredInterrupt;
     private boolean cancellationStarted;
     private boolean cancellationComplete = true;
     private RuntimeException operationFailure;
@@ -197,6 +199,8 @@ public final class SlidingOccupancyQuery {
                         operationFailure);
             cancellationStarted = false;
             cancellationComplete = true;
+            inDurableAction = false;
+            deferredInterrupt = false;
         }
         executor = null;
         future = null;
@@ -440,14 +444,26 @@ public final class SlidingOccupancyQuery {
                         observationId,
                         identityResolver.laneUid(observation), observation,
                         Occupancy.toOccupancy(observation.getResult()));
-                if (!afterQueryAction.call(record))
-                    return false;
-                // Historical reconciliation intentionally ignores processed markers. Rewriting a
-                // marker there would recreate old tiny files immediately after safe reclamation;
-                // only the forward/late-arrival scan needs this bounded deduplication state.
-                if (skipProcessed)
-                    cursorStore.markProcessed(RetentionProcessedObservation.at(observationId,
-                            observation.getResultTime(), clock.instant()));
+                synchronized (operationLock) {
+                    if (stopRequested)
+                        return false;
+                    inDurableAction = true;
+                }
+                try {
+                    if (!afterQueryAction.call(record))
+                        return false;
+                    // Historical reconciliation intentionally ignores processed markers. Rewriting a
+                    // marker there would recreate old tiny files immediately after safe reclamation;
+                    // only the forward/late-arrival scan needs this bounded deduplication state.
+                    if (skipProcessed)
+                        cursorStore.markProcessed(RetentionProcessedObservation.at(observationId,
+                                observation.getResultTime(), clock.instant()));
+                } finally {
+                    synchronized (operationLock) {
+                        inDurableAction = false;
+                        operationLock.notifyAll();
+                    }
+                }
             }
         }
         return !shouldStop();
@@ -723,16 +739,23 @@ public final class SlidingOccupancyQuery {
     public synchronized void requestStop() {
         stopRequested = true;
         ICancellableDataStore.CancellableOperation operation;
+        boolean deferInterrupt;
         synchronized (operationLock) {
             operation = activeOperation;
             if (operation != null)
                 startOperationCancellationLocked(operation);
+            deferInterrupt = inDurableAction;
+            deferredInterrupt = deferInterrupt;
         }
         if (future != null)
-            future.cancel(true);
+            future.cancel(!deferInterrupt);
         ScheduledExecutorService stopping = executor;
         if (stopping == null)
             future = null;
+        else if (deferInterrupt)
+            // Allow an in-flight retained-media publish (FileChannel.lock/force) to finish
+            // cleanly instead of aborting with FileLockInterruptionException / ClosedByInterruptException.
+            stopping.shutdown();
         else
             stopping.shutdownNow();
     }
@@ -745,10 +768,23 @@ public final class SlidingOccupancyQuery {
         long budgetNanos = Math.max(1L, unit.toNanos(timeout));
         long deadline = System.nanoTime() + budgetNanos;
         ScheduledExecutorService stopping = executor;
+        boolean deferInterrupt;
+        synchronized (operationLock) {
+            deferInterrupt = deferredInterrupt;
+        }
         boolean terminated;
         try {
             if (stopping == null || stopping.isTerminated()) {
                 terminated = true;
+            } else if (deferInterrupt) {
+                long remaining = Math.max(1L, deadline - System.nanoTime());
+                long graceNanos = Math.max(1L, Math.min(remaining / 2L, TimeUnit.SECONDS.toNanos(5)));
+                terminated = stopping.awaitTermination(graceNanos, TimeUnit.NANOSECONDS);
+                if (!terminated) {
+                    stopping.shutdownNow();
+                    long afterGrace = Math.max(1L, deadline - System.nanoTime());
+                    terminated = stopping.awaitTermination(afterGrace, TimeUnit.NANOSECONDS);
+                }
             } else {
                 long remaining = Math.max(1L, deadline - System.nanoTime());
                 terminated = stopping.awaitTermination(remaining, TimeUnit.NANOSECONDS);

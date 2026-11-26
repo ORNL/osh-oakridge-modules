@@ -1195,6 +1195,125 @@ public class RetentionCursorTest {
         }
     }
 
+    @Test
+    public void stopWaitsGracefullyForInFlightDurableActionWithoutInterrupting() throws Exception {
+        BigId streamId = BigId.fromLong(1, 77);
+        Instant t1 = Instant.parse("2026-01-01T00:00:02Z");
+        Instant t2 = Instant.parse("2026-01-01T00:00:05Z");
+        net.opengis.swe.v20.DataBlock block = Occupancy.fromOccupancy(new Occupancy.Builder().build());
+        IObsData obs1 = new org.sensorhub.api.data.ObsData.Builder()
+                .withDataStream(streamId).withPhenomenonTime(t1).withResultTime(t1).withResult(block).build();
+        IObsData obs2 = new org.sensorhub.api.data.ObsData.Builder()
+                .withDataStream(streamId).withPhenomenonTime(t2).withResultTime(t2).withResult(block).build();
+
+        org.sensorhub.api.feature.FeatureId laneFeatureId =
+                new org.sensorhub.api.feature.FeatureId(BigId.NONE, "urn:osh:system:lane:lane-50");
+        IDataStreamInfo streamInfo = (IDataStreamInfo) Proxy.newProxyInstance(
+                IDataStreamInfo.class.getClassLoader(), new Class<?>[]{IDataStreamInfo.class},
+                (proxy, method, arguments) -> method.getName().equals("getSystemID")
+                        ? laneFeatureId
+                        : defaultProxyValue(method.getReturnType()));
+        org.sensorhub.api.datastore.system.ISystemDescStore systemDescStore =
+                (org.sensorhub.api.datastore.system.ISystemDescStore) Proxy.newProxyInstance(
+                        org.sensorhub.api.datastore.system.ISystemDescStore.class.getClassLoader(),
+                        new Class<?>[]{org.sensorhub.api.datastore.system.ISystemDescStore.class},
+                        (proxy, method, arguments) -> method.getName().equals("select")
+                                ? Stream.empty()
+                                : defaultProxyValue(method.getReturnType()));
+        IDataStreamStore dataStreams = (IDataStreamStore) Proxy.newProxyInstance(
+                IDataStreamStore.class.getClassLoader(), new Class<?>[]{IDataStreamStore.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "selectKeys" -> Stream.of(new DataStreamKey(streamId));
+                    case "selectEntries" -> Stream.empty();
+                    case "get" -> streamInfo;
+                    default -> defaultProxyValue(method.getReturnType());
+                });
+        IObsStore observations = (IObsStore) Proxy.newProxyInstance(
+                IObsStore.class.getClassLoader(), new Class<?>[]{IObsStore.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getDataStreams" -> dataStreams;
+                    case "selectEntries" -> Stream.of(
+                            Map.entry(BigId.fromLong(1, 1001L), obs1),
+                            Map.entry(BigId.fromLong(1, 1002L), obs2));
+                    default -> defaultProxyValue(method.getReturnType());
+                });
+        IFederatedDatabase federated = (IFederatedDatabase) Proxy.newProxyInstance(
+                IFederatedDatabase.class.getClassLoader(), new Class<?>[]{IFederatedDatabase.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getObservationStore" -> observations;
+                    case "getDataStreamStore" -> dataStreams;
+                    case "getSystemDescStore" -> systemDescStore;
+                    default -> defaultProxyValue(method.getReturnType());
+                });
+        IDatabaseRegistry registry = (IDatabaseRegistry) Proxy.newProxyInstance(
+                IDatabaseRegistry.class.getClassLoader(), new Class<?>[]{IDatabaseRegistry.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getFederatedDatabase" -> federated;
+                    case "getObsSystemDatabases" -> List.of();
+                    default -> defaultProxyValue(method.getReturnType());
+                });
+        org.sensorhub.api.common.IdEncoder obsEncoder = (org.sensorhub.api.common.IdEncoder) Proxy.newProxyInstance(
+                org.sensorhub.api.common.IdEncoder.class.getClassLoader(),
+                new Class<?>[]{org.sensorhub.api.common.IdEncoder.class},
+                (proxy, method, arguments) -> method.getName().equals("encodeID")
+                        ? "obs-" + ((BigId) arguments[0]).getIdAsLong()
+                        : defaultProxyValue(method.getReturnType()));
+        org.sensorhub.api.common.IdEncoders idEncoders = (org.sensorhub.api.common.IdEncoders) Proxy.newProxyInstance(
+                org.sensorhub.api.common.IdEncoders.class.getClassLoader(),
+                new Class<?>[]{org.sensorhub.api.common.IdEncoders.class},
+                (proxy, method, arguments) -> method.getName().equals("getObsIdEncoder")
+                        ? obsEncoder
+                        : defaultProxyValue(method.getReturnType()));
+        ISensorHub hub = (ISensorHub) Proxy.newProxyInstance(
+                ISensorHub.class.getClassLoader(), new Class<?>[]{ISensorHub.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getDatabaseRegistry" -> registry;
+                    case "getIdEncoders" -> idEncoders;
+                    default -> defaultProxyValue(method.getReturnType());
+                });
+
+        CountDownLatch enteredAction = new CountDownLatch(1);
+        CountDownLatch releaseAction = new CountDownLatch(1);
+        AtomicInteger handled = new AtomicInteger();
+        AtomicReference<Boolean> interruptedInsideAction = new AtomicReference<>(Boolean.FALSE);
+        InMemoryCursorStore cursors = new InMemoryCursorStore();
+        cursors.write(RetentionScanCheckpoint.at(Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2026-01-01T00:00:00Z")));
+
+        SlidingOccupancyQuery query = new SlidingOccupancyQuery(hub, Duration.ofDays(1),
+                record -> {
+                    handled.incrementAndGet();
+                    enteredAction.countDown();
+                    awaitIgnoringInterrupts(releaseAction);
+                    if (Thread.currentThread().isInterrupted())
+                        interruptedInsideAction.set(Boolean.TRUE);
+                    return true;
+                },
+                Duration.ZERO, Duration.ofDays(1), cursors, () -> { },
+                Clock.fixed(Instant.parse("2026-01-01T00:01:00Z"), ZoneOffset.UTC),
+                Duration.ZERO, Duration.ofDays(1));
+
+        query.start();
+        try {
+            assertTrue("Worker did not enter afterQueryAction", enteredAction.await(2, TimeUnit.SECONDS));
+            query.requestStop();
+            // Brief settle while requestStop takes effect; worker must NOT have its interrupt flag raised.
+            Thread.sleep(60L);
+            releaseAction.countDown();
+            query.awaitStop(2, TimeUnit.SECONDS);
+            assertEquals("Graceful stop must not interrupt an in-flight durable action",
+                    Boolean.FALSE, interruptedInsideAction.get());
+            assertEquals("Worker must finish the in-flight record and skip subsequent records",
+                    1, handled.get());
+        } finally {
+            releaseAction.countDown();
+            try {
+                query.requestStop();
+                query.awaitStop(2, TimeUnit.SECONDS);
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
+
     private static ScheduledExecutorService scheduler(SlidingOccupancyQuery query)
             throws ReflectiveOperationException {
         Field field = SlidingOccupancyQuery.class.getDeclaredField("executor");
