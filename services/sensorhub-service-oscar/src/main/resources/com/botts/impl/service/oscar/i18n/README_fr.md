@@ -63,7 +63,7 @@ Consultez le [Guide de démarrage rapide](https://github.com/ORNL/oscar/blob/mai
 | **Fichier quotidien et codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | Journal CSV quotidien par voie contenant les messages RPM bruts : `GB`/`NB` = bruit de fond gamma/neutrons, `GS` = début d'occupation, `GC`/`NC` = profil de comptage, `GA`/`NA`/`NS` = alarme gamma/neutrons, `GX` = fin d'occupation, `TT`/`TC` = défaut/rétablissement de sabotage, et `SG1`–`SG3`/`SN1`–`SN2` = paramètres quotidiens de configuration gamma/neutrons (qui mettent automatiquement à jour les paramètres du pilote Rapiscan en mémoire et regroupent les modifications dans `config.json`). |
 | **UUID d'événement (`Event UUID`)** | Identifiant unique global attribué à chaque événement d'occupation pour la recherche, l'exportation QR et le suivi dans les rapports et nœuds fédérés. |
 | **Vue opérationnelle (`Operational View`)** | Filtre nommé sélectionnable depuis le menu déroulant **Vue opérationnelle** de la barre supérieure (ou via `?view=<clé>` / `/view/<clé>`) limitant le Tableau de bord, les Événements, l'État de santé, la Carte et le Générateur de rapports à un groupe de voies précis dans le respect des permissions `allowedViews`. |
-| **Niveau froid Parquet (`PARQUET_PRIMARY`)** | Mode de stockage par défaut d'OSCAR 3.11.15 dans lequel PostgreSQL conserve une fenêtre de transit de 30 minutes et les partitions terminées sont exportées en fichiers Apache Parquet compressés ZSTD (`archive/parquet/`). |
+| **Niveau froid Parquet (`PARQUET_PRIMARY`)** | Mode de stockage par défaut d'OSCAR dans lequel PostgreSQL conserve une fenêtre de transit de 30 minutes et les partitions terminées sont scindées dès l'export en profils Apache Parquet V2 compressés ZSTD (`archive/datasets/observations/`) : `RAW_TELEMETRY` en écriture unique (flux 1 Hz jamais réécrits) et `RAW_EVENTS` avec filtres Bloom (les 9 flux d'événements consultables, compactés en `DAILY_EVENTS` puis `MONTHLY_EVENTS`). |
 | **Médias conservés à 5 images** | Pour chaque occupation avec alarme, OSCAR extrait 5 instantanés JPEG (`frame-01.jpg` à `frame-05.jpg`). Après 30 jours, les images secondaires (`01`, `02`, `04`, `05`) sont purgées et l'image centrale (`frame-03.jpg`) est conservée. |
 | **OCR des véhicules (`ocrConfig`)** | Lecture optique facultative par voie (`Activer l'OCR des véhicules = false` par défaut) analysant de façon asynchrone les codes conteneur ISO 6346 (avec chiffre de contrôle) et les plaques d'immatriculation selon les ressources CPU et mémoire disponibles (`OcrResourceGovernor`), publiant des candidats `vehicleOcr` (`PARQUET_PRIMARY`), des vignettes JPEG partitionnées par date (`/sensorhub/buckets/ocr/crops/<YYYY-MM-DD>/`, alignées sur `frame-03.jpg` et `ocrCropRetentionDays = 365`) et préremplissant l'**ID véhicule** pour les conteneurs ISO valides ou les plaques `>= 85%`. Lorsque `Alarmes uniquement` est décoché, les séquences hors alarme sont analysées de manière transitoire puis supprimées immédiatement tout en gardant `occupancy.videoPaths` vide (`[]`). |
 | **SAN (Nom alternatif du sujet)** | Liste des noms d'hôtes et adresses IP (tels que `oscar.local` et `192.0.2.10`) inscrits dans un certificat HTTPS que le navigateur vérifie avant d'établir la connexion. |
@@ -1045,7 +1045,7 @@ Une fois les portails distants connectés via des jetons `oscar_fed_...`, **Év�
 
 ## 12. Conservation des données et stockage
 
-Le profil standard 3.11.15 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet en mode
+Le profil standard 3.11.15 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet V2 en mode
 `PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Les flux de configuration statiques
 (`sensorLocation`, `adjudicationCodes`, `siteInfo`) restent dans PostgreSQL `ONLY oscar.obs`, tandis que
 les 26 sorties opérationnelles, probantes et mobiles autorisées (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
@@ -1054,15 +1054,21 @@ les 26 sorties opérationnelles, probantes et mobiles autorisées (`gammaCounts`
 `occupancy`, `adjudication`, `report`, `siteStatistics`, `nationalSummary`, `vehicleOcr`, `location`, `alarm`,
 `KromekDetectorRadiometricsV1Report`, `KromekSerialRadiometricStatusReport`) sont écrites dans des
 partitions de transit de 30 minutes (`osg_*`). Cinq minutes après la clôture de chaque fenêtre de
-30 minutes, des tâches d'arrière-plan exportent la partition vers des fichiers Apache Parquet catalogués
-et compressés en ZSTD (`archive/datasets/observations/`), alimentent `oscar_obs_latest`, les compteurs de
-résumé de `oscar_archive_schema` et `oscar_event_locator`, vérifient la parité exacte des lignes/empreintes
-et suppriment la partition de transit afin de garder PostgreSQL compact (et au démarrage, OSCAR réconcilie
-les routes existantes et exporte rétroactivement vers Parquet toute ligne historique non archivée de la
-table parente pour ces 26 sorties). Les décisions et ré-adjudications portant sur des occupations archivées
-sont enregistrées dans `oscar_obs_overlay` + `oscar_obs_latest` sans réécrire Parquet, et chaque heure
-OSCAR purge les commandes opérationnelles transitoires dans `cmd_commands`/`cmd_status` de plus de
-24 heures (tout en conservant définitivement les commandes d'audit `%adjudicate%`). (Les sites configurés
+30 minutes, des tâches d'arrière-plan scindent directement la partition à l'export en deux profils
+complémentaires Apache Parquet V2 compressés ZSTD (`archive/datasets/observations/`) : **`RAW_EVENTS`**
+(les 9 flux d'événements consultables avec colonnes scalaires projetées et filtres Bloom, compactés en
+arrière-plan en `DAILY_EVENTS` puis `MONTHLY_EVENTS` avec plafonds de rotation de `1 000 000` lignes /
+`192 Mio`, fusion des surcouches stabilisées et nettoyage automatique des `.partial` obsolètes `>= 2h`) et
+**`RAW_TELEMETRY`** en écriture unique (les 17 flux restants de télémétrie 1 Hz et d'état, écrits une seule
+fois sans jamais être réécrits). Chaque export alimente `oscar_obs_latest`, les compteurs de résumé de
+`oscar_archive_schema` (avec `ocr_bloom` sélectif uniquement sur les événements) et `oscar_event_locator`,
+vérifie la parité exacte des lignes/empreintes et supprime la partition de transit afin de garder PostgreSQL
+compact (et au démarrage, OSCAR réconcilie les routes existantes et exporte rétroactivement vers Parquet
+toute ligne historique non archivée de la table parente pour ces 26 sorties). Les décisions et
+ré-adjudications portant sur des occupations archivées sont enregistrées dans `oscar_obs_overlay` +
+`oscar_obs_latest` sans réécrire Parquet (jusqu'à leur fusion lors de la compaction des événements), et
+chaque heure OSCAR purge les commandes opérationnelles transitoires dans `cmd_commands`/`cmd_status` de
+plus de 24 heures (tout en conservant définitivement les commandes d'audit `%adjudicate%`). (Les sites configurés
 explicitement en mode `HOT_RETENTION` conservent les lignes chaudes pendant la fenêtre configurée avant de
 les retirer après vérification de parité.) La propriété de l'archive, l'intégrité des objets, la parité et
 les conservations actives sont revérifiées avant toute suppression et échouent de façon sûre.

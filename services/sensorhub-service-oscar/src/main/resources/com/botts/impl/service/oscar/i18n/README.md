@@ -63,7 +63,7 @@ Use the release [Quick Start](https://github.com/ORNL/oscar/blob/main/dist/relea
 | **Daily File & Record Codes (`GB`, `GS`, `GA`, `NS`, `GX`, `SG1`–`SG3`, `SN1`–`SN2`)** | The per-lane daily CSV log of raw RPM messages: `GB`/`NB` = gamma/neutron background, `GS` = occupancy start, `GC`/`NC` = gamma/neutron count profile, `GA`/`NA`/`NS` = gamma/neutron alarm, `GX` = occupancy end, `TT`/`TC` = tamper fault/clear, and `SG1`–`SG3`/`SN1`–`SN2` = daily gamma/neutron hardware setup parameters (which automatically update the Rapiscan driver's parameters in memory and coalesce changes into `config.json`). |
 | **Event UUID** | Globally unique identifier (`UUID`) assigned to each occupancy event so operators can search, export QR summaries, and trace the exact event across reports and federated nodes. |
 | **Operational View** | A named filter selectable from the top-bar **Scoped View** dropdown (or via `?view=<key>` / `/view/<key>` URLs) that scopes a workstation's Dashboard, Events, Status of Health, Map, and Report Generator to a specific group of lanes (for example, `north-gate`) while honoring user `allowedViews` permissions. |
-| **Parquet Cold Tier (`PARQUET_PRIMARY`)** | OSCAR 3.11.15's default storage mode where PostgreSQL holds a 30-minute hot staging window and completed 30-minute partitions are exported to ZSTD-compressed Apache Parquet files (`archive/parquet/`) for fast, compact long-term querying. |
+| **Parquet Cold Tier (`PARQUET_PRIMARY`)** | OSCAR's default storage mode where PostgreSQL holds a 30-minute hot staging window and completed 30-minute partitions split directly at export into ZSTD-compressed Apache Parquet V2 profiles under `archive/datasets/observations/`: write-once `RAW_TELEMETRY` (high-rate 1 Hz streams written once and never rewritten) and Bloom-indexed `RAW_EVENTS` (the 9 searchable event/summary streams, compacted into `DAILY_EVENTS` and `MONTHLY_EVENTS`). |
 | **Retained 5-Frame Media** | For every alarm occupancy, OSCAR extracts 5 evenly spaced JPEG snapshots (`frame-01.jpg` to `frame-05.jpg`). After 30 days, secondary frames (`01`, `02`, `04`, `05`) are pruned while the midpoint keyframe (`frame-03.jpg`) is preserved. |
 | **Vehicle OCR (`ocrConfig`)** | Optional per-lane background OCR (`Enable Vehicle OCR = false` by default) that asynchronously reads ISO 6346 shipping container codes (with check-digit verification) and license plates from occupancy camera clips as CPU and heap resources allow (`OcrResourceGovernor`), publishing `vehicleOcr` (`PARQUET_PRIMARY`) candidates, date-partitioned JPEG evidence crops (`/sensorhub/buckets/ocr/crops/<YYYY-MM-DD>/`, aligned with retained `frame-03.jpg` media and `ocrCropRetentionDays = 365`), and auto-filled **Vehicle ID** for checksum-valid containers or high-confidence (`>= 85%`) plates. When `Alarms Only` is cleared, non-alarm clips are scanned transiently and deleted immediately after OCR while keeping `occupancy.videoPaths` empty (`[]`). |
 | **SAN (Subject Alternative Name)** | The list of hostnames and IP addresses (such as `oscar.local` and `192.0.2.10`) embedded inside an HTTPS certificate that a browser checks before trusting the connection. |
@@ -1080,7 +1080,7 @@ Once one or more remote portals are connected via `oscar_fed_...` Federation Ser
 
 ## 12. Data retention and storage behavior
 
-The standard 3.11.15 profile uses the tiered PostgreSQL + Apache Parquet architecture in `PARQUET_PRIMARY`
+The standard 3.11.15 profile uses the tiered PostgreSQL + Apache Parquet V2 architecture in `PARQUET_PRIMARY`
 mode (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Static singleton configuration streams (`sensorLocation`,
 `adjudicationCodes`, `siteInfo`) remain in PostgreSQL `ONLY oscar.obs`, while all 26 allowlisted operational,
 evidentiary, and mobile outputs (`gammaCounts`, `gammaThreshold`, `neutronCounts`, `setupGamma`, `setupNeutron`,
@@ -1088,14 +1088,22 @@ evidentiary, and mobile outputs (`gammaCounts`, `gammaThreshold`, `neutronCounts
 `emlAnalysis`, `dailyFile`, `connectionStatus`, `occupancyStatus`, `tamper`, `occupancy`, `adjudication`,
 `report`, `siteStatistics`, `nationalSummary`, `vehicleOcr`, `location`, `alarm`,
 `KromekDetectorRadiometricsV1Report`, `KromekSerialRadiometricStatusReport`) land in 30-minute PostgreSQL staging partitions (`osg_*`).
-Five minutes after each 30-minute window closes, bounded background jobs export the completed window to
-cataloged, ZSTD-compressed Apache Parquet (`archive/datasets/observations/`), populate `oscar_obs_latest`,
-`oscar_archive_schema` summary counters, and `oscar_event_locator`, verify exact row/hash parity, and drop
-the staging partition so the live PostgreSQL working set stays compact (and on startup, OSCAR reconciles
-existing route entries and retroactively exports and compacts any legacy unarchived parent-table rows for
-those 26 outputs to Parquet). Adjudications and re-adjudications of archived `occupancy` rows are recorded
-in `oscar_obs_overlay` + `oscar_obs_latest` without rewriting Parquet, while transient operational commands
-in `cmd_commands`/`cmd_status` (> 24 hours old, preserving `%adjudicate%` audit commands) are pruned hourly.
+Five minutes after each 30-minute window closes, bounded background jobs split the completed window directly at
+export into two complementary cataloged, ZSTD-compressed Apache Parquet V2 profiles under
+`archive/datasets/observations/`: **`RAW_EVENTS`** (the 9 searchable event/summary streams `occupancy`, `alarm`,
+`adjudication`, `report`, `vehicleOcr`, `emlAnalysis`, `tamper`, `siteStatistics`, `nationalSummary` with 9
+projected scalar columns and Split-Block Bloom filters) and write-once **`RAW_TELEMETRY`** (all 17 remaining
+high-rate `1 Hz` telemetry and status streams, written once with `1.0x` write amplification and never rewritten).
+Background compaction (`ArchiveCompactionManager`) compacts only the compact event tier (`RAW_EVENTS` ->
+`DAILY_EVENTS` -> `MONTHLY_EVENTS` with `1,000,000`-row / `192 MiB` rollover caps, settled-overlay folding,
+per-part monthly defragmentation, and automatic cleanup of stale `>= 2h` unregistered `.partial` files). Each
+export populates `oscar_obs_latest`, `oscar_archive_schema` summary counters (and selective `ocr_bloom` on event
+tiers), and `oscar_event_locator`, verifies exact row/hash parity, and drops the staging partition so the live
+PostgreSQL working set stays compact (and on startup, OSCAR reconciles existing route entries and retroactively
+exports and compacts any legacy unarchived parent-table rows for those 26 outputs to Parquet). Adjudications and
+re-adjudications of archived `occupancy` rows are recorded in `oscar_obs_overlay` + `oscar_obs_latest` without
+rewriting Parquet (until folded during event compaction), while transient operational commands in
+`cmd_commands`/`cmd_status` (> 24 hours old, preserving `%adjudicate%` audit commands) are pruned hourly.
 (Sites that explicitly configure `HOT_RETENTION` retain hot PostgreSQL rows for the configured multi-day
 window plus rollback grace before retiring them after parity verification.) Archive ownership, object
 integrity, parity, and active generation or observation holds are rechecked before deletion and fail closed.
