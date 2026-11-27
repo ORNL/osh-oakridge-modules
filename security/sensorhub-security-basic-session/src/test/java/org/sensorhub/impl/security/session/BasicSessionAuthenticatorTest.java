@@ -1012,6 +1012,104 @@ public class BasicSessionAuthenticatorTest
     }
 
 
+    @Test
+    public void basicAuthShortTtlCacheAvoidsRepeatedPbkdf2AndInvalidatesOnRotationDisableOrExpiry() throws Exception
+    {
+        Path storePath = tempFolder.newFile("basic-cache-identity.json").toPath();
+        Files.deleteIfExists(storePath);
+
+        InMemoryUserRegistry registry = new InMemoryUserRegistry();
+        registry.addAdmin("siem-bot", "InitialStrongPass!99");
+
+        BasicSessionConfig cfg = new BasicSessionConfig();
+        cfg.persistSessions = true;
+        BasicSessionAuthenticator auth = createAuthenticator(cfg, storePath, registry);
+
+        java.util.concurrent.atomic.AtomicLong fakeNow = new java.util.concurrent.atomic.AtomicLong(1_000_000L);
+        auth.setBasicAuthCacheConfigForTesting(fakeNow::get, 30_000L);
+
+        String goodHeader = "Basic " + java.util.Base64.getEncoder()
+            .encodeToString("siem-bot:InitialStrongPass!99".getBytes(StandardCharsets.UTF_8));
+        String badHeader = "Basic " + java.util.Base64.getEncoder()
+            .encodeToString("siem-bot:WrongPassword!00".getBytes(StandardCharsets.UTF_8));
+
+        // 1. First cookieless Basic Auth request runs full PBKDF2 verification and creates 1 session cookie.
+        ResponseCapture firstResp = new ResponseCapture();
+        Authentication firstAuth = auth.validateRequest(
+            createRequest("GET", "/sensorhub/api/systems", Map.of(), null, Map.of("Authorization", goodHeader)),
+            firstResp.proxy(), true);
+        assertTrue(firstAuth instanceof Authentication.User);
+        assertEquals(1L, auth.getBasicAuthFullVerificationsForTesting());
+        assertEquals(0L, auth.getBasicAuthCacheHitsForTesting());
+        assertEquals(1, firstResp.setCookies.size());
+
+        // 2. Five repeated cookieless Basic Auth requests within 30s hit cache with ZERO PBKDF2 & ZERO orphan sessions.
+        for (int i = 0; i < 5; i++)
+        {
+            fakeNow.addAndGet(2_000L);
+            ResponseCapture r = new ResponseCapture();
+            Authentication a = auth.validateRequest(
+                createRequest("GET", "/sensorhub/api/systems", Map.of(), null, Map.of("Authorization", goodHeader)),
+                r.proxy(), true);
+            assertTrue(a instanceof Authentication.User);
+            assertEquals("Cached cookieless Basic Auth must not mint orphan session cookies", 0, r.setCookies.size());
+        }
+        assertEquals(1L, auth.getBasicAuthFullVerificationsForTesting());
+        assertEquals(5L, auth.getBasicAuthCacheHitsForTesting());
+
+        // 3. Wrong password must never be accepted and must evict cached digest.
+        ResponseCapture wrongResp = new ResponseCapture();
+        Authentication wrongAuth = auth.validateRequest(
+            createRequest("GET", "/sensorhub/api/systems", Map.of(), null, Map.of("Authorization", badHeader)),
+            wrongResp.proxy(), true);
+        assertEquals(Authentication.SEND_FAILURE, wrongAuth);
+        assertEquals(401, wrongResp.status);
+        assertEquals(0, auth.getBasicAuthCacheSizeForTesting());
+
+        // 4. Re-authenticate, then rotate stored password hash -> old password is rejected immediately.
+        ResponseCapture refillResp = new ResponseCapture();
+        assertTrue(auth.validateRequest(
+            createRequest("GET", "/sensorhub/api/systems", Map.of(), null, Map.of("Authorization", goodHeader)),
+            refillResp.proxy(), true) instanceof Authentication.User);
+        assertEquals(1, auth.getBasicAuthCacheSizeForTesting());
+
+        UserConfig rotated = (UserConfig) registry.get("siem-bot");
+        rotated.password = PasswordHasher.hashPassword("RotatedStrongPass!42");
+        ResponseCapture staleResp = new ResponseCapture();
+        Authentication staleAuth = auth.validateRequest(
+            createRequest("GET", "/sensorhub/api/systems", Map.of(), null, Map.of("Authorization", goodHeader)),
+            staleResp.proxy(), true);
+        assertEquals(Authentication.SEND_FAILURE, staleAuth);
+        assertEquals(401, staleResp.status);
+
+        // 5. New rotated password succeeds, caches, and forces re-verification once TTL expires.
+        String rotatedHeader = "Basic " + java.util.Base64.getEncoder()
+            .encodeToString("siem-bot:RotatedStrongPass!42".getBytes(StandardCharsets.UTF_8));
+        long beforeFull = auth.getBasicAuthFullVerificationsForTesting();
+        assertTrue(auth.validateRequest(
+            createRequest("GET", "/sensorhub/api/systems", Map.of(), null, Map.of("Authorization", rotatedHeader)),
+            new ResponseCapture().proxy(), true) instanceof Authentication.User);
+        assertEquals(beforeFull + 1L, auth.getBasicAuthFullVerificationsForTesting());
+
+        fakeNow.addAndGet(31_000L);
+        assertTrue(auth.validateRequest(
+            createRequest("GET", "/sensorhub/api/systems", Map.of(), null, Map.of("Authorization", rotatedHeader)),
+            new ResponseCapture().proxy(), true) instanceof Authentication.User);
+        assertEquals("TTL expiry must force full re-verification", beforeFull + 2L,
+            auth.getBasicAuthFullVerificationsForTesting());
+
+        // 6. Per-user session cap bounds persisted sessions even under repeated fresh sign-ins.
+        OscarIdentityStore store = new OscarIdentityStore(
+            null, null, storePath, false, LoggerFactory.getLogger(BasicSessionAuthenticatorTest.class));
+        for (int i = 0; i < OscarIdentityStore.MAX_SESSIONS_PER_USER + 20; i++)
+        {
+            store.createSession(null, "siem-bot", true);
+        }
+        assertEquals(OscarIdentityStore.MAX_SESSIONS_PER_USER,
+            store.countActiveSessionsForUser("siem-bot", 0L, 0L));
+    }
+
+
     private static BasicSessionAuthenticator createAuthenticator(Path storePath, InMemoryUserRegistry registry)
     {
         return createAuthenticator(new BasicSessionConfig(), storePath, registry);

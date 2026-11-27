@@ -555,6 +555,8 @@ public final class OscarIdentityStore {
     // Sessions (SHA-256 hashed on disk)
     // -------------------------------------------------------------------------
 
+    public static final int MAX_SESSIONS_PER_USER = 64;
+
     public String createSession(String previousRawToken, String username, boolean keepSignedIn) {
         if (previousRawToken != null && !previousRawToken.isEmpty()) {
             sessionsByHash.remove(PasswordHasher.sha256Hex(previousRawToken));
@@ -563,9 +565,34 @@ public final class OscarIdentityStore {
         String tokenHash = PasswordHasher.sha256Hex(rawToken);
         long now = System.currentTimeMillis();
         sessionsByHash.put(tokenHash, new PersistedSession(tokenHash, username, now, keepSignedIn));
+        evictExcessSessionsForUser(username, tokenHash);
         if (persistSessions)
             saveToDisk();
         return rawToken;
+    }
+
+    private void evictExcessSessionsForUser(String username, String keepTokenHash) {
+        if (username == null)
+            return;
+        List<PersistedSession> userSessions = new ArrayList<>();
+        for (PersistedSession s : sessionsByHash.values()) {
+            if (username.equals(s.username)) {
+                userSessions.add(s);
+            }
+        }
+        if (userSessions.size() <= MAX_SESSIONS_PER_USER)
+            return;
+        userSessions.sort(Comparator.comparingLong(s -> s.lastAccessAt));
+        int toRemove = userSessions.size() - MAX_SESSIONS_PER_USER;
+        for (PersistedSession candidate : userSessions) {
+            if (toRemove <= 0)
+                break;
+            if (candidate.tokenHash.equals(keepTokenHash))
+                continue;
+            if (sessionsByHash.remove(candidate.tokenHash) != null) {
+                toRemove--;
+            }
+        }
     }
 
     public PersistedSession validateAndTouchSession(String rawToken,

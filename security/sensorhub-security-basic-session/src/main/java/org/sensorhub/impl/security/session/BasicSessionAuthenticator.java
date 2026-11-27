@@ -109,8 +109,25 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
     private static final int MAX_AUTH_HEADER_LENGTH = 16 * 1024;
     private static final int MAX_JSON_BODY_BYTES = 64 * 1024;
     private static final long PRUNE_INTERVAL_MILLIS = 60_000L;
+    static final int MAX_BASIC_AUTH_CACHE_ENTRIES = 256;
+    static final long DEFAULT_BASIC_AUTH_CACHE_TTL_MS = 30_000L;
+    private static final byte[] BASIC_AUTH_CACHE_PEPPER = generateBasicAuthCachePepper();
     private static final String LOGIN_CSP =
             "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+
+    private record CachedBasicAuth(byte[] digest, String storedHash, long expiresAtMillis) {}
+
+    private enum LocalVerifyOutcome {
+        FAILED,
+        VERIFIED_FRESH,
+        VERIFIED_CACHED
+    }
+
+    private static byte[] generateBasicAuthCachePepper() {
+        byte[] pepper = new byte[32];
+        new java.security.SecureRandom().nextBytes(pepper);
+        return pepper;
+    }
 
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final byte[] LOGIN_JS_BYTES = loadLoginJsResource();
@@ -126,6 +143,15 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
     private final boolean secureCookie;
     private final String sameSite;
     private final String defaultRedirectPath;
+    private final java.util.concurrent.ConcurrentHashMap<String, CachedBasicAuth> verifiedBasicAuthCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong basicAuthCacheHits =
+            new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong basicAuthFullVerifications =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    private volatile java.util.function.LongSupplier basicAuthClock = System::currentTimeMillis;
+    private volatile long basicAuthCacheTtlMs = DEFAULT_BASIC_AUTH_CACHE_TTL_MS;
 
     private volatile long idleTimeoutMillis;
     private volatile long absoluteTimeoutMillis;
@@ -522,11 +548,13 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
         String remoteIp = clientIp(request);
 
         if (identityStore.isRateLimited(remoteIp, username)) {
+            verifiedBasicAuthCache.remove(username);
             response.sendError(429, "Too many failed sign-in attempts. Please wait a minute and try again.");
             return Authentication.SEND_FAILURE;
         }
 
-        if (!verifyLocalCredentials(username, password, request)) {
+        LocalVerifyOutcome outcome = verifyBasicCredentialsWithCache(username, password, request);
+        if (outcome == LocalVerifyOutcome.FAILED) {
             identityStore.recordAuthFailure(remoteIp, username);
             log.warn("Failed Basic authentication for user '{}'", username);
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
@@ -535,9 +563,120 @@ public class BasicSessionAuthenticator extends LoginAuthenticator {
 
         identityStore.recordAuthSuccess(remoteIp, username);
         UserIdentity identity = withoutCredentials(username);
-        createSession(request, response, username, allowKeepSignedIn);
-        log.debug("Created authentication session for user '{}'", username);
+        if (outcome == LocalVerifyOutcome.VERIFIED_FRESH) {
+            createSession(request, response, username, allowKeepSignedIn);
+            log.debug("Created authentication session for user '{}'", username);
+        }
         return new UserAuthentication(AUTH_METHOD, identity);
+    }
+
+    /**
+     * Verifies HTTP Basic credentials with a bounded (max 256 entries), short-TTL
+     * (30s) in-memory cache storing only a per-JVM-peppered SHA-256 digest bound
+     * to the user's current stored password hash. Never stores plaintext passwords,
+     * never caches failures, and auto-invalidates immediately on password rotation,
+     * account disable, or rate-limit lockout.
+     */
+    private LocalVerifyOutcome verifyBasicCredentialsWithCache(String username, String password, HttpServletRequest request) {
+        if (username == null || password == null)
+            return LocalVerifyOutcome.FAILED;
+        UserProfileRecord profile = identityStore.getProfile(username);
+        if (profile != null && !profile.enabled) {
+            verifiedBasicAuthCache.remove(username);
+            return LocalVerifyOutcome.FAILED;
+        }
+
+        IUserInfo user = securityManager != null ? securityManager.getUserInfo(username) : null;
+        String storedHash = user != null ? user.getPassword() : null;
+        long now = basicAuthClock.getAsLong();
+
+        if (storedHash != null && basicAuthCacheTtlMs > 0L) {
+            CachedBasicAuth cached = verifiedBasicAuthCache.get(username);
+            if (cached != null) {
+                byte[] expectedDigest = computeBasicAuthCacheDigest(username, storedHash, password);
+                if (now < cached.expiresAtMillis()
+                        && MessageDigest.isEqual(
+                                cached.storedHash().getBytes(StandardCharsets.UTF_8),
+                                storedHash.getBytes(StandardCharsets.UTF_8))
+                        && MessageDigest.isEqual(cached.digest(), expectedDigest)) {
+                    basicAuthCacheHits.incrementAndGet();
+                    return LocalVerifyOutcome.VERIFIED_CACHED;
+                }
+                verifiedBasicAuthCache.remove(username, cached);
+            }
+        }
+
+        basicAuthFullVerifications.incrementAndGet();
+        boolean verified = verifyLocalCredentials(username, password, request);
+        if (!verified) {
+            verifiedBasicAuthCache.remove(username);
+            return LocalVerifyOutcome.FAILED;
+        }
+
+        if (storedHash != null && basicAuthCacheTtlMs > 0L) {
+            putBasicAuthCacheEntry(
+                    username,
+                    new CachedBasicAuth(
+                            computeBasicAuthCacheDigest(username, storedHash, password),
+                            storedHash,
+                            now + basicAuthCacheTtlMs),
+                    now);
+        }
+        return LocalVerifyOutcome.VERIFIED_FRESH;
+    }
+
+    private void putBasicAuthCacheEntry(String username, CachedBasicAuth entry, long now) {
+        if (verifiedBasicAuthCache.size() >= MAX_BASIC_AUTH_CACHE_ENTRIES && !verifiedBasicAuthCache.containsKey(username)) {
+            verifiedBasicAuthCache.entrySet().removeIf(e -> now >= e.getValue().expiresAtMillis());
+            if (verifiedBasicAuthCache.size() >= MAX_BASIC_AUTH_CACHE_ENTRIES) {
+                String oldestKey = null;
+                long oldestExpiry = Long.MAX_VALUE;
+                for (Map.Entry<String, CachedBasicAuth> existing : verifiedBasicAuthCache.entrySet()) {
+                    if (existing.getValue().expiresAtMillis() < oldestExpiry) {
+                        oldestExpiry = existing.getValue().expiresAtMillis();
+                        oldestKey = existing.getKey();
+                    }
+                }
+                if (oldestKey != null) {
+                    verifiedBasicAuthCache.remove(oldestKey);
+                }
+            }
+        }
+        verifiedBasicAuthCache.put(username, entry);
+    }
+
+    private static byte[] computeBasicAuthCacheDigest(String username, String storedHash, String password) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(BASIC_AUTH_CACHE_PEPPER);
+            md.update((byte) 0);
+            md.update(username.getBytes(StandardCharsets.UTF_8));
+            md.update((byte) 0);
+            md.update(storedHash.getBytes(StandardCharsets.UTF_8));
+            md.update((byte) 0);
+            md.update(password.getBytes(StandardCharsets.UTF_8));
+            return md.digest();
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 unavailable for Basic Auth cache digest", e);
+        }
+    }
+
+    void setBasicAuthCacheConfigForTesting(java.util.function.LongSupplier clock, long ttlMs) {
+        this.basicAuthClock = clock != null ? clock : System::currentTimeMillis;
+        this.basicAuthCacheTtlMs = Math.max(0L, ttlMs);
+        this.verifiedBasicAuthCache.clear();
+    }
+
+    long getBasicAuthCacheHitsForTesting() {
+        return basicAuthCacheHits.get();
+    }
+
+    long getBasicAuthFullVerificationsForTesting() {
+        return basicAuthFullVerifications.get();
+    }
+
+    int getBasicAuthCacheSizeForTesting() {
+        return verifiedBasicAuthCache.size();
     }
 
     private boolean verifyLocalCredentials(String username, String password, HttpServletRequest request) {
