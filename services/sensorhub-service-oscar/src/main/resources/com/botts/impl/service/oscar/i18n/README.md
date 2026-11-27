@@ -1,4 +1,4 @@
-# OSCAR 3.12.0 administrator and operator manual
+# OSCAR 3.12.1 administrator and operator manual
 
 This manual covers the complete first-use and operations workflow including certificate trust, sign-in, site-diagram georeferencing, lane import/manual creation, alarm adjudication and evidence, event review, national statistics, reports, and node federation.
 
@@ -32,7 +32,7 @@ The screenshots show the English interface. OSCAR also supplies Spanish, French,
 
 You need:
 
-- an installed and running OSCAR 3.12.0 deployment;
+- an installed and running OSCAR 3.12.1 deployment;
 - the OSCAR URL, normally `https://oscar.local/` unless deployment selected another hostname;
 - an administrator account for `/sensorhub/admin`;
 - the approved site image and the latitude/longitude of its lower-left and upper-right corners;
@@ -262,10 +262,10 @@ historical reconciliation to recreate deleted media. Back up and restore the com
 `videos/retained-media/v1` prefix as one unit; its indexes, checkpoints, queues, manifests, and
 ledgers are application state.
 
-The compact layout first ships in 3.12.0 and does not scan/migrate pre-release prototype
-`.deleted.json` or per-observation marker trees. Test/pre-release systems need a fresh 3.12.0 database
+The compact layout first ships in 3.12.1 and does not scan/migrate pre-release prototype
+`.deleted.json` or per-observation marker trees. Test/pre-release systems need a fresh 3.12.1 database
 and retained-media prefix. To downgrade, restore both from the same coordinated pre-3.11.0 backup;
-never run an older binary against 3.12.0 storage.
+never run an older binary against 3.12.1 storage.
 
 ### Custom disposition codes
 
@@ -1080,7 +1080,7 @@ Once one or more remote portals are connected via `oscar_fed_...` Federation Ser
 
 ## 12. Data retention and storage behavior
 
-The standard 3.12.0 profile uses the tiered PostgreSQL + Apache Parquet V2 architecture in `PARQUET_PRIMARY`
+The standard 3.12.1 profile uses the tiered PostgreSQL + Apache Parquet V2 architecture in `PARQUET_PRIMARY`
 mode (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Static singleton configuration streams (`sensorLocation`,
 `adjudicationCodes`, `siteInfo`) remain in PostgreSQL `ONLY oscar.obs`, while all 26 allowlisted operational,
 evidentiary, and mobile outputs (`gammaCounts`, `gammaThreshold`, `neutronCounts`, `setupGamma`, `setupNeutron`,
@@ -1151,7 +1151,7 @@ dry-run/purge workflows, plus `backup` and `backup-verify` only in `single` mode
 encryption key separately and retain an off-host copy if site policy requires another failure
 domain. Never delete cataloged archive/media files directly. A pre-3.11.0 `upgrade` preserves its old
 database and configuration and does not create the full storage profile or enable PostgreSQL
-checksums; initialize a fresh 3.12.0 deployment or use a separately validated production migration.
+checksums; initialize a fresh 3.12.1 deployment or use a separately validated production migration.
 The packaged `documentation/` storage guides are the authoritative runbooks.
 
 Use the release launcher for deployment-wide `stop` and `restart`. It stops the gateway first,
@@ -1274,7 +1274,7 @@ For commercial portals operating alongside X-ray NII scanners (`UFF 2.0` or `UFF
 - [ ] Node ID is unique and stable.
 - [ ] Database ID, Web ID root, statistics interval, and Auto Start match site policy.
 - [ ] Video and pressure-retention settings were reviewed before enabling cleanup.
-- [ ] A fresh 3.12.0 database/configuration or an approved migration was used; archive status and integrity verification pass.
+- [ ] A fresh 3.12.1 database/configuration or an approved migration was used; archive status and integrity verification pass.
 - [ ] Backup mode is recorded. Disabled mode creates no OSCAR-managed backup; if `single` is enabled, its current snapshot verifies, its external key is escrowed separately, and an isolated restore drill has passed.
 - [ ] A sample lane publishes a journal-backed daily CSV/manifest; retained events show five JPEGs while legacy events still play.
 - [ ] Bucket Storage Service and OSCAR Service Module are started.
@@ -1350,7 +1350,7 @@ Administrators can update OSCAR directly from **OSCAR Viewer -> Users & Access (
   </video>
 </details>
 
-For new bare-metal Ubuntu Server 24.04 LTS appliances, download the compact standalone **`oscar-3.12.0-autoinstall-usb-creator.zip`** (`~53 KiB`) alongside `ubuntu-24.04.x-live-server-amd64.iso` and `oscar-3.12.0-ubuntu-x86_64-offline-full.zip` without unpacking the offline bundle first. Launch the **Desktop GUI** (`create-autoinstall-usb.bat` on Windows 11 or `sudo bash create-autoinstall-usb.sh --gui` on Ubuntu), **Interactive Terminal TUI** (`-Tui` / `--tui`), or **Scriptable CLI** to build a UEFI Secure-Boot installer USB with native `$6$` SHA-512 Linux password hashing, optional 12+ character LUKS2 full-disk encryption, `--require-sudo-password`, `--ssh-keys-only`, and **Turnkey Site Pre-Configuration**—pre-staging a PBKDF2-hashed initial OSCAR web `admin` password (`14+` characters, zero plaintext on USB), `lanes.csv` / `config.json`, and unattended first-boot OSCAR initialization (`-AutoInitOscar` / `--auto-init-oscar`) so on arrival at the site you only open `https://<hostname>/`, register site operators, and upload `.pmtiles` or the site background diagram while keeping internal OS and `OSCAR_BACKUP` disks strictly protected.
+For new bare-metal Ubuntu Server 24.04 LTS appliances, download the compact standalone **`oscar-3.12.1-autoinstall-usb-creator.zip`** (`~73 KiB`) alongside `ubuntu-24.04.x-live-server-amd64.iso` and `oscar-3.12.1-ubuntu-x86_64-offline-full.zip` without unpacking the offline bundle first. Launch the **Desktop GUI** (`create-autoinstall-usb.bat` on Windows 11 or `sudo bash create-autoinstall-usb.sh --gui` on Ubuntu), **Interactive Terminal TUI** (`-Tui` / `--tui`), or **Scriptable CLI** to build a UEFI Secure-Boot installer USB with native `$6$` SHA-512 Linux password hashing, optional 12+ character LUKS2 full-disk encryption, `--require-sudo-password`, `--ssh-keys-only`, and **Turnkey Site Pre-Configuration**—pre-staging a PBKDF2-hashed initial OSCAR web `admin` password (`14+` characters, zero plaintext on USB), `lanes.csv` / `config.json`, and unattended first-boot OSCAR initialization (`-AutoInitOscar` / `--auto-init-oscar`) so on arrival at the site you only open `https://<hostname>/`, register site operators, and upload `.pmtiles` or the site background diagram while keeping internal OS and `OSCAR_BACKUP` disks strictly protected. After building the stick, both the Windows 11 and Ubuntu creators automatically save a printable 1-page **Technician Handover One-Sheet PDF** strictly to the local staging workstation (`0600` on Linux, restricted current-user NTFS ACL on Windows—never written to the USB drive) containing usernames, passwords, LUKS2/backup passphrases, parsed `site-network.env` IP settings, verified SHA-256 checksums, staged seed files, and post-autoinstall checklist steps.
 
 ![Bare-Metal Ubuntu 24.04 Offline Autoinstall USB Creator](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/55-bare-metal-autoinstall-usb-creator.png)
 
@@ -1377,7 +1377,7 @@ For new bare-metal Ubuntu Server 24.04 LTS appliances, download the compact stan
 | OSM tiles show 403/blocked | Do not point production traffic directly at volunteer OSM tiles in violation of tile policy. Use the deployment's approved OSM provider/proxy or select Esri while the tile-service configuration is corrected. |
 | CSV rejected | Compare the exact header/order, camera groups of six with sequential indexes, cell count on every row, numeric fields, and plain unquoted empty cells. Remove commas from values. |
 | CSV says success but a lane is missing | Check for an existing loaded lane with the same UniqueID, a name longer than 12 characters, device-child initialization errors, and whether asynchronous loading has finished. |
-| **Sensors** is empty after restart following CSV upload | The upload created in-memory modules, but the complete configuration was not persisted. Upload again if necessary, wait for every lane and child to appear, select the global **Save**, restart OSCAR, and verify **Sensors** again. If a 3.12.0 node still loses the lanes, check OSCAR logs and verify that `/var/lib/oscar/config.json` is owner-writable. |
+| **Sensors** is empty after restart following CSV upload | The upload created in-memory modules, but the complete configuration was not persisted. Upload again if necessary, wait for every lane and child to appear, select the global **Save**, restart OSCAR, and verify **Sensors** again. If a 3.12.1 node still loses the lanes, check OSCAR logs and verify that `/var/lib/oscar/config.json` is owner-writable. |
 | Scoped operational view is empty or rejects its key | Confirm the lane's **Operational View Keys** contains the exact lowercase key, apply and globally save the configuration, restart the lane if required, and use `?view=<key>` or `/view/<key>`. A blank assignment never matches a scoped view. |
 | RPM does not start | Verify host reachability, exact TCP port, firewall, Aspect range, and device availability. Review the child driver status/error, not only the parent lane. |
 | Camera does not start | Verify RTSP reachability and credentials, omit `rtsp://` from host, include a needed port once, confirm Axis codec or Custom path, and test the generated endpoint from the OSCAR host. |
@@ -1434,4 +1434,4 @@ When collecting support data, export a redacted troubleshooting support bundle (
 
 ---
 
-Document baseline: OSCAR 3.12.0 source behavior, reviewed 2026-10-18. If a later release changes fields or workflows, update the English canonical manual and all three translations together.
+Document baseline: OSCAR 3.12.1 source behavior, reviewed 2026-10-18. If a later release changes fields or workflows, update the English canonical manual and all three translations together.

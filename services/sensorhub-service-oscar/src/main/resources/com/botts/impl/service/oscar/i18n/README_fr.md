@@ -1,4 +1,4 @@
-# Manuel d'administration et d'exploitation d'OSCAR 3.12.0
+# Manuel d'administration et d'exploitation d'OSCAR 3.12.1
 
 Ce manuel couvre la première utilisation et l'exploitation complète : certificat, connexion, plan géoréférencé, import/création des voies, adjudication et preuves, événements, statistiques nationales, rapports et fédération de nœuds.
 
@@ -32,7 +32,7 @@ L'interface d'administration sélectionne automatiquement le manuel correspondan
 
 Vous avez besoin :
 
-- d'un déploiement OSCAR 3.12.0 installé et démarré ;
+- d'un déploiement OSCAR 3.12.1 installé et démarré ;
 - de l'URL OSCAR, généralement `https://oscar.local/` sauf si un autre hôte a été choisi ;
 - d'un compte administrateur pour `/sensorhub/admin` ;
 - de l'image de site approuvée et des coordonnées des coins inférieur gauche et supérieur droit ;
@@ -262,10 +262,10 @@ mémorise les suppressions sous pression sans un
 tombstone JSON permanent par caméra. Sauvegardez et restaurez comme une unité tout
 `videos/retained-media/v1`, notamment index, points de contrôle, files, manifestes et journaux.
 
-Ce format compact apparaît pour la première fois dans 3.12.0 et ne migre pas les prototypes
+Ce format compact apparaît pour la première fois dans 3.12.1 et ne migre pas les prototypes
 `.deleted.json` ni les arbres de marqueurs par observation. Les systèmes de test doivent démarrer
-avec une base et un préfixe de médias 3.12.0 neufs. Pour revenir en arrière, restaurez les deux depuis
-la même sauvegarde coordonnée antérieure à 3.12.0 ; n'exécutez jamais un ancien binaire sur ce stockage.
+avec une base et un préfixe de médias 3.12.1 neufs. Pour revenir en arrière, restaurez les deux depuis
+la même sauvegarde coordonnée antérieure à 3.12.1 ; n'exécutez jamais un ancien binaire sur ce stockage.
 
 ### Codes de disposition personnalisés
 
@@ -1045,7 +1045,7 @@ Une fois les portails distants connectés via des jetons `oscar_fed_...`, **Év�
 
 ## 12. Conservation des données et stockage
 
-Le profil standard 3.12.0 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet V2 en mode
+Le profil standard 3.12.1 utilise l'architecture à plusieurs niveaux PostgreSQL + Apache Parquet V2 en mode
 `PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Les flux de configuration statiques
 (`sensorLocation`, `adjudicationCodes`, `siteInfo`) restent dans PostgreSQL `ONLY oscar.obs`, tandis que
 les 26 sorties opérationnelles, probantes et mobiles autorisées (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
@@ -1121,8 +1121,8 @@ Utilisez les commandes `archive status`, `archive verify`, de conservation, d'ex
 suppression avec simulation/jeton du lanceur, ainsi que `backup` et `backup-verify` uniquement en mode
 `single`. Protégez séparément la clé de chiffrement et conservez une copie hors hôte si la politique
 du site exige un autre domaine de défaillance. Ne supprimez jamais à la main les fichiers catalogués.
-Une mise à niveau antérieure à 3.12.0 conserve l'ancienne base et configuration : elle ne crée pas tout
-le profil et n'active pas les sommes de contrôle PostgreSQL. Initialisez un nouveau déploiement 3.12.0
+Une mise à niveau antérieure à 3.12.1 conserve l'ancienne base et configuration : elle ne crée pas tout
+le profil et n'active pas les sommes de contrôle PostgreSQL. Initialisez un nouveau déploiement 3.12.1
 ou appliquez une migration de production validée séparément. Les guides de stockage de
 `documentation/` sont les procédures de référence.
 
@@ -1246,7 +1246,7 @@ Sur les sites équipés de scanners rayons X NII (`UFF 2.0` ou `UFF 3.0.0`), un 
 
 - [ ] ID de nœud unique ; base, Web ID, statistiques et démarrage automatique vérifiés.
 - [ ] Conservation vidéo et pression examinées avant toute purge.
-- [ ] Une base/configuration 3.12.0 neuve ou une migration approuvée est utilisée ; l'état et l'intégrité de l'archive sont valides.
+- [ ] Une base/configuration 3.12.1 neuve ou une migration approuvée est utilisée ; l'état et l'intégrité de l'archive sont valides.
 - [ ] Le mode de sauvegarde est consigné. Le mode désactivé ne crée aucune sauvegarde gérée par OSCAR ; si `single` est activé, son instantané courant est vérifié, sa clé externe est séquestrée séparément et un exercice de restauration isolé a réussi.
 - [ ] Une voie témoin publie CSV/manifeste depuis le journal ; les événements retenus montrent cinq JPEG et les anciens restent lisibles.
 - [ ] Services de compartiments et OSCAR démarrés.
@@ -1322,7 +1322,7 @@ Les administrateurs peuvent mettre à niveau OSCAR directement depuis **OSCAR Vi
   </video>
 </details>
 
-Pour les nouveaux serveurs physiques Ubuntu Server 24.04 LTS, téléchargez l’archive autonome **`oscar-3.12.0-autoinstall-usb-creator.zip`** (`~53 KiB`) avec `ubuntu-24.04.x-live-server-amd64.iso` et `oscar-3.12.0-ubuntu-x86_64-offline-full.zip` sans décompresser au préalable l’archive hors ligne. Lancez l’**interface graphique (GUI)** (`create-autoinstall-usb.bat` sous Windows 11 ou `sudo bash create-autoinstall-usb.sh --gui` sous Ubuntu), le **TUI interactif** (`-Tui` / `--tui`) ou la **CLI** pour préparer une clé USB UEFI Secure-Boot avec hachage SHA-512 (`$6$`), chiffrement LUKS2 facultatif, `--require-sudo-password`, `--ssh-keys-only` et **préconfiguration clé en main du site** (mot de passe web initial `admin` haché en PBKDF2 sans texte clair sur la clé, `lanes.csv` / `config.json` et initialisation automatique au premier démarrage via `-AutoInitOscar` / `--auto-init-oscar` afin qu’il ne reste sur site qu’à inscrire les opérateurs et téléverser `.pmtiles` ou le schéma du site), tout en protégeant les disques internes et `OSCAR_BACKUP`.
+Pour les nouveaux serveurs physiques Ubuntu Server 24.04 LTS, téléchargez l’archive autonome **`oscar-3.12.1-autoinstall-usb-creator.zip`** (`~73 KiB`) avec `ubuntu-24.04.x-live-server-amd64.iso` et `oscar-3.12.1-ubuntu-x86_64-offline-full.zip` sans décompresser au préalable l’archive hors ligne. Lancez l’**interface graphique (GUI)** (`create-autoinstall-usb.bat` sous Windows 11 ou `sudo bash create-autoinstall-usb.sh --gui` sous Ubuntu), le **TUI interactif** (`-Tui` / `--tui`) ou la **CLI** pour préparer une clé USB UEFI Secure-Boot avec hachage SHA-512 (`$6$`), chiffrement LUKS2 facultatif, `--require-sudo-password`, `--ssh-keys-only` et **préconfiguration clé en main du site** (mot de passe web initial `admin` haché en PBKDF2 sans texte clair sur la clé, `lanes.csv` / `config.json` et initialisation automatique au premier démarrage via `-AutoInitOscar` / `--auto-init-oscar` afin qu’il ne reste sur site qu’à inscrire les opérateurs et téléverser `.pmtiles` ou le schéma du site), tout en protégeant les disques internes et `OSCAR_BACKUP`. Une fois la clé créée, les utilitaires Windows 11 et Ubuntu enregistrent automatiquement une **fiche technique PDF imprimable d’une page** uniquement sur le poste local (`0600` sous Linux, ACL NTFS restreinte sous Windows — jamais écrite sur la clé USB) regroupant identifiants, mots de passe, phrases secrètes LUKS2/sauvegarde, résumé réseau (`site-network.env`), empreinte SHA-256 vérifiée, fichiers `seed/` et liste de contrôle post-installation.
 
 ![Créateur de clé USB d’installation automatique Ubuntu 24.04 hors ligne](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/55-bare-metal-autoinstall-usb-creator.png)
 
@@ -1349,7 +1349,7 @@ Pour les nouveaux serveurs physiques Ubuntu Server 24.04 LTS, téléchargez l’
 | Tuiles OSM 403/bloquées | N'utilisez pas directement des serveurs bénévoles contrairement à leur politique. Configurez un fournisseur/proxy OSM approuvé ou utilisez Esri pendant la correction. |
 | CSV refusé | Vérifiez en-tête/ordre, groupes de six, index continus, nombre de cellules, nombres, cellules vides non citées et absence de virgules internes. |
 | Voie manquante après CSV | Cherchez un UniqueID déjà chargé, un nom trop long, des erreurs d'enfants et attendez le chargement asynchrone. |
-| **Capteurs** est vide après un redémarrage suivant le téléversement du CSV | Le téléversement a créé des modules en mémoire, mais la configuration complète n'a pas été persistée. Téléversez de nouveau si nécessaire, attendez toutes les voies et tous les enfants, utilisez l'action globale **Enregistrer**, redémarrez OSCAR et vérifiez encore **Capteurs**. Si un nœud 3.12.0 perd toujours les voies, consultez les journaux OSCAR et vérifiez que le propriétaire peut écrire dans `/var/lib/oscar/config.json`. |
+| **Capteurs** est vide après un redémarrage suivant le téléversement du CSV | Le téléversement a créé des modules en mémoire, mais la configuration complète n'a pas été persistée. Téléversez de nouveau si nécessaire, attendez toutes les voies et tous les enfants, utilisez l'action globale **Enregistrer**, redémarrez OSCAR et vérifiez encore **Capteurs**. Si un nœud 3.12.1 perd toujours les voies, consultez les journaux OSCAR et vérifiez que le propriétaire peut écrire dans `/var/lib/oscar/config.json`. |
 | Vue opérationnelle vide ou clé rejetée | Vérifiez que les **Clés de vue opérationnelle** de la voie contiennent exactement la clé en minuscules, appliquez et enregistrez globalement, redémarrez la voie si nécessaire, puis utilisez `?view=<clé>` ou `/view/<clé>`. Une affectation vide ne correspond jamais à une vue limitée. |
 | RPM ne démarre pas | Testez hôte, port, pare-feu, plage Aspect et disponibilité ; consultez l'erreur du pilote enfant. |
 | Caméra ne démarre pas | Testez RTSP/identifiants, retirez `rtsp://` de l'hôte, évitez un port en double, vérifiez codec Axis ou chemin Custom depuis l'hôte OSCAR. |
@@ -1406,4 +1406,4 @@ Pour l'assistance technique, exportez une archive de diagnostic expurgée (`.zip
 
 ---
 
-Référence du document : comportement du code OSCAR 3.12.0, revu le 2026-10-18. Si une version ultérieure change les champs ou procédures, mettez à jour ensemble le manuel canonique anglais et les trois traductions.
+Référence du document : comportement du code OSCAR 3.12.1, revu le 2026-10-18. Si une version ultérieure change les champs ou procédures, mettez à jour ensemble le manuel canonique anglais et les trois traductions.
