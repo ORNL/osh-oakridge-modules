@@ -576,6 +576,8 @@ public final class SupportBundleHandler implements IObjectHandler {
             }
         }
         storage.put("applicationReadiness", readiness);
+        storage.put("gatewayTls", new GatewayTlsCertInspector(
+                GatewayTlsCertInspector.resolveConfiguredCertPath(), clock).inspect().toMap());
         return storage;
     }
 

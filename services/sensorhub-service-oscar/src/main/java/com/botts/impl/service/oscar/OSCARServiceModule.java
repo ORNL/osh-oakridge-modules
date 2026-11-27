@@ -21,6 +21,7 @@ import com.botts.impl.service.oscar.alarms.DashboardAlarmReadStateHandler;
 import com.botts.impl.service.oscar.vehicle.VehicleSearchHandler;
 import com.botts.impl.service.oscar.dailyfile.DailyFileSliceHandler;
 import com.botts.impl.service.oscar.diagnostics.SupportBundleHandler;
+import com.botts.impl.service.oscar.diagnostics.SystemDiagnosticsServlet;
 import com.botts.impl.service.oscar.eml.EmlPluginHandler;
 import com.botts.impl.service.oscar.extensions.RuntimeExtensionsManager;
 import com.botts.impl.service.oscar.extensions.RuntimeExtensionsServlet;
@@ -97,6 +98,7 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
     TrainingSandboxServlet trainingSandboxServlet;
     SystemUpdateServlet systemUpdateServlet;
     LaneWebRelayServlet laneWebRelayServlet;
+    SystemDiagnosticsServlet systemDiagnosticsServlet;
     HttpServer extensionsHttpServer;
     VideoRetention videoRetention;
     DatabasePurger databasePurger;
@@ -971,6 +973,9 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
                 systemUpdateServlet = new SystemUpdateServlet(getParentHub(), getLogger());
                 server.deployServlet(systemUpdateServlet, SystemUpdateServlet.ENDPOINT_WILDCARD);
                 server.addServletSecurity(SystemUpdateServlet.ENDPOINT_WILDCARD, true);
+                systemDiagnosticsServlet = new SystemDiagnosticsServlet(getLogger());
+                server.deployServlet(systemDiagnosticsServlet, SystemDiagnosticsServlet.ENDPOINT_WILDCARD);
+                server.addServletSecurity(SystemDiagnosticsServlet.ENDPOINT_WILDCARD, true);
                 extensionsHttpServer = server;
             }
         } catch (Exception e) {
@@ -984,11 +989,13 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
         TrainingSandboxServlet sbServlet = trainingSandboxServlet;
         LaneWebRelayServlet wrServlet = laneWebRelayServlet;
         SystemUpdateServlet updServlet = systemUpdateServlet;
+        SystemDiagnosticsServlet diagServlet = systemDiagnosticsServlet;
         extensionsHttpServer = null;
         runtimeExtensionsServlet = null;
         trainingSandboxServlet = null;
         laneWebRelayServlet = null;
         systemUpdateServlet = null;
+        systemDiagnosticsServlet = null;
         if (server != null && server.isStarted()) {
             if (servlet != null) {
                 server.undeployServlet(servlet);
@@ -1005,6 +1012,10 @@ public class OSCARServiceModule extends AbstractModule<OSCARServiceConfig> imple
             if (updServlet != null) {
                 server.undeployServlet(updServlet);
                 updServlet.destroy();
+            }
+            if (diagServlet != null) {
+                server.undeployServlet(diagServlet);
+                diagServlet.destroy();
             }
         }
     }
