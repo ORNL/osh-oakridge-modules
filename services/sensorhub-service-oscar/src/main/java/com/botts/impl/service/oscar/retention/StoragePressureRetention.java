@@ -22,6 +22,23 @@ public class StoragePressureRetention {
     private static final long DEFAULT_STOP_TIMEOUT_MILLIS = 5_000L;
     private static final Duration OCR_AGE_SWEEP_INTERVAL = Duration.ofHours(1);
     private static final int MAX_OCR_AGE_DELETES_PER_CYCLE = 1_000;
+    private static final int CRITICAL_USAGE_PERCENT = 92;
+
+    public enum PressureTier {
+        NORMAL,
+        EARLY_SECONDARY_PRUNE,
+        PRESSURE,
+        CRITICAL
+    }
+
+    public record PressureStatus(
+            Instant checkedAt,
+            int usagePercent,
+            PressureTier tier,
+            long cumulativeSecondaryPrunedBytes,
+            long cumulativeDeletedBytes,
+            int cumulativeSecondarySetsPruned,
+            int cumulativeDeletedObjects) {}
 
     private final StoragePressureRetentionConfig config;
     private final Logger log;
@@ -32,6 +49,12 @@ public class StoragePressureRetention {
     private final Object cleanupMonitor = new Object();
     private ScheduledExecutorService scheduler;
     private Instant lastOcrAgeSweep;
+    private long cumulativeSecondaryPrunedBytes;
+    private long cumulativeDeletedBytes;
+    private int cumulativeSecondarySetsPruned;
+    private int cumulativeDeletedObjects;
+    private volatile PressureStatus latestStatus = new PressureStatus(
+            null, 0, PressureTier.NORMAL, 0L, 0L, 0, 0);
 
     public StoragePressureRetention(IBucketStore bucketStore, StoragePressureRetentionConfig config, Logger log) {
         this(bucketStore, createMediaStore(bucketStore), config, id -> false, log);
@@ -49,6 +72,8 @@ public class StoragePressureRetention {
         if (config.triggerUsagePercent <= config.targetUsagePercent || config.triggerUsagePercent > 100
                 || config.targetUsagePercent < 0)
             throw new IllegalArgumentException("Storage trigger must be greater than target and no more than 100 percent");
+        if (config.earlySecondaryPruneUsagePercent < 0 || config.earlySecondaryPruneUsagePercent > 100)
+            throw new IllegalArgumentException("Early secondary-frame prune usage must be between 0 and 100 percent");
         if (config.checkPeriodMinutes <= 0 || config.minimumObjectAgeMinutes < 0
                 || config.maximumMediaSetsPerCycle <= 0)
             throw new IllegalArgumentException("Storage retention intervals must be valid");
@@ -133,9 +158,26 @@ public class StoragePressureRetention {
         }
     }
 
+    public PressureStatus latestStatus() {
+        return latestStatus;
+    }
+
     void cleanupIfNeeded() throws IOException, DataStoreException {
         synchronized (cleanupMonitor) {
-            cleanupIfNeededWithinLock();
+            Files.createDirectories(storagePath);
+            FileStore fileStore = Files.getFileStore(storagePath);
+            cleanupIfNeededWithinLock(readUsage(fileStore), fileStore);
+        }
+    }
+
+    void cleanupIfNeeded(long totalBytes, long usableBytes) throws IOException, DataStoreException {
+        synchronized (cleanupMonitor) {
+            Files.createDirectories(storagePath);
+            long safeTotal = Math.max(0L, totalBytes);
+            long safeUsable = Math.max(0L, Math.min(safeTotal, usableBytes));
+            long used = Math.max(0L, safeTotal - safeUsable);
+            int percent = safeTotal == 0L ? 0 : (int) Math.ceil((used * 100.0) / safeTotal);
+            cleanupIfNeededWithinLock(new StorageUsage(safeTotal, used, percent), null);
         }
     }
 
@@ -147,16 +189,85 @@ public class StoragePressureRetention {
         }
     }
 
-    private void cleanupIfNeededWithinLock() throws IOException, DataStoreException {
-        Files.createDirectories(storagePath);
+    private int effectiveEarlySecondaryPrunePercent() {
+        int configured = config.earlySecondaryPruneUsagePercent;
+        return (configured > 0 && configured < config.triggerUsagePercent) ? configured : 0;
+    }
+
+    private void cleanupIfNeededWithinLock(StorageUsage usage, FileStore fileStore) throws IOException, DataStoreException {
         Instant now = Instant.now();
         maybePruneExpiredOcrCrops(now);
 
-        FileStore fileStore = Files.getFileStore(storagePath);
-        StorageUsage usage = readUsage(fileStore);
-        if (usage.percentUsed() < config.triggerUsagePercent)
+        int effectiveEarly = effectiveEarlySecondaryPrunePercent();
+        if (usage.percentUsed() < config.triggerUsagePercent) {
+            if (effectiveEarly > 0 && usage.percentUsed() >= effectiveEarly) {
+                int earlyTarget = Math.max(0, effectiveEarly - 5);
+                long earlyBytesToFree = Math.max(0L, usage.usedBytes() - usage.targetBytes(earlyTarget));
+                log.warn("Storage usage is {}% (early pressure >= {}%); pruning oldest unheld secondary frames " +
+                                "while preserving primary frame-3.jpg ({} bytes targeted)",
+                        usage.percentUsed(), effectiveEarly, earlyBytesToFree);
+                Instant cutoff = now.minus(Duration.ofMinutes(config.minimumObjectAgeMinutes));
+                long cycleTail = mediaStore.pressureQueueTail();
+                long freedBytes = 0L;
+                int prunedSets = 0;
+                int inspected = 0;
+                while (!Thread.currentThread().isInterrupted()
+                        && inspected < config.maximumMediaSetsPerCycle && freedBytes < earlyBytesToFree) {
+                    Optional<MediaSetStore.PressureQueueEntry> next = mediaStore.inspectPressureHead();
+                    if (next.isEmpty() || next.get().sequence() >= cycleTail)
+                        break;
+                    MediaSetStore.PressureQueueEntry queueEntry = next.get();
+                    inspected++;
+                    if (queueEntry.job().isEmpty() || !queueEntry.currentMembership()) {
+                        mediaStore.completePressureEntry(queueEntry);
+                        continue;
+                    }
+                    MediaSetStore.Identity identity = queueEntry.job().get().identity();
+                    Optional<MediaManifest> found = mediaStore.findManifest(identity);
+                    if (found.isEmpty()) {
+                        mediaStore.completePressureEntry(queueEntry);
+                        continue;
+                    }
+                    MediaManifest manifest = found.get();
+                    boolean protectedByHold = manifest.isHeld()
+                            || manifest.lifecycleState() == MediaManifest.LifecycleState.HELD;
+                    boolean protectedByRollback = manifest.source().state()
+                            == MediaManifest.SourceState.PRESERVED_FOR_ROLLBACK
+                            && now.isBefore(manifest.source().rollbackDeleteAfter());
+                    boolean tooNew = manifest.createdAt().isAfter(cutoff);
+                    if (!protectedByHold && !protectedByRollback && !tooNew
+                            && manifest.lifecycleState() != MediaManifest.LifecycleState.DELETING
+                            && manifest.hasSecondaryFramesRemaining()) {
+                        long pruned = mediaStore.pruneSecondaryFrames(new MediaSetStore.ManifestEntry(
+                                mediaStore.manifestKey(identity), manifest));
+                        if (pruned > 0L) {
+                            freedBytes += pruned;
+                            prunedSets++;
+                            cumulativeSecondaryPrunedBytes += pruned;
+                            cumulativeSecondarySetsPruned++;
+                            log.info("Early storage-pressure cleanup pruned secondary frames for media set {} ({} bytes; primary frame preserved)",
+                                    manifest.mediaSetId(), pruned);
+                        }
+                    }
+                    // Always defer back to the pressure queue so surviving primary frame-3.jpg remains
+                    // tracked in FIFO order if full-set deletion ever becomes necessary.
+                    mediaStore.deferPressureEntry(queueEntry);
+                }
+                int finalPct = fileStore != null ? readUsage(fileStore).percentUsed() : usage.percentUsed();
+                latestStatus = new PressureStatus(
+                        now, finalPct, PressureTier.EARLY_SECONDARY_PRUNE,
+                        cumulativeSecondaryPrunedBytes, cumulativeDeletedBytes,
+                        cumulativeSecondarySetsPruned, cumulativeDeletedObjects);
+                return;
+            }
+            latestStatus = new PressureStatus(
+                    now, usage.percentUsed(), PressureTier.NORMAL,
+                    cumulativeSecondaryPrunedBytes, cumulativeDeletedBytes,
+                    cumulativeSecondarySetsPruned, cumulativeDeletedObjects);
             return;
+        }
 
+        boolean critical = usage.percentUsed() >= CRITICAL_USAGE_PERCENT;
         long bytesToFree = Math.max(0, usage.usedBytes() - usage.targetBytes(config.targetUsagePercent));
         log.warn("Storage usage is {}%; deleting eligible data until usage reaches {}% ({} bytes required)",
                 usage.percentUsed(), config.targetUsagePercent, bytesToFree);
@@ -168,6 +279,7 @@ public class StoragePressureRetention {
         long cycleTail = mediaStore.pressureQueueTail();
         long freedBytes = 0;
         int deletedObjects = 0;
+        int prunedSecondarySets = 0;
         int inspected = 0;
         while (!Thread.currentThread().isInterrupted()
                 && inspected < config.maximumMediaSetsPerCycle && freedBytes < bytesToFree) {
@@ -201,11 +313,29 @@ public class StoragePressureRetention {
                 continue;
             }
 
+            if (!deletionAlreadyStarted && !critical && effectiveEarly > 0
+                    && manifest.hasSecondaryFramesRemaining()) {
+                long pruned = mediaStore.pruneSecondaryFrames(new MediaSetStore.ManifestEntry(
+                        mediaStore.manifestKey(identity), manifest));
+                if (pruned > 0L) {
+                    freedBytes += pruned;
+                    prunedSecondarySets++;
+                    cumulativeSecondaryPrunedBytes += pruned;
+                    cumulativeSecondarySetsPruned++;
+                    log.info("Pressure cleanup pruned secondary frames for media set {} ({} bytes; primary frame preserved)",
+                            manifest.mediaSetId(), pruned);
+                    mediaStore.deferPressureEntry(queueEntry);
+                    continue;
+                }
+            }
+
             long deleted = mediaStore.deleteMediaSet(new MediaSetStore.ManifestEntry(
                     mediaStore.manifestKey(identity), manifest));
             freedBytes += deleted;
             if (deleted > 0) {
                 deletedObjects++;
+                cumulativeDeletedBytes += deleted;
+                cumulativeDeletedObjects++;
                 log.info("Pressure cleanup deleted media set {} ({} bytes)",
                         manifest.mediaSetId(), deleted);
             }
@@ -226,20 +356,28 @@ public class StoragePressureRetention {
             if (cropSweep.deletedFiles() > 0) {
                 freedBytes += cropSweep.freedBytes();
                 deletedObjects += cropSweep.deletedFiles();
+                cumulativeDeletedBytes += cropSweep.freedBytes();
+                cumulativeDeletedObjects += cropSweep.deletedFiles();
                 log.info("Pressure cleanup deleted {} OCR evidence crop(s) ({} bytes)",
                         cropSweep.deletedFiles(), cropSweep.freedBytes());
             }
         }
 
-        StorageUsage finalUsage = readUsage(fileStore);
+        StorageUsage finalUsage = fileStore != null ? readUsage(fileStore) : usage;
+        PressureTier activeTier = (critical || finalUsage.percentUsed() >= CRITICAL_USAGE_PERCENT)
+                ? PressureTier.CRITICAL : PressureTier.PRESSURE;
+        latestStatus = new PressureStatus(
+                now, finalUsage.percentUsed(), activeTier,
+                cumulativeSecondaryPrunedBytes, cumulativeDeletedBytes,
+                cumulativeSecondarySetsPruned, cumulativeDeletedObjects);
         if (finalUsage.percentUsed() > config.targetUsagePercent) {
-            log.error("Storage remains at {}% after inspecting {} and deleting {} media sets "
+            log.error("Storage remains at {}% after inspecting {}, pruning secondary frames on {} set(s), and deleting {} media sets "
                             + "({} bytes). Daily-file CSVs remain protected; bounded cleanup will "
                             + "resume next cycle.", finalUsage.percentUsed(), inspected,
-                    deletedObjects, freedBytes);
+                    prunedSecondarySets, deletedObjects, freedBytes);
         } else {
-            log.info("Storage pressure cleanup completed at {}% after deleting {} objects ({} bytes)",
-                    finalUsage.percentUsed(), deletedObjects, freedBytes);
+            log.info("Storage pressure cleanup completed at {}% after pruning secondary frames on {} set(s) and deleting {} objects ({} bytes)",
+                    finalUsage.percentUsed(), prunedSecondarySets, deletedObjects, freedBytes);
         }
     }
 

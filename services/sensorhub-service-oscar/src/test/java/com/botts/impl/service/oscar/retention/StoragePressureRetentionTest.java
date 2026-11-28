@@ -518,6 +518,112 @@ public class StoragePressureRetentionTest {
         }
     }
 
+    @Test
+    public void earlySecondaryPressurePrunesSecondaryFramesWhilePreservingPrimaryFrameAndHolds() throws Exception {
+        Path root = Files.createTempDirectory("oscar-early-pressure-");
+        try {
+            FileSystemBucketStore store = new FileSystemBucketStore(root);
+            store.createBucket("videos");
+            store.createBucket("dailyfiles");
+            put(store, "dailyfiles", "daily.csv", "daily");
+            MediaSetStore mediaStore = new MediaSetStore(store);
+
+            MediaSetStore.Identity eligible = createMediaSet(store, mediaStore, "ev-early-1", "cam-1", false);
+            MediaSetStore.Identity held = createMediaSet(store, mediaStore, "ev-early-held", "cam-2", true);
+
+            StoragePressureRetentionConfig config = new StoragePressureRetentionConfig();
+            config.earlySecondaryPruneUsagePercent = 75;
+            config.triggerUsagePercent = 85;
+            config.targetUsagePercent = 80;
+            config.minimumObjectAgeMinutes = 0;
+            config.storagePath = root.toString();
+
+            StoragePressureRetention retention = new StoragePressureRetention(
+                    store, mediaStore, config, LoggerFactory.getLogger(StoragePressureRetentionTest.class));
+
+            // Below 75% -> NORMAL, no secondary frames pruned.
+            retention.cleanupIfNeeded(1_000_000L, 300_000L);
+            assertEquals(StoragePressureRetention.PressureTier.NORMAL, retention.latestStatus().tier());
+            assertTrue(mediaStore.findManifest(eligible).orElseThrow().hasSecondaryFramesRemaining());
+
+            // At 78% (between 75% early and 85% trigger) -> prunes secondary frames on eligible set,
+            // preserves primary MIDDLE frame and manifest, leaves held set completely intact.
+            retention.cleanupIfNeeded(1_000_000L, 220_000L);
+            assertEquals(StoragePressureRetention.PressureTier.EARLY_SECONDARY_PRUNE, retention.latestStatus().tier());
+            assertEquals(1, retention.latestStatus().cumulativeSecondarySetsPruned());
+            assertTrue(retention.latestStatus().cumulativeSecondaryPrunedBytes() > 0L);
+            assertEquals(0, retention.latestStatus().cumulativeDeletedObjects());
+
+            MediaManifest afterEarly = mediaStore.findManifest(eligible).orElseThrow();
+            assertFalse("Secondary frames must be pruned under early pressure",
+                    afterEarly.hasSecondaryFramesRemaining());
+            MediaManifest.Asset primary = afterEarly.assets().stream()
+                    .filter(MediaManifest.Asset::isPrimaryFrame).findFirst().orElseThrow();
+            assertEquals(MediaManifest.AssetState.PUBLISHED, primary.state());
+            assertTrue("Primary middle frame must remain on disk",
+                    store.objectExists("videos", primary.objectKey()));
+
+            MediaManifest heldAfter = mediaStore.findManifest(held).orElseThrow();
+            assertTrue("Held media set must retain all secondary frames",
+                    heldAfter.hasSecondaryFramesRemaining());
+
+            // Escalating to 88% now deletes the already-trimmed eligible set (preserving held and dailyfiles).
+            retention.cleanupIfNeeded(1_000_000L, 120_000L);
+            assertEquals(StoragePressureRetention.PressureTier.PRESSURE, retention.latestStatus().tier());
+            assertTrue("Eligible trimmed set must be deleted when pressure crosses triggerUsagePercent",
+                    mediaStore.findManifest(eligible).isEmpty());
+            assertTrue("Held set must still survive standard pressure",
+                    mediaStore.findManifest(held).isPresent());
+            assertTrue(store.objectExists("dailyfiles", "daily.csv"));
+        } finally {
+            try (var paths = Files.walk(root)) {
+                paths.sorted((left, right) -> right.compareTo(left)).forEach(path -> path.toFile().delete());
+            }
+        }
+    }
+
+    @Test
+    public void triggerPressurePrunesSecondaryFramesBeforeDeletingPrimaryFrameAndEscalatesAtCritical() throws Exception {
+        Path root = Files.createTempDirectory("oscar-tiered-pressure-");
+        try {
+            FileSystemBucketStore store = new FileSystemBucketStore(root);
+            store.createBucket("videos");
+            MediaSetStore mediaStore = new MediaSetStore(store);
+
+            MediaSetStore.Identity setOne = createMediaSet(store, mediaStore, "ev-tier-1", "cam-1", false);
+            MediaSetStore.Identity setTwo = createMediaSet(store, mediaStore, "ev-tier-2", "cam-2", false);
+
+            StoragePressureRetentionConfig config = new StoragePressureRetentionConfig();
+            config.earlySecondaryPruneUsagePercent = 75;
+            config.triggerUsagePercent = 85;
+            config.targetUsagePercent = 80;
+            config.minimumObjectAgeMinutes = 0;
+            config.storagePath = root.toString();
+
+            StoragePressureRetention retention = new StoragePressureRetention(
+                    store, mediaStore, config, LoggerFactory.getLogger(StoragePressureRetentionTest.class));
+
+            // At 86% with small deficit (~600 bytes) -> prunes secondary frames on setOne, preserves primary frame!
+            retention.cleanupIfNeeded(10_000L, 1_400L);
+            assertEquals(StoragePressureRetention.PressureTier.PRESSURE, retention.latestStatus().tier());
+            assertTrue("Primary manifest of setOne must survive when secondary-frame pruning covers deficit",
+                    mediaStore.findManifest(setOne).isPresent());
+            assertFalse(mediaStore.findManifest(setOne).orElseThrow().hasSecondaryFramesRemaining());
+            assertTrue("setTwo stays untouched once target bytes are freed",
+                    mediaStore.findManifest(setTwo).orElseThrow().hasSecondaryFramesRemaining());
+
+            // At 94% (CRITICAL >= 92%) -> deletes unheld sets immediately without waiting a second rotation!
+            retention.cleanupIfNeeded(1_000_000L, 60_000L);
+            assertEquals(StoragePressureRetention.PressureTier.CRITICAL, retention.latestStatus().tier());
+            assertTrue(mediaStore.findManifest(setOne).isEmpty());
+            assertTrue(mediaStore.findManifest(setTwo).isEmpty());
+        } finally {
+            try (var paths = Files.walk(root)) {
+                paths.sorted((left, right) -> right.compareTo(left)).forEach(path -> path.toFile().delete());
+            }
+        }
+    }
+
     private static String encodeObsCropName(String obsId, String suffix) {
         String encoded = java.util.Base64.getUrlEncoder()
                 .withoutPadding()

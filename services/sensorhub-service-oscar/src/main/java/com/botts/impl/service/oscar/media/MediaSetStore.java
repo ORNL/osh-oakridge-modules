@@ -1223,6 +1223,74 @@ public final class MediaSetStore {
     }
 
     /**
+     * Prunes secondary JPEG frames while verifying and preserving the primary middle frame
+     * ({@code frame-3.jpg}) under early storage pressure. Held sets, sets inside source
+     * rollback grace, sets already deleting, and sets without remaining secondary frames
+     * are left untouched.
+     */
+    public long pruneSecondaryFrames(ManifestEntry entry) throws IOException {
+        MediaManifest supplied = entry.manifest();
+        Identity identity = new Identity(supplied.eventId(), supplied.laneUid(), supplied.cameraUid());
+        return withIdentityLock(identity, () -> pruneSecondaryFramesLocked(entry, identity));
+    }
+
+    private long pruneSecondaryFramesLocked(ManifestEntry entry, Identity identity) throws IOException {
+        Path manifestPath = objectPathWithoutCreatingParents(entry.manifestKey());
+        if (!requireRegularObjectOrDurableAbsence(manifestPath, entry.manifestKey()))
+            return 0L;
+        MediaManifest manifest = readManifest(entry.manifestKey());
+        if (manifest.lifecycleState() == MediaManifest.LifecycleState.DELETING
+                || isTerminallyDeleted(identity))
+            return 0L;
+        if (manifest.isHeld() || manifest.lifecycleState() == MediaManifest.LifecycleState.HELD)
+            return 0L;
+        if (manifest.source().state() == MediaManifest.SourceState.PRESERVED_FOR_ROLLBACK
+                && Instant.now().isBefore(manifest.source().rollbackDeleteAfter()))
+            return 0L;
+        if (!manifest.hasSecondaryFramesRemaining())
+            return 0L;
+
+        Optional<MediaManifest.Asset> primaryOpt = manifest.assets().stream()
+                .filter(MediaManifest.Asset::isPrimaryFrame)
+                .findFirst();
+        if (primaryOpt.isEmpty())
+            return 0L;
+        verifyPublishedAsset(primaryOpt.get());
+
+        MediaManifest current = manifest;
+        boolean anySecondaryPublished = current.assets().stream()
+                .anyMatch(asset -> !asset.isPrimaryFrame()
+                        && asset.state() == MediaManifest.AssetState.PUBLISHED);
+        if (anySecondaryPublished) {
+            List<MediaManifest.Asset> eligibleAssets = new ArrayList<>(current.assets().size());
+            for (MediaManifest.Asset asset : current.assets()) {
+                if (asset.isPrimaryFrame() || asset.state() == MediaManifest.AssetState.DELETED) {
+                    eligibleAssets.add(asset);
+                } else {
+                    eligibleAssets.add(asset.withState(MediaManifest.AssetState.ELIGIBLE_FOR_DELETION));
+                }
+            }
+            current = current.withAssets(eligibleAssets);
+            publishManifest(identity, current);
+        }
+
+        long deletedBytes = 0L;
+        for (MediaManifest.Asset asset : current.assets()) {
+            if (!asset.isPrimaryFrame() && asset.state() != MediaManifest.AssetState.DELETED)
+                deletedBytes += deleteIfPresent(asset.objectKey());
+        }
+
+        List<MediaManifest.Asset> prunedAssets = new ArrayList<>(current.assets().size());
+        for (MediaManifest.Asset asset : current.assets()) {
+            prunedAssets.add(asset.isPrimaryFrame()
+                    ? asset
+                    : asset.withState(MediaManifest.AssetState.DELETED));
+        }
+        publishManifest(identity, current.withAssets(prunedAssets));
+        return deletedBytes;
+    }
+
+    /**
      * Completes an interrupted terminal deletion, including removal of its durable queue work.
      * A terminal index entry is authoritative even if a pre-crash manifest unlink reappears.
      */
