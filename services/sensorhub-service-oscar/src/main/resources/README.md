@@ -2,7 +2,7 @@
 
 ## Administrator and operator manual
 
-The detailed OSCAR 3.12.2 manual is maintained beside `OSCARServiceConfig`, where the administration UI can select it using the active language:
+The detailed OSCAR 4.0.0 manual is maintained beside `OSCARServiceConfig`, where the administration UI can select it using the active language:
 
 - [English](com/botts/impl/service/oscar/i18n/README.md)
 - [Español](com/botts/impl/service/oscar/i18n/README_es.md)
@@ -26,7 +26,7 @@ The purpose of this module is to handle the following aspects of OSCAR (3.0+)
   - Early secondary-frame prune usage (`75%`, preserving primary `frame-3.jpg`), trigger (`85%`), and target (`80%`) filesystem usage
   - Check period, minimum object age, and monitored storage path (paired with cold-archive `RAW_TELEMETRY`/`DAILY_TELEMETRY` pressure protection that preserves `100%` of events, adjudications, and legal holds)
 
-OSCAR 3.12.2 retains exactly five verified JPEG frames per eligible aging camera clip and keeps
+OSCAR 4.0.0 retains exactly five verified JPEG frames per eligible aging camera clip and keeps
 legacy video playback for events without the new retained-media representation. High-volume
 detector observations are owned by the tiered database lifecycle, while the required direct
 daily-file journal publishes immutable legacy CSVs independently of database retention. Use the
@@ -40,7 +40,7 @@ threshold above 1.2 million evenly distributed occupancies/hour while retaining 
 inode bounds. Pressure-deletion state uses an exact, file-locked compact
 index rather than one permanent JSON tombstone per camera set. Back up the complete
 `videos/retained-media/v1` prefix; its indexes and checkpoints prevent intentionally deleted media
-from being reconstructed during reconciliation. The 3.12.2 compact layout requires fresh state for
+from being reconstructed during reconciliation. The 4.0.0 compact layout requires fresh state for
 pre-release/test deployments; do not reuse prototype `.deleted.json` or per-observation marker
 trees. Downgrade only by restoring the database and this complete prefix from the same coordinated
 pre-3.11.0 backup.

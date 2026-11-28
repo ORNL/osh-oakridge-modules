@@ -258,12 +258,12 @@ public final class SystemUpdateHostBridge {
             String username) throws IOException {
         assertOperationalUpgradeAllowed();
         if (targetVersion == null || !SystemUpdateReleaseChecker.isValidSemVer(targetVersion.trim())) {
-            throw new IllegalArgumentException("A valid semantic version (for example 3.12.0) is required.");
+            throw new IllegalArgumentException("A valid semantic version (for example 4.0.1) is required.");
         }
         String cleanVer = targetVersion.trim();
-        if (!SystemUpdateReleaseChecker.isInPlaceCompatible311Plus(cleanVer)) {
+        if (!SystemUpdateReleaseChecker.isInPlaceCompatible40Plus(cleanVer)) {
             throw new IllegalArgumentException(
-                    "In-place GUI upgrade supports OSCAR 3.11.0 and newer releases only (received " + cleanVer + ").");
+                    "In-place GUI upgrade supports OSCAR 4.0.0 and newer releases only (received " + cleanVer + ").");
         }
         String cleanSha = expectedSha256 == null ? "" : expectedSha256.trim().toLowerCase(Locale.ROOT);
         if (!cleanSha.isEmpty() && !SHA256_PATTERN.matcher(cleanSha).matches()) {
@@ -453,9 +453,9 @@ public final class SystemUpdateHostBridge {
             throw new IllegalArgumentException(
                     "Uploaded .zip is missing required OSCAR release layout (oscar-<version>/.env.example, compose.yaml, oscar-setup.sh).");
         }
-        if (!SystemUpdateReleaseChecker.isInPlaceCompatible311Plus(envVersion)) {
+        if (!SystemUpdateReleaseChecker.isInPlaceCompatible40Plus(envVersion)) {
             throw new IllegalArgumentException(
-                    "Uploaded bundle version " + envVersion + " is older than 3.11.0 and cannot be applied via in-place GUI update.");
+                    "Uploaded bundle version " + envVersion + " is older than 4.0.0 and cannot be applied via in-place GUI update.");
         }
         return new ValidatedZipMeta(topRoot, envVersion);
     }

@@ -57,7 +57,7 @@ public final class SystemUpdateReleaseChecker {
             "(?i)\\b([0-9a-f]{64})\\b");
 
     private static final long CACHE_TTL_MS = 10L * 60L * 1_000L;
-    private static final String USER_AGENT = "OSCAR-SystemUpdater/3.11 (+https://github.com/ORNL/oscar)";
+    private static final String USER_AGENT = "OSCAR-SystemUpdater/4.0 (+https://github.com/ORNL/oscar)";
 
     private final String baseUrl;
     private final HttpClient noRedirectClient;
@@ -174,7 +174,7 @@ public final class SystemUpdateReleaseChecker {
         String latest = info.has("latestVersion") ? info.get("latestVersion").getAsString() : "";
         String cur = (currentVersion == null || currentVersion.isBlank()) ? "0.0.0" : currentVersion.trim();
         int cmp = compareSemVer(latest, cur);
-        boolean compatible = isInPlaceCompatible311Plus(latest);
+        boolean compatible = isInPlaceCompatible40Plus(latest);
         boolean assetReady = info.has("assetAvailable") && info.get("assetAvailable").getAsBoolean();
 
         info.addProperty("currentVersion", cur);
@@ -368,7 +368,7 @@ public final class SystemUpdateReleaseChecker {
         return SEMVER_PATTERN.matcher(version.trim()).matches();
     }
 
-    public static boolean isInPlaceCompatible311Plus(String version) {
+    public static boolean isInPlaceCompatible40Plus(String version) {
         if (!isValidSemVer(version)) {
             return false;
         }
@@ -377,8 +377,7 @@ public final class SystemUpdateReleaseChecker {
             return false;
         }
         int major = Integer.parseInt(m.group(1));
-        int minor = Integer.parseInt(m.group(2));
-        return major > 3 || (major == 3 && minor >= 11);
+        return major >= 4;
     }
 
     public static int compareSemVer(String a, String b) {

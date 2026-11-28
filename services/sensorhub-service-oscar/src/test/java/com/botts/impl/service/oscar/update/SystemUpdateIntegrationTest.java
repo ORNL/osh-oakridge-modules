@@ -64,7 +64,7 @@ public class SystemUpdateIntegrationTest {
 
     @Test
     public void discoversLatestReleaseAnonymouslyWithoutGitHubLoginOrApiRateLimit() throws Exception {
-        byte[] sampleZip = buildValidReleaseZip("3.11.9");
+        byte[] sampleZip = buildValidReleaseZip("4.0.1");
         String zipSha256 = sha256Hex(sampleZip);
         AtomicBoolean sawAuthHeader = new AtomicBoolean(false);
 
@@ -76,7 +76,7 @@ public class SystemUpdateIntegrationTest {
             if (ex.getRequestHeaders().containsKey("Authorization")) {
                 sawAuthHeader.set(true);
             }
-            ex.getResponseHeaders().add("Location", baseUrl + "/releases/tag/v3.11.9");
+            ex.getResponseHeaders().add("Location", baseUrl + "/releases/tag/v4.0.1");
             ex.sendResponseHeaders(302, -1);
             ex.close();
         });
@@ -88,10 +88,10 @@ public class SystemUpdateIntegrationTest {
                     <?xml version="1.0" encoding="UTF-8"?>
                     <feed xmlns="http://www.w3.org/2005/Atom">
                       <entry>
-                        <id>tag:github.com,2008:Repository/1/v3.11.9</id>
-                        <updated>2026-11-23T03:30:00Z</updated>
-                        <link rel="alternate" type="text/html" href="%s/releases/tag/v3.11.9"/>
-                        <title>Release v3.11.9 (Amber)</title>
+                        <id>tag:github.com,2008:Repository/1/v4.0.1</id>
+                        <updated>2026-11-28T16:30:00Z</updated>
+                        <link rel="alternate" type="text/html" href="%s/releases/tag/v4.0.1"/>
+                        <title>Release v4.0.1</title>
                         <content type="html">&lt;p&gt;Zero-login GUI system updater &amp;amp; Rapiscan edge proxy.&lt;/p&gt;</content>
                       </entry>
                     </feed>
@@ -102,16 +102,16 @@ public class SystemUpdateIntegrationTest {
             ex.getResponseBody().write(b);
             ex.close();
         });
-        mockGitHub.createContext("/ORNL/oscar/releases/download/v3.11.9/oscar-3.11.9.zip.sha256", ex -> {
+        mockGitHub.createContext("/ORNL/oscar/releases/download/v4.0.1/oscar-4.0.1.zip.sha256", ex -> {
             if (ex.getRequestHeaders().containsKey("Authorization")) {
                 sawAuthHeader.set(true);
             }
-            byte[] b = (zipSha256 + " *oscar-3.11.9.zip\n").getBytes(StandardCharsets.UTF_8);
+            byte[] b = (zipSha256 + " *oscar-4.0.1.zip\n").getBytes(StandardCharsets.UTF_8);
             ex.sendResponseHeaders(200, b.length);
             ex.getResponseBody().write(b);
             ex.close();
         });
-        mockGitHub.createContext("/ORNL/oscar/releases/download/v3.11.9/oscar-3.11.9.zip", ex -> {
+        mockGitHub.createContext("/ORNL/oscar/releases/download/v4.0.1/oscar-4.0.1.zip", ex -> {
             if (ex.getRequestHeaders().containsKey("Authorization")) {
                 sawAuthHeader.set(true);
             }
@@ -128,20 +128,20 @@ public class SystemUpdateIntegrationTest {
 
         SystemUpdateReleaseChecker checker = new SystemUpdateReleaseChecker(
                 baseUrl, LoggerFactory.getLogger(SystemUpdateIntegrationTest.class));
-        JsonObject info = checker.checkLatestRelease("3.11.8", true);
+        JsonObject info = checker.checkLatestRelease("4.0.0", true);
 
         assertFalse("Zero-login checker must never send an Authorization header", sawAuthHeader.get());
         assertFalse(info.get("requiresGitHubLogin").getAsBoolean());
-        assertEquals("3.11.9", info.get("latestVersion").getAsString());
-        assertEquals("3.11.8", info.get("currentVersion").getAsString());
+        assertEquals("4.0.1", info.get("latestVersion").getAsString());
+        assertEquals("4.0.0", info.get("currentVersion").getAsString());
         assertTrue(info.get("updateAvailable").getAsBoolean());
         assertTrue(info.get("inPlaceCompatible").getAsBoolean());
         assertEquals(zipSha256, info.get("expectedSha256").getAsString());
         assertEquals(sampleZip.length, info.get("downloadBytes").getAsLong());
         assertTrue(info.get("notesSummary").getAsString().contains("Zero-login GUI system updater & Rapiscan edge proxy."));
 
-        // Verify up-to-date comparison when already running 3.11.9
-        JsonObject same = checker.checkLatestRelease("3.11.9", false);
+        // Verify up-to-date comparison when already running 4.0.1
+        JsonObject same = checker.checkLatestRelease("4.0.1", false);
         assertTrue(same.get("fromCache").getAsBoolean());
         assertFalse(same.get("updateAvailable").getAsBoolean());
         assertTrue(same.get("upToDate").getAsBoolean());
@@ -150,7 +150,7 @@ public class SystemUpdateIntegrationTest {
     @Test
     public void queuesGitHubUpgradeStagesOfflineZipAndEnforcesAdminAndSha256() throws Exception {
         tempDir = Files.createTempDirectory("oscar-system-update-test");
-        System.setProperty(SystemUpdateHostBridge.PROP_CURRENT_VERSION, "3.11.8");
+        System.setProperty(SystemUpdateHostBridge.PROP_CURRENT_VERSION, "4.0.0");
 
         Files.writeString(tempDir.resolve("status.json"), """
                 {
@@ -163,31 +163,31 @@ public class SystemUpdateIntegrationTest {
                 }
                 """, StandardCharsets.UTF_8);
 
-        byte[] validZip = buildValidReleaseZip("3.11.9");
+        byte[] validZip = buildValidReleaseZip("4.0.1");
         String validSha = sha256Hex(validZip);
 
         mockGitHub = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         int port = mockGitHub.getAddress().getPort();
         String baseUrl = "http://127.0.0.1:" + port + "/ORNL/oscar";
         mockGitHub.createContext("/ORNL/oscar/releases/latest", ex -> {
-            ex.getResponseHeaders().add("Location", baseUrl + "/releases/tag/v3.11.9");
+            ex.getResponseHeaders().add("Location", baseUrl + "/releases/tag/v4.0.1");
             ex.sendResponseHeaders(302, -1);
             ex.close();
         });
         mockGitHub.createContext("/ORNL/oscar/releases.atom", ex -> {
-            byte[] b = "<feed><entry><link href=\"/releases/tag/v3.11.9\"/><title>v3.11.9</title></entry></feed>"
+            byte[] b = "<feed><entry><link href=\"/releases/tag/v4.0.1\"/><title>v4.0.1</title></entry></feed>"
                     .getBytes(StandardCharsets.UTF_8);
             ex.sendResponseHeaders(200, b.length);
             ex.getResponseBody().write(b);
             ex.close();
         });
-        mockGitHub.createContext("/ORNL/oscar/releases/download/v3.11.9/oscar-3.11.9.zip.sha256", ex -> {
-            byte[] b = (validSha + " *oscar-3.11.9.zip\n").getBytes(StandardCharsets.UTF_8);
+        mockGitHub.createContext("/ORNL/oscar/releases/download/v4.0.1/oscar-4.0.1.zip.sha256", ex -> {
+            byte[] b = (validSha + " *oscar-4.0.1.zip\n").getBytes(StandardCharsets.UTF_8);
             ex.sendResponseHeaders(200, b.length);
             ex.getResponseBody().write(b);
             ex.close();
         });
-        mockGitHub.createContext("/ORNL/oscar/releases/download/v3.11.9/oscar-3.11.9.zip", ex -> {
+        mockGitHub.createContext("/ORNL/oscar/releases/download/v4.0.1/oscar-4.0.1.zip", ex -> {
             ex.getResponseHeaders().add("Content-Length", Integer.toString(validZip.length));
             ex.sendResponseHeaders(200, -1);
             ex.close();
@@ -215,36 +215,49 @@ public class SystemUpdateIntegrationTest {
                 "{\"force\":true}".getBytes(StandardCharsets.UTF_8));
         assertEquals(200, checkResp.status);
         JsonObject checkJson = JsonParser.parseString(checkResp.bodyString()).getAsJsonObject();
-        assertEquals("3.11.8", checkJson.get("currentVersion").getAsString());
-        assertEquals("3.11.9", checkJson.getAsJsonObject("latestRelease").get("latestVersion").getAsString());
+        assertEquals("4.0.0", checkJson.get("currentVersion").getAsString());
+        assertEquals("4.0.1", checkJson.getAsJsonObject("latestRelease").get("latestVersion").getAsString());
 
         // 4. Admin POST /apply writes atomic request.json with SHA-256 and backup flag
         MockResponse applyResp = invokeServlet(
                 servlet, "POST", "/apply", "admin", true, "XMLHttpRequest",
-                ("{\"targetVersion\":\"3.11.9\",\"createBackupFirst\":true}").getBytes(StandardCharsets.UTF_8));
+                ("{\"targetVersion\":\"4.0.1\",\"createBackupFirst\":true}").getBytes(StandardCharsets.UTF_8));
         assertEquals(200, applyResp.status);
         Path reqPath = tempDir.resolve("request.json");
         assertTrue(Files.isRegularFile(reqPath));
         JsonObject writtenReq = JsonParser.parseString(Files.readString(reqPath, StandardCharsets.UTF_8)).getAsJsonObject();
         assertEquals("upgrade-github", writtenReq.get("action").getAsString());
-        assertEquals("3.11.9", writtenReq.get("targetVersion").getAsString());
+        assertEquals("4.0.1", writtenReq.get("targetVersion").getAsString());
         assertEquals(validSha, writtenReq.get("expectedSha256").getAsString());
         assertTrue(writtenReq.get("createBackupFirst").getAsBoolean());
         Files.deleteIfExists(reqPath);
 
-        // 5. Reject pre-3.11.0 version
+        // 5. Reject pre-4.0.0 version (both GitHub target and uploaded pre-4.0 zip)
         try {
-            bridge.queueGitHubUpgrade("3.10.2", "", false, "admin");
-            fail("Expected pre-3.11.0 upgrade to be rejected");
+            bridge.queueGitHubUpgrade("3.12.2", "", false, "admin");
+            fail("Expected pre-4.0.0 upgrade to be rejected");
         } catch (IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("3.11.0"));
+            assertTrue(expected.getMessage().contains("4.0.0"));
+        }
+        byte[] pre40Zip = buildValidReleaseZip("3.12.2");
+        try {
+            bridge.stageUploadedBundleAndMaybeApply(
+                    new ByteArrayInputStream(pre40Zip),
+                    "oscar-3.12.2.zip",
+                    "",
+                    false,
+                    false,
+                    "admin");
+            fail("Expected pre-4.0.0 bundle upload to be rejected");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("4.0.0"));
         }
 
         // 6. Reject tampered SHA-256 on offline bundle upload
         try {
             bridge.stageUploadedBundleAndMaybeApply(
                     new ByteArrayInputStream(validZip),
-                    "oscar-3.11.9.zip",
+                    "oscar-4.0.1.zip",
                     "0000000000000000000000000000000000000000000000000000000000000000",
                     false,
                     false,
@@ -259,7 +272,7 @@ public class SystemUpdateIntegrationTest {
         try {
             bridge.stageUploadedBundleAndMaybeApply(
                     new ByteArrayInputStream(zipSlipBytes),
-                    "oscar-3.11.9.zip",
+                    "oscar-4.0.1.zip",
                     "",
                     false,
                     false,
@@ -272,17 +285,17 @@ public class SystemUpdateIntegrationTest {
         // 8. Accept valid offline .zip upload and queue upgrade-staged
         JsonObject stagedResult = bridge.stageUploadedBundleAndMaybeApply(
                 new ByteArrayInputStream(validZip),
-                "oscar-3.11.9.zip",
+                "oscar-4.0.1.zip",
                 validSha,
                 false,
                 true,
                 "admin");
         assertNotNull(stagedResult);
-        assertTrue(Files.isRegularFile(tempDir.resolve("staged/oscar-3.11.9.zip")));
+        assertTrue(Files.isRegularFile(tempDir.resolve("staged/oscar-4.0.1.zip")));
         JsonObject stagedReq = JsonParser.parseString(Files.readString(reqPath, StandardCharsets.UTF_8)).getAsJsonObject();
         assertEquals("upgrade-staged", stagedReq.get("action").getAsString());
-        assertEquals("oscar-3.11.9.zip", stagedReq.get("bundleFileName").getAsString());
-        assertEquals("3.11.9", stagedReq.get("targetVersion").getAsString());
+        assertEquals("oscar-4.0.1.zip", stagedReq.get("bundleFileName").getAsString());
+        assertEquals("4.0.1", stagedReq.get("targetVersion").getAsString());
         assertEquals(validSha, stagedReq.get("expectedSha256").getAsString());
     }
 
