@@ -1,16 +1,6 @@
-// Plugin to do JAXB .xsd -> .java code generation
-plugins {
-    id 'org.unbroken-dome.xjc' version '2.0.0'
-}
-
-
 description = 'RAD Utilities'
 ext.details = "Utilities for creation drivers for Radiological Sensors and Systems"
 version = '1.2.0'
-
-import org.apache.tools.ant.taskdefs.condition.Os
-
-
 
 def thisProjectDir = projectDir
 rootProject.allprojects {
@@ -22,7 +12,7 @@ rootProject.allprojects {
 }
 
 configurations {
-    jaxb
+    xjcTool
 }
 
 dependencies {
@@ -37,20 +27,35 @@ dependencies {
     testImplementation('junit:junit:4.13')
     testImplementation('org.mockito:mockito-core:3.12.4')
 
-    // Explicitly set the classpath for the xjc tool so we're using the new stuff.
+    // Explicitly set the classpath for the xjc tool (replaces unmaintained Gradle 6 xjc plugin).
     xjcTool 'com.sun.xml.bind:jaxb-xjc:3.0.2'
     xjcTool 'org.glassfish.jaxb:jaxb-runtime:3.0.2'
     xjcTool 'jakarta.xml.bind:jakarta.xml.bind-api:3.0.1'
 }
 
-xjc {
-    // We're not using gradle's "normal" place for schemas, so set it here:
-//    srcDirName = './src/main/N42/xsd/'
-    // Fix a quirk in the behavior of xjc so that "Boolean" properties don't use "is"
-    enableIntrospection = true
-    // Change the package where the classes are generated. (This is not the "right" way, supposedly.)
-    extraArgs.add '-p'
-    extraArgs.add 'com.botts.impl.utils.n42'
+def xjcOutputDir = layout.buildDirectory.dir('generated/sources/xjc/java/main')
+
+def xjcGenerate = tasks.register('xjcGenerate', JavaExec) {
+    group = 'build'
+    description = 'Generates JAXB N42 Java classes from src/main/schema/*.xsd'
+    classpath = configurations.xjcTool
+    mainClass = 'com.sun.tools.xjc.XJCFacade'
+    inputs.dir(file('src/main/schema'))
+    outputs.dir(xjcOutputDir)
+    doFirst {
+        def outDir = xjcOutputDir.get().asFile
+        outDir.mkdirs()
+        def schemas = fileTree('src/main/schema') { include '*.xsd' }.files.sort().collect { it.absolutePath }
+        args = ['-no-header', '-enableIntrospection', '-p', 'com.botts.impl.utils.n42', '-d', outDir.absolutePath] + schemas
+    }
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir(xjcGenerate)
+        }
+    }
 }
 
 
