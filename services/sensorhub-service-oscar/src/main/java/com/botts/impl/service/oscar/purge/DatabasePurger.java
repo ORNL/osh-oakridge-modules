@@ -932,12 +932,19 @@ public class DatabasePurger {
     }
 
     private void exportAndPurgeDailyFileDataWithinScope() {
+        if (shouldStopPurge())
+            return;
         if (journalService == null) {
             // Compatibility fallback for installations that have not enabled the durable journal.
             // Such installs retain the historical one-day behavior because they have nowhere safe
             // to store a restart checkpoint.
             exportAndPurgeDailyFileDataWithinScope(
                     previousCompletedDayWindow(clock.instant(), dailyFileZone));
+            return;
+        }
+
+        if (observationLifecycleDelegated && isParquetPrimaryManagedStore()) {
+            log.debug("Skipping Daily File journal catch-up because PARQUET_PRIMARY stage lifecycle manages observation retention");
             return;
         }
 
@@ -1014,6 +1021,13 @@ public class DatabasePurger {
     }
 
     private void exportAndPurgeDailyFileDataWithinScope(DayWindow window) {
+        if (shouldStopPurge())
+            return;
+        if (journalService != null && observationLifecycleDelegated && isParquetPrimaryManagedStore()) {
+            log.debug("Skipping Daily File observation purge for [{}, {}) because PARQUET_PRIMARY stage lifecycle manages retention",
+                    window.startInclusive, window.endExclusive);
+            return;
+        }
         log.info("Exporting and purging Daily File data for immutable window [{}, {})",
                 window.startInclusive, window.endExclusive);
         Map<BigId, IDataStreamInfo> streams = getDataStreamEntriesByOutputNames(OUTPUT_DAILY_FILE);

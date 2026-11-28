@@ -259,7 +259,322 @@ public class StatisticsTests {
         if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.rs350NeutronAlarmCQL).build().getCQLFilter(), cql)) {
             return "Neutron".equals(struct.getComponent("alarmCategoryCode").getData().getStringValue());
         }
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.gammaFaultCQL).build().getCQLFilter(), cql)) {
+            var comp = struct.getComponent("alarmState");
+            if (comp == null) return false;
+            String state = comp.getData().getStringValue();
+            return "Fault - Gamma Low".equals(state) || "Fault - Gamma High".equals(state);
+        }
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.neutronFaultCQL).build().getCQLFilter(), cql)) {
+            var comp = struct.getComponent("alarmState");
+            return comp != null && "Fault - Neutron High".equals(comp.getData().getStringValue());
+        }
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.extendedOccupancyFaultCQL).build().getCQLFilter(), cql)) {
+            var comp = struct.getComponent("alarmState");
+            return comp != null && "Fault - Extended Occupancy".equals(comp.getData().getStringValue());
+        }
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.faultCQL).build().getCQLFilter(), cql)) {
+            var comp = struct.getComponent("alarmState");
+            if (comp == null) return false;
+            String state = comp.getData().getStringValue();
+            return "Fault - Neutron High".equals(state)
+                    || "Fault - Gamma Low".equals(state)
+                    || "Fault - Gamma High".equals(state)
+                    || "Fault - Extended Occupancy".equals(state);
+        }
+        if (Objects.equals(new ObsFilter.Builder().withCQLFilter(StatisticsOutput.tamperCQL).build().getCQLFilter(), cql)) {
+            var comp = struct.getComponent("tamperStatus");
+            return comp != null && comp.getData().getBooleanValue();
+        }
         return false;
+    }
+
+    @Test
+    public void singleSnapshotPerPublicationAndEquivalentFaultCountsWithoutDuplicateFullSiteScan() throws Exception {
+        statsOutput.stop();
+
+        // Use a real H2 MVObsSystemDatabase so multiple observations per datastream are retained
+        // (SystemDriverDatabase's InMemoryObsStore keeps only the latest observation per stream).
+        java.nio.file.Path dbFile = java.nio.file.Files.createTempFile("stats-fault-equiv-", ".dat");
+        java.nio.file.Files.deleteIfExists(dbFile);
+        var mvDb = new org.sensorhub.impl.datastore.h2.MVObsSystemDatabase();
+        var mvCfg = new org.sensorhub.impl.datastore.h2.MVObsSystemDatabaseConfig();
+        mvCfg.storagePath = dbFile.toString();
+        mvCfg.databaseNum = 21;
+        mvDb.setConfiguration(mvCfg);
+        mvDb.init();
+        mvDb.start();
+        try {
+            var sml = new org.vast.sensorML.SMLHelper();
+            var rad = new org.sensorhub.impl.utils.rad.RADHelper();
+            Instant tBase = Instant.now().minus(10, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.SECONDS);
+
+            // Lane with Rapiscan-style gammaCounts, neutronCounts, occupancyStatus, and tamper streams
+            String laneUid = "urn:osh:system:lane:fault-equiv-1";
+            BigId laneSysId = mvDb.getSystemDescStore().add(new org.sensorhub.impl.system.wrapper.SystemWrapper(
+                    sml.createPhysicalSystem().uniqueID(laneUid).name("Fault Equiv Lane 1").build())).getInternalID();
+
+            var gammaStruct = rad.createRecord()
+                    .name("gammaCounts")
+                    .addField("samplingTime", rad.createPrecisionTimeStamp())
+                    .addField("alarmState", rad.createGammaAlarmState())
+                    .addField("gammaGrossCount", rad.createGammaGrossCount())
+                    .build();
+            BigId gammaDsId = mvDb.getObservationStore().getDataStreams().add(new org.sensorhub.api.data.DataStreamInfo.Builder()
+                    .withSystem(new org.sensorhub.api.feature.FeatureId(laneSysId, laneUid))
+                    .withName("gammaCounts")
+                    .withRecordDescription(gammaStruct)
+                    .withRecordEncoding(new org.vast.data.TextEncodingImpl(",", "\n"))
+                    .build()).getInternalID();
+
+            var neutronStruct = rad.createRecord()
+                    .name("neutronCounts")
+                    .addField("samplingTime", rad.createPrecisionTimeStamp())
+                    .addField("alarmState", rad.createNeutronAlarmState())
+                    .addField("neutronGrossCount", rad.createNeutronGrossCount())
+                    .build();
+            BigId neutronDsId = mvDb.getObservationStore().getDataStreams().add(new org.sensorhub.api.data.DataStreamInfo.Builder()
+                    .withSystem(new org.sensorhub.api.feature.FeatureId(laneSysId, laneUid))
+                    .withName("neutronCounts")
+                    .withRecordDescription(neutronStruct)
+                    .withRecordEncoding(new org.vast.data.TextEncodingImpl(",", "\n"))
+                    .build()).getInternalID();
+
+            var occStatusStruct = rad.createRecord()
+                    .name("occupancyStatus")
+                    .addField("samplingTime", rad.createPrecisionTimeStamp())
+                    .addField("extendedOccupancyFault", rad.createBoolean()
+                            .name("extendedOccupancyFault")
+                            .definition(org.sensorhub.impl.utils.rad.RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT)
+                            .build())
+                    .addField("alarmState", rad.createCategory()
+                            .name("alarmState")
+                            .definition(org.sensorhub.impl.utils.rad.RADHelper.DEF_EXTENDED_OCCUPANCY_ALARM_STATE)
+                            .addAllowedValues("Clear", org.sensorhub.impl.utils.rad.RADHelper.FAULT_EXTENDED_OCCUPANCY)
+                            .build())
+                    .build();
+            BigId occStatusDsId = mvDb.getObservationStore().getDataStreams().add(new org.sensorhub.api.data.DataStreamInfo.Builder()
+                    .withSystem(new org.sensorhub.api.feature.FeatureId(laneSysId, laneUid))
+                    .withName("occupancyStatus")
+                    .withRecordDescription(occStatusStruct)
+                    .withRecordEncoding(new org.vast.data.TextEncodingImpl(",", "\n"))
+                    .build()).getInternalID();
+
+            var tamperStruct = rad.createRecord()
+                    .name("tamper")
+                    .addField("samplingTime", rad.createPrecisionTimeStamp())
+                    .addField("tamperStatus", rad.createTamperStatus())
+                    .build();
+            BigId tamperDsId = mvDb.getObservationStore().getDataStreams().add(new org.sensorhub.api.data.DataStreamInfo.Builder()
+                    .withSystem(new org.sensorhub.api.feature.FeatureId(laneSysId, laneUid))
+                    .withName("tamper")
+                    .withRecordDescription(tamperStruct)
+                    .withRecordEncoding(new org.vast.data.TextEncodingImpl(",", "\n"))
+                    .build()).getInternalID();
+
+            // Add 2 gamma faults (High + Low) + 1 Background, 1 neutron fault + 1 Background,
+            // 1 extended occupancy fault + 1 Clear, 1 tamper=true + 1 tamper=false
+            addThreeFieldObs(mvDb, gammaDsId, gammaStruct, tBase.plusSeconds(1), "Fault - Gamma High", 900);
+            addThreeFieldObs(mvDb, gammaDsId, gammaStruct, tBase.plusSeconds(2), "Fault - Gamma Low", 5);
+            addThreeFieldObs(mvDb, gammaDsId, gammaStruct, tBase.plusSeconds(3), "Background", 120);
+            addThreeFieldObs(mvDb, neutronDsId, neutronStruct, tBase.plusSeconds(4), "Fault - Neutron High", 80);
+            addThreeFieldObs(mvDb, neutronDsId, neutronStruct, tBase.plusSeconds(5), "Background", 2);
+
+            var extFaultBlock = occStatusStruct.createDataBlock();
+            extFaultBlock.setTimeStamp(0, tBase.plusSeconds(6));
+            extFaultBlock.setBooleanValue(1, true);
+            extFaultBlock.setStringValue(2, "Fault - Extended Occupancy");
+            mvDb.getObservationStore().add(new ObsData.Builder()
+                    .withDataStream(occStatusDsId).withPhenomenonTime(tBase.plusSeconds(6))
+                    .withResultTime(tBase.plusSeconds(6)).withResult(extFaultBlock).build());
+
+            var extClearBlock = occStatusStruct.createDataBlock();
+            extClearBlock.setTimeStamp(0, tBase.plusSeconds(7));
+            extClearBlock.setBooleanValue(1, false);
+            extClearBlock.setStringValue(2, "Clear");
+            mvDb.getObservationStore().add(new ObsData.Builder()
+                    .withDataStream(occStatusDsId).withPhenomenonTime(tBase.plusSeconds(7))
+                    .withResultTime(tBase.plusSeconds(7)).withResult(extClearBlock).build());
+
+            var tamperTrueBlock = tamperStruct.createDataBlock();
+            tamperTrueBlock.setTimeStamp(0, tBase.plusSeconds(8));
+            tamperTrueBlock.setBooleanValue(1, true);
+            mvDb.getObservationStore().add(new ObsData.Builder()
+                    .withDataStream(tamperDsId).withPhenomenonTime(tBase.plusSeconds(8))
+                    .withResultTime(tBase.plusSeconds(8)).withResult(tamperTrueBlock).build());
+
+            var tamperFalseBlock = tamperStruct.createDataBlock();
+            tamperFalseBlock.setTimeStamp(0, tBase.plusSeconds(9));
+            tamperFalseBlock.setBooleanValue(1, false);
+            mvDb.getObservationStore().add(new ObsData.Builder()
+                    .withDataStream(tamperDsId).withPhenomenonTime(tBase.plusSeconds(9))
+                    .withResultTime(tBase.plusSeconds(9)).withResult(tamperFalseBlock).build());
+
+            // Standalone RS-350 AlarmOutput stream (no alarmState field)
+            String rs350Uid = "urn:osh:sensor:rsi:rs350:fault-equiv-rs350";
+            BigId rs350SysId = mvDb.getSystemDescStore().add(new org.sensorhub.impl.system.wrapper.SystemWrapper(
+                    sml.createPhysicalSystem().uniqueID(rs350Uid).name("RS350 Fault Equiv").build())).getInternalID();
+            var rawAlarmStruct = rad.createRecord()
+                    .name("alarm")
+                    .definition(org.sensorhub.impl.utils.rad.RADHelper.getRadUri("AlarmOutput"))
+                    .addField("samplingTime", rad.createPrecisionTimeStamp())
+                    .addField("alarmCategoryCode", rad.createAlarmCatCode())
+                    .build();
+            BigId rawAlarmDsId = mvDb.getObservationStore().getDataStreams().add(new org.sensorhub.api.data.DataStreamInfo.Builder()
+                    .withSystem(new org.sensorhub.api.feature.FeatureId(rs350SysId, rs350Uid))
+                    .withName("alarm")
+                    .withRecordDescription(rawAlarmStruct)
+                    .withRecordEncoding(new org.vast.data.TextEncodingImpl(",", "\n"))
+                    .build()).getInternalID();
+            var rawAlarmBlock = rawAlarmStruct.createDataBlock();
+            rawAlarmBlock.setDoubleValue(0, tBase.plusSeconds(10).getEpochSecond());
+            rawAlarmBlock.setStringValue(1, "Gamma");
+            mvDb.getObservationStore().add(new ObsData.Builder()
+                    .withDataStream(rawAlarmDsId).withPhenomenonTime(tBase.plusSeconds(10))
+                    .withResultTime(tBase.plusSeconds(10)).withResult(rawAlarmBlock).build());
+
+            AtomicInteger dsSelectEntriesCalls = new AtomicInteger();
+            AtomicInteger dsSelectKeysCalls = new AtomicInteger();
+            List<ObsFilter> recordedCountFilters = Collections.synchronizedList(new ArrayList<>());
+
+            var baseDsStore = mvDb.getDataStreamStore();
+            var countingDsStore = (org.sensorhub.api.datastore.obs.IDataStreamStore) java.lang.reflect.Proxy.newProxyInstance(
+                    org.sensorhub.api.datastore.obs.IDataStreamStore.class.getClassLoader(),
+                    new Class<?>[]{org.sensorhub.api.datastore.obs.IDataStreamStore.class},
+                    (proxy, method, args) -> {
+                        if ("selectEntries".equals(method.getName())) {
+                            dsSelectEntriesCalls.incrementAndGet();
+                        } else if ("selectKeys".equals(method.getName())) {
+                            dsSelectKeysCalls.incrementAndGet();
+                        }
+                        return method.invoke(baseDsStore, args);
+                    });
+
+            var baseObsStore = mvDb.getObservationStore();
+            var cqlAwareObsStore = (org.sensorhub.api.datastore.obs.IObsStore) java.lang.reflect.Proxy.newProxyInstance(
+                    org.sensorhub.api.datastore.obs.IObsStore.class.getClassLoader(),
+                    new Class<?>[]{org.sensorhub.api.datastore.obs.IObsStore.class},
+                    (proxy, method, args) -> {
+                        if ("countMatchingEntries".equals(method.getName())
+                                && args != null && args.length == 1
+                                && args[0] instanceof ObsFilter filter) {
+                            recordedCountFilters.add(filter);
+                            if (filter.getCQLFilter() != null) {
+                                var cql = filter.getCQLFilter();
+                                try (var stream = baseObsStore.select(filter)) {
+                                    return stream.filter(obs -> matchesSimpleStatsCql(
+                                            baseDsStore.get(new org.sensorhub.api.datastore.obs.DataStreamKey(obs.getDataStreamID())),
+                                            obs.getResult(),
+                                            cql)).count();
+                                }
+                            }
+                        }
+                        return method.invoke(baseObsStore, args);
+                    });
+
+            var instrumentedDb = (IObsSystemDatabase) java.lang.reflect.Proxy.newProxyInstance(
+                    IObsSystemDatabase.class.getClassLoader(),
+                    new Class<?>[]{IObsSystemDatabase.class},
+                    (proxy, method, args) -> {
+                        if ("getDataStreamStore".equals(method.getName())) {
+                            return countingDsStore;
+                        }
+                        if ("getObservationStore".equals(method.getName())) {
+                            return cqlAwareObsStore;
+                        }
+                        return method.invoke(mvDb, args);
+                    });
+
+            StatisticsOutput isolatedStats = new StatisticsOutput(system, instrumentedDb, 60);
+            isolatedStats.publishLatestStatistics();
+
+            // 1. Exactly one DataStreamStore metadata snapshot across all 4 windows (zero dead selectKeys calls)
+            assertEquals("Expected 0 dead DataStreamStore.selectKeys calls per publication", 0, dsSelectKeysCalls.get());
+            assertEquals("Expected exactly 1 DataStreamStore.selectEntries snapshot across all 4 windows", 1, dsSelectEntriesCalls.get());
+
+            // 2. No duplicate full-site faultCQL scan, and extendedOccupancyFaultCQL only scans occupancyStatus streams
+            Object parsedFaultCql = new ObsFilter.Builder().withCQLFilter(StatisticsOutput.faultCQL).build().getCQLFilter();
+            Object parsedExtFaultCql = new ObsFilter.Builder().withCQLFilter(StatisticsOutput.extendedOccupancyFaultCQL).build().getCQLFilter();
+            int extFaultQueries = 0;
+            for (ObsFilter filter : recordedCountFilters) {
+                assertNotEquals("StatisticsOutput must not issue a redundant full-site faultCQL scan",
+                        parsedFaultCql, filter.getCQLFilter());
+                if (Objects.equals(parsedExtFaultCql, filter.getCQLFilter())) {
+                    extFaultQueries++;
+                    assertNotNull(filter.getDataStreamFilter());
+                    assertEquals("extendedOccupancyFaultCQL must target only DEF_EXTENDED_OCCUPANCY_FAULT streams",
+                            Set.of(occStatusDsId), filter.getDataStreamFilter().getInternalIDs());
+                }
+            }
+            assertEquals("Expected 1 extendedOccupancyFaultCQL query per time window (4 windows)", 4, extFaultQueries);
+
+            // 3. Exact mathematical equivalence with legacy faultCQL + tamperCQL across all detector streams
+            var rec = isolatedStats.getLatestRecord();
+            assertNotNull(rec);
+            long expectedLegacyFaults = cqlAwareObsStore.countMatchingEntries(new ObsFilter.Builder()
+                    .withDataStreams(new DataStreamFilter.Builder()
+                            .withObservedProperties(
+                                    org.sensorhub.impl.utils.rad.RADHelper.DEF_GAMMA,
+                                    org.sensorhub.impl.utils.rad.RADHelper.DEF_NEUTRON,
+                                    org.sensorhub.impl.utils.rad.RADHelper.DEF_ALARM,
+                                    org.sensorhub.impl.utils.rad.RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT)
+                            .build())
+                    .withCQLFilter(StatisticsOutput.faultCQL)
+                    .build())
+                    + cqlAwareObsStore.countMatchingEntries(new ObsFilter.Builder()
+                    .withDataStreams(new DataStreamFilter.Builder()
+                            .withObservedProperties(org.sensorhub.impl.utils.rad.RADHelper.DEF_TAMPER)
+                            .build())
+                    .withCQLFilter(StatisticsOutput.tamperCQL)
+                    .build());
+            assertEquals(5L, expectedLegacyFaults);
+            assertEquals(1L, rec.getLongValue(1)); // numOccupancies (RS350 Gamma)
+            assertEquals(1L, rec.getLongValue(2)); // numGammaAlarms
+            assertEquals(0L, rec.getLongValue(3)); // numNeutronAlarms
+            assertEquals(0L, rec.getLongValue(4)); // numGammaNeutronAlarms
+            assertEquals("numFaults must equal legacy faultCQL + tamperCQL", expectedLegacyFaults, rec.getLongValue(5));
+            assertEquals(2L, rec.getLongValue(6)); // numGammaFaults (Gamma High + Gamma Low)
+            assertEquals(1L, rec.getLongValue(7)); // numNeutronFaults (Neutron High)
+            assertEquals(1L, rec.getLongValue(8)); // numTampers
+
+            // 4. Scoped populateDataBlock also executes exactly 1 DataStreamStore query
+            dsSelectEntriesCalls.set(0);
+            dsSelectKeysCalls.set(0);
+            var scopedBlock = statsControl.getResultDescription().copy().createDataBlock();
+            isolatedStats.populateDataBlock(scopedBlock, 0, Instant.EPOCH, Instant.now().plusSeconds(60), Set.of(laneUid));
+            assertEquals(0, dsSelectKeysCalls.get());
+            assertEquals("Expected exactly 1 DataStreamStore.selectEntries query per scoped statistics request",
+                    1, dsSelectEntriesCalls.get());
+            assertEquals(0L, scopedBlock.getLongValue(0));
+            assertEquals(5L, scopedBlock.getLongValue(4));
+            assertEquals(2L, scopedBlock.getLongValue(5));
+            assertEquals(1L, scopedBlock.getLongValue(6));
+            assertEquals(1L, scopedBlock.getLongValue(7));
+        } finally {
+            try {
+                mvDb.stop();
+            } catch (Exception ignored) {}
+            java.nio.file.Files.deleteIfExists(dbFile);
+        }
+    }
+
+    private static void addThreeFieldObs(
+            IObsSystemDatabase db,
+            BigId dsId,
+            net.opengis.swe.v20.DataComponent struct,
+            Instant time,
+            String alarmState,
+            int grossCount) {
+        var block = struct.createDataBlock();
+        block.setTimeStamp(0, time);
+        block.setStringValue(1, alarmState);
+        block.setIntValue(2, grossCount);
+        db.getObservationStore().add(new ObsData.Builder()
+                .withDataStream(dsId)
+                .withPhenomenonTime(time)
+                .withResultTime(time)
+                .withResult(block)
+                .build());
     }
 
     @Test

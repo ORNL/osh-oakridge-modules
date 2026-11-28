@@ -25,11 +25,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MessageHandler {
     private static final long STOP_WARNING_MILLIS = 2_000L;
+    private static final String[] EMPTY_TOKENS = new String[0];
 
     private final RapiscanSensor parentSensor;
 
-    List<String[]> csvList;
-    CSVReader reader;
     Boolean currentOccupancy = false;
     Boolean isGammaAlarm = false;
     Boolean isNeutronAlarm = false;
@@ -134,13 +133,12 @@ public class MessageHandler {
                         }
 
                         try {
-                            reader = new CSVReader(new StringReader(msgLine));
-                            csvList = reader.readAll();
+                            String[] tokens = splitCsvLine(msgLine);
 
-                            if (!csvList.isEmpty() && csvList.get(0).length > 0 && isRunning.get()) {
+                            if (tokens.length > 0 && isRunning.get()) {
                                 if (journal == null || journal.shouldPublishLegacyObservation())
                                     parentSensor.getDailyFileOutput().onNewMessage(msgLine, receivedAt);
-                                onNewMainChar(csvList.get(0)[0], csvList.get(0), receivedAt);
+                                onNewMainChar(tokens[0], tokens, receivedAt);
                             }
                         } catch (Exception e) {
                             if (isRunning.get()) {
@@ -504,6 +502,56 @@ public class MessageHandler {
         }
 
         return maxSum;
+    }
+
+    /**
+     * Fast-path ASCII CSV line splitter for 250-500 Hz RPM frames.
+     *
+     * <p>Standard Rapiscan lines are unquoted, comma-separated tokens (for example
+     * {@code GA,123,456,789,321}). Scanning directly with {@link String#indexOf(int, int)}
+     * eliminates per-line {@code StringReader}, 16 KiB {@code BufferedReader}, and
+     * {@code CSVReader} allocations while delegating any line containing quotes,
+     * backslash escapes, or embedded line breaks to {@link CSVReader} for exact
+     * RFC-4180 / OpenCSV parity (including malformed-quote exception semantics).</p>
+     */
+    static String[] splitCsvLine(String line) throws IOException {
+        if (line == null || line.isEmpty()) {
+            return EMPTY_TOKENS;
+        }
+        int len = line.length();
+        int fieldCount = 1;
+        for (int i = 0; i < len; i++) {
+            char c = line.charAt(i);
+            if (c == ',') {
+                fieldCount++;
+            } else if (c == '"' || c == '\\' || c == '\n' || c == '\r') {
+                return parseCsvLineWithOpenCsv(line);
+            }
+        }
+        if (fieldCount == 1) {
+            return new String[]{line};
+        }
+        String[] tokens = new String[fieldCount];
+        int tokenIndex = 0;
+        int start = 0;
+        int comma = line.indexOf(',');
+        while (comma >= 0) {
+            tokens[tokenIndex++] = line.substring(start, comma);
+            start = comma + 1;
+            comma = line.indexOf(',', start);
+        }
+        tokens[tokenIndex] = line.substring(start);
+        return tokens;
+    }
+
+    private static String[] parseCsvLineWithOpenCsv(String line) throws IOException {
+        try (CSVReader csvReader = new CSVReader(new StringReader(line))) {
+            List<String[]> rows = csvReader.readAll();
+            if (rows.isEmpty() || rows.get(0) == null) {
+                return EMPTY_TOKENS;
+            }
+            return rows.get(0);
+        }
     }
 
     static int getNeutronMax(List<Integer> neutronBatch) {

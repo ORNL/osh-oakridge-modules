@@ -12,7 +12,6 @@ import org.sensorhub.api.database.IObsSystemDatabase;
 import org.sensorhub.api.datastore.ICancellableDataStore;
 import org.sensorhub.api.datastore.obs.DataStreamFilter;
 import org.sensorhub.api.datastore.obs.ObsFilter;
-import org.sensorhub.api.resource.ResourceKey;
 import org.sensorhub.impl.sensor.AbstractSensorOutput;
 import org.sensorhub.impl.utils.rad.RADHelper;
 import org.sensorhub.utils.Async;
@@ -21,17 +20,14 @@ import org.vast.data.TextEncodingImpl;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.Set;
 import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
 
@@ -58,6 +54,23 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
     public static String rs350NeutronAlarmCQL = "alarmCategoryCode = 'Neutron'";
 
     private static final String DEF_ALARM_CATEGORY = RADHelper.getRadUri("AlarmCategoryCode");
+    private static final String[] STATS_OBSERVED_PROPERTIES = {
+            RADHelper.DEF_OCCUPANCY,
+            RADHelper.DEF_GAMMA,
+            RADHelper.DEF_NEUTRON,
+            RADHelper.DEF_ALARM,
+            RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT,
+            RADHelper.DEF_TAMPER,
+            DEF_ALARM_CATEGORY
+    };
+
+    private static final int PROP_OCCUPANCY = 1 << 0;
+    private static final int PROP_GAMMA = 1 << 1;
+    private static final int PROP_NEUTRON = 1 << 2;
+    private static final int PROP_ALARM = 1 << 3;
+    private static final int PROP_EXTENDED_OCCUPANCY_FAULT = 1 << 4;
+    private static final int PROP_TAMPER = 1 << 5;
+    private static final int PROP_ALARM_CATEGORY = 1 << 6;
 
     private final DataComponent recordDescription;
     private final DataEncoding recommendedEncoding;
@@ -66,17 +79,28 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
     private final Object lifecycleMonitor = new Object();
     private final Object workMonitor = new Object();
     private final ReentrantLock publicationLock = new ReentrantLock(true);
-    private final Set<StatisticsWork> activeWork = new java.util.HashSet<>();
+    private final Set<StatisticsWork> activeWork = new HashSet<>();
     private final ThreadLocal<Boolean> operationScope =
             ThreadLocal.withInitial(() -> Boolean.FALSE);
+    private final ThreadLocal<AtomicReference<ResolvedDataStreams>> publicationStreamSnapshot =
+            new ThreadLocal<>();
     private final AtomicReference<RuntimeException> unsafeStopFailure = new AtomicReference<>();
     private volatile boolean stopRequested;
     private long lifecycleGeneration;
     private ScheduledExecutorService service;
     private final IObsSystemDatabase database;
-    private Map<String, Set<BigId>> observedPropertyToDataStreamIds;
 
     private record LastStatisticObservationData(Instant timestamp, Statistics total) {
+
+    }
+
+    private record ResolvedDataStreams(
+            Set<BigId> occupancyStreams,
+            Set<BigId> gammaFaultStreams,
+            Set<BigId> neutronFaultStreams,
+            Set<BigId> extendedOccupancyFaultStreams,
+            Set<BigId> tamperStreams,
+            Set<BigId> rawAlarmCategoryStreams) {
 
     }
 
@@ -87,39 +111,6 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
         recordDescription = fac.createSiteStatistics();
         recommendedEncoding = new TextEncodingImpl();
         this.samplingPeriod = samplingPeriod;
-    }
-
-    /**
-     * Initializes the mapping between observed properties and their datastream IDs.
-     */
-    private void initializeDataStreamMapping() {
-        if (observedPropertyToDataStreamIds == null)
-            observedPropertyToDataStreamIds = new HashMap<>();
-
-        // Query for each observed property type
-        String[] observedProperties = {
-                RADHelper.DEF_OCCUPANCY,
-                RADHelper.DEF_GAMMA,
-                RADHelper.DEF_NEUTRON,
-                RADHelper.DEF_ALARM,
-                RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT,
-                RADHelper.DEF_TAMPER,
-                DEF_ALARM_CATEGORY
-        };
-
-        for (String property : observedProperties) {
-            Set<BigId> dataStreamIds;
-            try (var keys = database.getDataStreamStore()
-                    .selectKeys(new DataStreamFilter.Builder()
-                            .withObservedProperties(property)
-                            .build())) {
-                dataStreamIds = keys
-                        .map(ResourceKey::getInternalID)
-                        .collect(Collectors.toSet());
-            }
-
-            observedPropertyToDataStreamIds.put(property, dataStreamIds);
-        }
     }
 
     public void start() {
@@ -304,7 +295,6 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
     }
 
     protected void publishLatestStatisticsWithinScope() {
-        initializeDataStreamMapping();
         getLogger().info("Starting stats counting...");
         long calculationStarted = System.currentTimeMillis();
 
@@ -322,30 +312,35 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
         int i = 0;
         dataBlock.setTimeStamp(i++, now);
 
-        if (lastStatisticObservationData != null) {
-            Instant lastTimestamp = lastStatisticObservationData.timestamp();
-            Statistics previousTotal = lastStatisticObservationData.total();
-            Statistics incrementalStats = getStatsAfter(lastTimestamp, now, Set.of());
+        publicationStreamSnapshot.set(new AtomicReference<>());
+        try {
+            if (lastStatisticObservationData != null) {
+                Instant lastTimestamp = lastStatisticObservationData.timestamp();
+                Statistics previousTotal = lastStatisticObservationData.total();
+                Statistics incrementalStats = getStatsAfter(lastTimestamp, now, Set.of());
 
-            Statistics newTotal = previousTotal.add(incrementalStats);
+                Statistics newTotal = previousTotal.add(incrementalStats);
 
-            i = populateDataBlockWithStats(dataBlock, i, newTotal);
-        } else {
-            getLogger().debug("No previous stats observation found, calculating from epoch to {}", now);
-            i = populateDataBlock(dataBlock, i, Instant.EPOCH, now);
+                i = populateDataBlockWithStats(dataBlock, i, newTotal);
+            } else {
+                getLogger().debug("No previous stats observation found, calculating from epoch to {}", now);
+                i = populateDataBlock(dataBlock, i, Instant.EPOCH, now);
+            }
+
+            // last 30 days
+            Instant monthStart = now.minus(30, ChronoUnit.DAYS);
+            i = populateDataBlock(dataBlock, i, monthStart, now);
+
+            // last 7 days
+            Instant weekStart = now.minus(7, ChronoUnit.DAYS);
+            i = populateDataBlock(dataBlock, i, weekStart, now);
+
+            // last 24 hours
+            Instant dayStart = now.minus(24, ChronoUnit.HOURS);
+            populateDataBlock(dataBlock, i, dayStart, now);
+        } finally {
+            publicationStreamSnapshot.remove();
         }
-
-        // last 30 days
-        Instant monthStart = now.minus(30, ChronoUnit.DAYS);
-        i = populateDataBlock(dataBlock, i, monthStart, now);
-
-        // last 7 days
-        Instant weekStart = now.minus(7, ChronoUnit.DAYS);
-        i = populateDataBlock(dataBlock, i, weekStart, now);
-
-        // last 24 hours
-        Instant dayStart = now.minus(24, ChronoUnit.HOURS);
-        populateDataBlock(dataBlock, i, dayStart, now);
 
         latestRecord = dataBlock;
         latestRecordTime = now.toEpochMilli();
@@ -435,18 +430,41 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
     }
 
     private Statistics getStats(Range<Instant> timeRange, Collection<String> laneUIDs) {
-        long numOccupancies = countObservations(database, null, timeRange, laneUIDs, RADHelper.DEF_OCCUPANCY);
-        long numGammaAlarms = countObservations(database, gammaAlarmCQL, timeRange, laneUIDs, RADHelper.DEF_OCCUPANCY);
-        long numNeutronAlarms = countObservations(database, neutronAlarmCQL, timeRange, laneUIDs, RADHelper.DEF_OCCUPANCY);
-        long numGammaNeutronAlarms = countObservations(database, gammaNeutronAlarmCQL, timeRange, laneUIDs, RADHelper.DEF_OCCUPANCY);
-        long numGammaFaults = countObservations(database, gammaFaultCQL, timeRange, laneUIDs, RADHelper.DEF_GAMMA, RADHelper.DEF_ALARM);
-        long numNeutronFaults = countObservations(database, neutronFaultCQL, timeRange, laneUIDs, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM);
-        long numTampers = countObservations(database, tamperCQL, timeRange, laneUIDs, RADHelper.DEF_TAMPER);
-        long numFaults = countObservations(database, faultCQL, timeRange, laneUIDs, RADHelper.DEF_GAMMA, RADHelper.DEF_NEUTRON, RADHelper.DEF_ALARM, RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT) + numTampers;
+        ResolvedDataStreams streams = getOrResolveDataStreams(laneUIDs);
+        long numOccupancies = countObservationsOnStreams(database, null, timeRange, streams.occupancyStreams());
+        long numGammaAlarms = countObservationsOnStreams(database, gammaAlarmCQL, timeRange, streams.occupancyStreams());
+        long numNeutronAlarms = countObservationsOnStreams(database, neutronAlarmCQL, timeRange, streams.occupancyStreams());
+        long numGammaNeutronAlarms = countObservationsOnStreams(database, gammaNeutronAlarmCQL, timeRange, streams.occupancyStreams());
+        long numGammaFaults = countObservationsOnStreams(database, gammaFaultCQL, timeRange, streams.gammaFaultStreams());
+        long numNeutronFaults = countObservationsOnStreams(database, neutronFaultCQL, timeRange, streams.neutronFaultStreams());
+        long numExtendedOccupancyFaults = countObservationsOnStreams(
+                database, extendedOccupancyFaultCQL, timeRange, streams.extendedOccupancyFaultStreams());
+        long numTampers = countObservationsOnStreams(database, tamperCQL, timeRange, streams.tamperStreams());
+        // Mathematical equivalence proof for numFaults (eliminating a duplicate full-site faultCQL
+        // scan over high-volume gammaCounts/neutronCounts telemetry):
+        //   1. faultCQL is the 4-way disjunction of gammaFaultCQL ('Fault - Gamma Low' OR
+        //      'Fault - Gamma High'), neutronFaultCQL ('Fault - Neutron High'), and
+        //      extendedOccupancyFaultCQL ('Fault - Extended Occupancy') on the single scalar SWE
+        //      Category field `alarmState`. Because a single scalar value cannot simultaneously
+        //      equal two distinct literals, the three predicates are pairwise mutually exclusive
+        //      on every observation across all detector types (Rapiscan, Aspect, RS-350, D3S, D5,
+        //      and lane OccupancyStatusOutput).
+        //   2. Gamma faults are emitted exclusively by GammaOutput (DEF_GAMMA + DEF_ALARM),
+        //      neutron faults exclusively by NeutronOutput (DEF_NEUTRON + DEF_ALARM), and
+        //      extended occupancy faults exclusively by OccupancyStatusOutput
+        //      (DEF_EXTENDED_OCCUPANCY_FAULT, whose allowed alarmState values are strictly
+        //      'Clear' and 'Fault - Extended Occupancy'). RS-350 (AlarmOutput/BackgroundOutput/
+        //      ForegroundOutput/StatusOutput), N42Output, OccupancyExtended, Kromek D3S, and
+        //      Kromek D5 carry no `alarmState` field and contribute 0 to all three predicates.
+        //   3. All three CQL predicates map to exact oscar_archive_schema summary counters in
+        //      JsonCqlEvaluator.summaryCounterSpec(...), and scoping extendedOccupancyFaultCQL to
+        //      DEF_EXTENDED_OCCUPANCY_FAULT queries only low-volume occupancyStatus streams
+        //      instead of re-scanning 5 Hz RAW_TELEMETRY streams.
+        long numFaults = numGammaFaults + numNeutronFaults + numExtendedOccupancyFaults + numTampers;
 
         // Standalone RS350 alarm counts from raw AlarmOutput only; exclude OccupancyExtended
         // datastreams (which also carry DEF_ALARM_CATEGORY) so they are never double-counted.
-        Set<BigId> rawAlarmStreamIds = selectNonOccupancyAlarmCategoryStreamIds(database, laneUIDs);
+        Set<BigId> rawAlarmStreamIds = streams.rawAlarmCategoryStreams();
         long numRS350GammaAlarms = countObservationsOnStreams(database, rs350GammaAlarmCQL, timeRange, rawAlarmStreamIds);
         long numRS350NeutronAlarms = countObservationsOnStreams(database, rs350NeutronAlarmCQL, timeRange, rawAlarmStreamIds);
         numGammaAlarms += numRS350GammaAlarms;
@@ -465,11 +483,26 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
                 .build();
     }
 
-    private Set<BigId> selectNonOccupancyAlarmCategoryStreamIds(
+    private ResolvedDataStreams getOrResolveDataStreams(Collection<String> laneUIDs) {
+        if (laneUIDs == null || laneUIDs.isEmpty()) {
+            AtomicReference<ResolvedDataStreams> holder = publicationStreamSnapshot.get();
+            if (holder != null) {
+                ResolvedDataStreams cached = holder.get();
+                if (cached == null) {
+                    cached = resolveDataStreams(database, Set.of());
+                    holder.set(cached);
+                }
+                return cached;
+            }
+        }
+        return resolveDataStreams(database, laneUIDs);
+    }
+
+    private ResolvedDataStreams resolveDataStreams(
             IObsSystemDatabase database,
             Collection<String> laneUIDs) {
         var dsFilterBuilder = new DataStreamFilter.Builder()
-                .withObservedProperties(DEF_ALARM_CATEGORY);
+                .withObservedProperties(STATS_OBSERVED_PROPERTIES);
 
         if (laneUIDs != null && !laneUIDs.isEmpty()) {
             dsFilterBuilder.withSystems()
@@ -478,16 +511,79 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
                     .done();
         }
 
-        Set<BigId> rawAlarmStreams = new java.util.HashSet<>();
+        Set<BigId> occupancyStreams = new HashSet<>();
+        Set<BigId> gammaFaultStreams = new HashSet<>();
+        Set<BigId> neutronFaultStreams = new HashSet<>();
+        Set<BigId> extendedOccupancyFaultStreams = new HashSet<>();
+        Set<BigId> tamperStreams = new HashSet<>();
+        Set<BigId> rawAlarmCategoryStreams = new HashSet<>();
+
         try (var entries = database.getDataStreamStore().selectEntries(dsFilterBuilder.build())) {
             entries.forEach(entry -> {
+                BigId id = entry.getKey() != null ? entry.getKey().getInternalID() : null;
                 DataComponent struct = entry.getValue() != null ? entry.getValue().getRecordStructure() : null;
-                if (!isOccupancyDataStream(struct)) {
-                    rawAlarmStreams.add(entry.getKey().getInternalID());
+                if (id == null || struct == null) {
+                    return;
+                }
+                int propMask = collectObservedPropertyMask(struct);
+                if ((propMask & PROP_OCCUPANCY) != 0) {
+                    occupancyStreams.add(id);
+                }
+                if ((propMask & (PROP_GAMMA | PROP_ALARM)) != 0) {
+                    gammaFaultStreams.add(id);
+                }
+                if ((propMask & (PROP_NEUTRON | PROP_ALARM)) != 0) {
+                    neutronFaultStreams.add(id);
+                }
+                if ((propMask & PROP_EXTENDED_OCCUPANCY_FAULT) != 0) {
+                    extendedOccupancyFaultStreams.add(id);
+                }
+                if ((propMask & PROP_TAMPER) != 0) {
+                    tamperStreams.add(id);
+                }
+                if ((propMask & PROP_ALARM_CATEGORY) != 0 && !isOccupancyDataStream(struct)) {
+                    rawAlarmCategoryStreams.add(id);
                 }
             });
         }
-        return rawAlarmStreams;
+
+        return new ResolvedDataStreams(
+                Set.copyOf(occupancyStreams),
+                Set.copyOf(gammaFaultStreams),
+                Set.copyOf(neutronFaultStreams),
+                Set.copyOf(extendedOccupancyFaultStreams),
+                Set.copyOf(tamperStreams),
+                Set.copyOf(rawAlarmCategoryStreams));
+    }
+
+    private static int collectObservedPropertyMask(DataComponent comp) {
+        if (comp == null) {
+            return 0;
+        }
+        int mask = 0;
+        String def = comp.getDefinition();
+        if (def != null) {
+            if (RADHelper.DEF_OCCUPANCY.equals(def)) {
+                mask |= PROP_OCCUPANCY;
+            } else if (RADHelper.DEF_GAMMA.equals(def)) {
+                mask |= PROP_GAMMA;
+            } else if (RADHelper.DEF_NEUTRON.equals(def)) {
+                mask |= PROP_NEUTRON;
+            } else if (RADHelper.DEF_ALARM.equals(def)) {
+                mask |= PROP_ALARM;
+            } else if (RADHelper.DEF_EXTENDED_OCCUPANCY_FAULT.equals(def)) {
+                mask |= PROP_EXTENDED_OCCUPANCY_FAULT;
+            } else if (RADHelper.DEF_TAMPER.equals(def)) {
+                mask |= PROP_TAMPER;
+            } else if (DEF_ALARM_CATEGORY.equals(def)) {
+                mask |= PROP_ALARM_CATEGORY;
+            }
+        }
+        int count = comp.getComponentCount();
+        for (int i = 0; i < count; i++) {
+            mask |= collectObservedPropertyMask(comp.getComponent(i));
+        }
+        return mask;
     }
 
     private static boolean isOccupancyDataStream(DataComponent struct) {
@@ -520,35 +616,6 @@ public class StatisticsOutput extends AbstractSensorOutput<OSCARSystem> {
         if (cqlValue != null && !cqlValue.isBlank()) {
             obsBuilder.withCQLFilter(cqlValue);
         }
-        return database.getObservationStore().countMatchingEntries(obsBuilder.build());
-    }
-
-    /**
-     * Counts observations from database (used by external callers like submitCommand).
-     */
-    private long countObservations(IObsSystemDatabase database, String cqlValue, Range<Instant> timeRange,
-                                   Collection<String> laneUIDs, String... observedProperty) {
-        var dsFilterBuilder = new DataStreamFilter.Builder()
-                .withObservedProperties(observedProperty);
-
-        if (laneUIDs != null && !laneUIDs.isEmpty()) {
-            dsFilterBuilder.withSystems()
-                    .withUniqueIDs(laneUIDs.toArray(String[]::new))
-                    .includeMembers(true)
-                    .done();
-        }
-
-        var dsFilter = dsFilterBuilder.build();
-
-        var obsBuilder = new ObsFilter.Builder().withDataStreams(dsFilter);
-
-        if (timeRange != null)
-            obsBuilder.withPhenomenonTime().withRange(timeRange).done();
-
-        if (cqlValue != null &&  !cqlValue.isBlank()) {
-            obsBuilder.withCQLFilter(cqlValue);
-        }
-
         return database.getObservationStore().countMatchingEntries(obsBuilder.build());
     }
 

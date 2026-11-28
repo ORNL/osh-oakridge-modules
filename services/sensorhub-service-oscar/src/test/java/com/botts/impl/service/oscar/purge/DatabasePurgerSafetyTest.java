@@ -1060,6 +1060,117 @@ public class DatabasePurgerSafetyTest {
         assertEquals(twoHoursAgo, legacyRemaining.get(0).getPhenomenonTime());
     }
 
+    public interface ParquetPrimaryObsStore extends IObsStore {
+        boolean isParquetPrimary();
+    }
+
+    @Test
+    public void parquetPrimaryWithJournalShortCircuitsDailyFileCatchUpAndWindowPurgeWithZeroStoreQueries() throws Exception {
+        LocalDate day = LocalDate.of(2026, 10, 15);
+        BigId system = addSystem(null, "urn:test:lane:parquet-primary-journal");
+        BigId daily = addDataStream(system, "urn:test:lane:parquet-primary-journal", "dailyFile",
+                dailyFileStructure());
+        addStringObservation(daily, DatabasePurger.dayWindow(day, ZoneOffset.UTC)
+                .startInclusive().plusSeconds(1), "archived-in-parquet");
+
+        AtomicInteger dataStreamQueries = new AtomicInteger();
+        AtomicInteger obsStoreQueries = new AtomicInteger();
+        IObsSystemDatabase parquetPrimaryDb = parquetPrimaryCountingDatabase(
+                dataStreamQueries, obsStoreQueries);
+
+        ToggleJournal journal = new ToggleJournal(ZoneOffset.UTC);
+        journal.published.set(true);
+        journal.earliestJournalDay = day;
+
+        DatabasePurger purger = new DatabasePurger(parquetPrimaryDb, bucketStore, 0, journal,
+                ZoneOffset.UTC, Clock.fixed(NOW, ZoneOffset.UTC), true, 50);
+
+        purger.executeHourlyPurge();
+        purger.exportAndPurgeDailyFileData();
+        purger.exportAndPurgeDailyFileData(DatabasePurger.dayWindow(day, ZoneOffset.UTC));
+
+        assertEquals("PARQUET_PRIMARY with journal must not query DataStreamStore for daily-file catch-up",
+                0, dataStreamQueries.get());
+        assertEquals("PARQUET_PRIMARY with journal must not execute cold ObservationStore queries",
+                0, obsStoreQueries.get());
+        assertTrue("PARQUET_PRIMARY with journal must not poll per-feed journal publication",
+                journal.requestedDays.isEmpty());
+        assertEquals("PARQUET_PRIMARY owns observation lifecycle; rows must not be deleted by DatabasePurger",
+                1, observations(daily).size());
+    }
+
+    @Test
+    public void parquetPrimaryWithoutJournalStillExportsLegacyCsvWithoutDeletingRows() throws Exception {
+        DatabasePurger.DayWindow window = DatabasePurger.previousCompletedDayWindow(NOW, ZoneOffset.UTC);
+        BigId populatedSystem = addSystem(null, "urn:test:lane:legacy-populated");
+        BigId populatedDaily = addDataStream(populatedSystem, "urn:test:lane:legacy-populated",
+                "dailyFile", dailyFileStructure());
+        addStringObservation(populatedDaily, window.startInclusive().plusSeconds(60), "GA,1,2,3,4");
+
+        BigId emptySystem = addSystem(null, "urn:test:lane:legacy-empty");
+        addDataStream(emptySystem, "urn:test:lane:legacy-empty", "dailyFile", dailyFileStructure());
+
+        IObsSystemDatabase parquetPrimaryDb = parquetPrimaryCountingDatabase(
+                new AtomicInteger(), new AtomicInteger());
+        DatabasePurger purger = new DatabasePurger(parquetPrimaryDb, bucketStore, 0, null,
+                ZoneOffset.UTC, Clock.fixed(NOW, ZoneOffset.UTC), true, 50);
+
+        purger.exportAndPurgeDailyFileData();
+
+        String populatedKey = "legacy-populated_" + window.day() + ".csv";
+        String emptyKey = "legacy-empty_" + window.day() + ".csv";
+        assertTrue("Legacy no-journal mode must still export populated daily-file CSV",
+                bucketStore.objectExists(DatabasePurger.DAILY_FILES_BUCKET, populatedKey));
+        assertTrue("Legacy no-journal mode must still export header-only CSV for empty days",
+                bucketStore.objectExists(DatabasePurger.DAILY_FILES_BUCKET, emptyKey));
+        assertEquals("PARQUET_PRIMARY must still skip row deletion after legacy CSV export",
+                1, observations(populatedDaily).size());
+    }
+
+    private IObsSystemDatabase parquetPrimaryCountingDatabase(
+            AtomicInteger dataStreamQueries,
+            AtomicInteger obsStoreQueries) {
+        IDataStreamStore delegateDs = database.getDataStreamStore();
+        IDataStreamStore countingDs = (IDataStreamStore) Proxy.newProxyInstance(
+                IDataStreamStore.class.getClassLoader(),
+                new Class<?>[]{IDataStreamStore.class},
+                (proxy, method, args) -> {
+                    if (method.getName().startsWith("select")) {
+                        dataStreamQueries.incrementAndGet();
+                    }
+                    return invokeDelegate(method, delegateDs, args);
+                });
+
+        IObsStore delegateObs = database.getObservationStore();
+        ParquetPrimaryObsStore countingObs = (ParquetPrimaryObsStore) Proxy.newProxyInstance(
+                ParquetPrimaryObsStore.class.getClassLoader(),
+                new Class<?>[]{ParquetPrimaryObsStore.class},
+                (proxy, method, args) -> {
+                    if ("isParquetPrimary".equals(method.getName()) && method.getParameterCount() == 0) {
+                        return Boolean.TRUE;
+                    }
+                    if (method.getName().startsWith("select")
+                            || method.getName().startsWith("remove")
+                            || "countMatchingEntries".equals(method.getName())) {
+                        obsStoreQueries.incrementAndGet();
+                    }
+                    return invokeDelegate(method, delegateObs, args);
+                });
+
+        return (IObsSystemDatabase) Proxy.newProxyInstance(
+                IObsSystemDatabase.class.getClassLoader(),
+                new Class<?>[]{IObsSystemDatabase.class},
+                (proxy, method, args) -> {
+                    if ("getDataStreamStore".equals(method.getName()) && method.getParameterCount() == 0) {
+                        return countingDs;
+                    }
+                    if ("getObservationStore".equals(method.getName()) && method.getParameterCount() == 0) {
+                        return countingObs;
+                    }
+                    return invokeDelegate(method, database, args);
+                });
+    }
+
     private DataComponent legacyOccupancyStatusStructure() {
         RADHelper helper = new RADHelper();
         return helper.createRecord()

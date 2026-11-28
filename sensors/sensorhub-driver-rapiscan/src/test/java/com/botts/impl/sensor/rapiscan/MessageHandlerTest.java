@@ -3,6 +3,7 @@ package com.botts.impl.sensor.rapiscan;
 import com.botts.impl.sensor.rapiscan.output.DailyFileOutput;
 import com.botts.impl.sensor.rapiscan.output.GammaOutput;
 import com.botts.impl.sensor.rapiscan.output.TamperOutput;
+import com.opencsv.CSVReader;
 import org.junit.Test;
 import org.sensorhub.impl.utils.rad.model.Occupancy;
 import org.sensorhub.impl.utils.rad.output.OccupancyOutput;
@@ -10,6 +11,7 @@ import org.sensorhub.impl.utils.rad.output.OccupancyOutput;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -18,7 +20,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class MessageHandlerTest {
@@ -91,6 +95,61 @@ public class MessageHandlerTest {
         assertTrue(occupancy != null);
         assertEquals(start.toEpochMilli(), Math.round(occupancy.getStartTime() * 1_000.0));
         assertEquals(end.toEpochMilli(), Math.round(occupancy.getEndTime() * 1_000.0));
+    }
+
+    @Test
+    public void splitCsvLineMatchesOpenCsvAcrossRapiscanAspectAndEdgeCases() throws Exception {
+        String[] sampleLines = {
+                // Standard Rapiscan RPM frame types (250-500 Hz hot path)
+                "GA,123,456,789,321",
+                "GB,00123,00456,00789,00321,123456",
+                "GH,99999,99999,99999,99999",
+                "GL,00001,00001,00001,00001",
+                "GS,100,200,300,400",
+                "GX,42,1500",
+                "NA,12,14,15,16",
+                "NB,0001,0002,0001,0002",
+                "NH,500,500,500,500",
+                "NS,2,3,1,4",
+                "TC,111111,111111,111111,111111",
+                "TT,111111,111111,111111,111111",
+                "SP,12.5,0",
+                "SP",
+                "SG1,000525,000070,06,12,08.3,P,00-32-23.236,03-32-23.236",
+                "SG2,1110,0.072,0.460,02,1010,T,00-32-23.258,03-32-23.258",
+                "SG3,0.071,0.459,030,002,1.12.0,00-32-23.258,03-32-23.258",
+                "SN1,000065,04,0005,1350,02,180,00-32-23.264,03-32-23.264",
+                "SN2,0.512,5.120,0.515,5.150,PP,00-32-23.302,03-32-23.302",
+                // Aspect 14-field daily-file CSV format
+                "123456,1,1,4321,118.5,14.25,0,9,1.75,0.5,77,4,5400,3",
+                // Trailing/consecutive empty fields and whitespace preservation
+                "GA,1,2,",
+                "GA,,2,",
+                ",",
+                "   ",
+                "SP, 12.34 , 56.78 ",
+                // Quoted and escaped RFC-4180 / OpenCSV fallback edge cases
+                "\"GA\",1,2,3,4",
+                "GA,\"1,2\",3,4",
+                "\"a\"\"b\",c,\"d\"",
+                "GA,1\\,2,3"
+        };
+
+        for (String line : sampleLines) {
+            String[] expected;
+            try (CSVReader ref = new CSVReader(new StringReader(line))) {
+                List<String[]> rows = ref.readAll();
+                expected = rows.isEmpty() ? new String[0] : rows.get(0);
+            }
+            assertArrayEquals("Tokenization mismatch for line: [" + line + "]",
+                    expected, MessageHandler.splitCsvLine(line));
+        }
+
+        assertArrayEquals(new String[0], MessageHandler.splitCsvLine(""));
+        assertArrayEquals(new String[0], MessageHandler.splitCsvLine(null));
+        assertThrows("Malformed unterminated quote must still fail via CSVReader fallback",
+                IOException.class,
+                () -> MessageHandler.splitCsvLine("\"unterminated,quote"));
     }
 
     private RapiscanSensor configuredSensor() {
