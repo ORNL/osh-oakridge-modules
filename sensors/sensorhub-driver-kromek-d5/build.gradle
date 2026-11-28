@@ -10,8 +10,7 @@ dependencies {
     implementation 'org.sensorhub:sensorhub-core:' + oshCoreVersion
     implementation project(':sensorhub-utils-rad')
     implementation 'com.fazecast:jSerialComm:2.6.2'
-    implementation 'junit:junit:4.13.1'
-    testImplementation('junit:junit:4.13.1')
+    testImplementation('junit:junit:4.13.2')
 }
 
 // exclude tests requiring connection to the sensor
@@ -20,6 +19,7 @@ dependencies {
 //          exclude '**/TestNameClass.class'
 test {
     useJUnit()
+    exclude '**/ConnectionTest.class'
 }
 
 // add info to OSGi manifest

@@ -6,7 +6,7 @@ version = '1.0.0'
 
 repositories {
     maven {
-        { url "https://openhab.jfrog.io/artifactory/libs-release" }
+        { url = "https://openhab.jfrog.io/artifactory/libs-release" }
 //        { url "https://maven.vaadin.com/vaadin-addons" }
     }
 }

@@ -6,7 +6,7 @@ dependencies {
     implementation 'org.sensorhub:sensorhub-core:' + oshCoreVersion
     implementation project(':sensorhub-utils-rad')
 //    implementation project('sensorhub-driver-simulation')
-    testImplementation('junit:junit:4.13.1')
+    testImplementation('junit:junit:4.13.2')
 }
 
 // exclude tests requiring connection to the sensor

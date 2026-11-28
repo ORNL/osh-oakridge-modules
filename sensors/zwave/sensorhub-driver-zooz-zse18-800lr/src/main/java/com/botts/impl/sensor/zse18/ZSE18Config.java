@@ -14,7 +14,6 @@
 package com.botts.impl.sensor.zse18;
 
 import com.botts.sensorhub.impl.zwave.comms.ZwaveCommServiceConfig;
-import org.checkerframework.framework.qual.DefaultQualifierForUse;
 import org.sensorhub.api.config.DisplayInfo;
 import org.sensorhub.api.sensor.PositionConfig;
 import org.sensorhub.api.sensor.PositionConfig.LLALocation;

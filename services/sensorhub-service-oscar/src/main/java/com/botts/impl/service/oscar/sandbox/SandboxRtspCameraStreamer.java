@@ -838,6 +838,7 @@ public final class SandboxRtspCameraStreamer implements Closeable {
                 hls: no
                 webrtc: no
                 srt: no
+                moq: no
                 rtsp: yes
                 rtspTransports: [tcp]
                 rtspAddress: 127.0.0.1:%d

@@ -11,10 +11,10 @@ dependencies {
     implementation project(':sensorhub-system-lane') // Lane for loading via spreadsheet
     implementation project(':sensorhub-process-ocr') // Runtime OCR model & engine extensions
     implementation project(':sensorhub-service-bucket') // service for file system
-    implementation("org.apache.pdfbox:pdfbox:3.0.3") // vector PDF generation (Apache-2.0)
-    implementation("com.hierynomus:smbj:0.13.0") // pure-Java user-space SMBv2/SMBv3 client for WCO UFF shares
+    implementation("org.apache.pdfbox:pdfbox:3.0.8") // vector PDF generation (Apache-2.0)
+    implementation("com.hierynomus:smbj:0.15.0") // pure-Java user-space SMBv2/SMBv3 client for WCO UFF shares
 
-    embeddedApi 'org.bytedeco:ffmpeg-platform:7.1-1.5.11'
+    embeddedApi 'org.bytedeco:ffmpeg-platform:7.1.1-1.5.12'
     implementation project(':sensorhub-driver-ffmpeg')
 
     testImplementation 'org.sensorhub:sensorhub-datastore-h2:' + oshCoreVersion
