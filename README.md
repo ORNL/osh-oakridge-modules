@@ -4,7 +4,7 @@ OpenSensorHub sensor, lane, adjudication, retained-media, and daily-journal modu
 
 ## OSCAR operator documentation
 
-The complete OSCAR 4.0.0 administration and operations manual is available in every supported language:
+The complete OSCAR 4.0.0-dev.1 administration and operations manual is available in every supported language:
 
 - [English](services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README.md)
 - [Español](services/sensorhub-service-oscar/src/main/resources/com/botts/impl/service/oscar/i18n/README_es.md)
@@ -20,7 +20,7 @@ The durable RPM journal, immutable legacy daily-file format, recovery procedure,
 and operator checks are documented in
 [`docs/daily-file-journal-v1.md`](docs/daily-file-journal-v1.md).
 
-OSCAR 4.0.0 uses the tiered PostgreSQL/Parquet database, required direct daily-file journal, and
+OSCAR 4.0.0-dev.1 uses the tiered PostgreSQL/Parquet database, required direct daily-file journal, and
 exact-five JPEG retained-media implementation in this repository. Deployment-level archive,
 retention-hold, portable-export, coordinated-backup, restore, deletion, and optional side-by-side
 CAS Rapiscan RPM Edge Proxy (`oscar-rpm-proxy`) commands are documented

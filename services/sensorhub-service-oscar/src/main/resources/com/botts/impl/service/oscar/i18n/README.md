@@ -1,4 +1,4 @@
-# OSCAR 4.0.0 administrator and operator manual
+# OSCAR 4.0.0-dev.1 administrator and operator manual
 
 This manual covers the complete first-use and operations workflow including certificate trust, sign-in, site-diagram georeferencing, lane import/manual creation, alarm adjudication and evidence, event review, national statistics, reports, and node federation.
 
@@ -32,7 +32,7 @@ The screenshots show the English interface. OSCAR also supplies Spanish, French,
 
 You need:
 
-- an installed and running OSCAR 4.0.0 deployment;
+- an installed and running OSCAR 4.0.0-dev.1 deployment;
 - the OSCAR URL, normally `https://oscar.local/` unless deployment selected another hostname;
 - an administrator account for `/sensorhub/admin`;
 - the approved site image and the latitude/longitude of its lower-left and upper-right corners;
@@ -1151,7 +1151,7 @@ managed snapshot is removed automatically.
 Use the release launcher's `archive status`, `archive verify`, hold, portable-export, and tokenized
 dry-run/purge workflows, plus `backup` and `backup-verify` only in `single` mode. Protect the backup
 encryption key separately and retain an off-host copy if site policy requires another failure
-domain. Never delete cataloged archive/media files directly. OSCAR 4.0.0 establishes the clean-start
+domain. Never delete cataloged archive/media files directly. OSCAR 4.0.0-dev.1 establishes the clean-start
 global baseline: pre-4.0 pilot deployments (`3.5`–`3.12`) perform a fresh `oscar init` installation,
 and all future `4.0.0 -> 4.x -> 5.x` releases — including future PostgreSQL major versions — upgrade
 cleanly in place with automatic side-by-side rollback safety.
@@ -1338,7 +1338,7 @@ The sandbox reuses the installed OSCAR images with disposable volumes (`oscar_sa
 
 ### 13.3 Zero-login GitHub & air-gapped system update and bare-metal Autoinstall USB Creator
 
-Administrators can update OSCAR directly from **OSCAR Viewer -> Users & Access (`/users?tab=update`) -> System Update** (or via `sudo bash oscar.sh update check|apply` on Ubuntu 24.04 and `.\oscar.bat update check|apply` on Windows 11) **without any GitHub login, OAuth account, or Personal Access Token**. OSCAR resolves official `ORNL/oscar` releases anonymously, verifies the expected SHA-256 digest before unpacking into a clean sibling directory, preserves `.env`, `secrets/`, `tls/`, and Docker volumes, and automatically rolls back if container startup or HTTPS `/healthz` checks fail. On air-gapped portals without internet access, administrators can upload `oscar-<version>.zip` directly in the same panel.
+Administrators can update OSCAR directly from **OSCAR Viewer -> Users & Access (`/users?tab=update`) -> System Update** (or via `sudo bash oscar.sh update check|apply` on Ubuntu 24.04/26.04 LTS and `.\oscar.bat update check|apply` on Windows 11) **without any GitHub login, OAuth account, or Personal Access Token**. By default, OSCAR tracks the **`Production (Stable — Latest)`** release channel (`releases/latest`), while evaluation or staging portals can explicitly opt into **`Development (Pre-release — Opt-in)`** in the same panel (or via `--channel dev` / `update channel dev`) to pull Dev pre-releases anonymously via `releases.atom` with clear pre-release warnings and seamless in-place promotion back to Production once GA ships. OSCAR verifies the expected SHA-256 digest before unpacking into a clean sibling directory, preserves `.env`, `secrets/`, `tls/`, and Docker volumes, and automatically rolls back if container startup or HTTPS `/healthz` checks fail. On air-gapped portals without internet access, administrators can upload `oscar-<version>.zip` directly in the same panel.
 
 ![Zero-Login GitHub & Offline System Update](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/54-zero-login-github-system-update.png)
 
@@ -1437,4 +1437,4 @@ When collecting support data, export a redacted troubleshooting support bundle (
 
 ---
 
-Document baseline: OSCAR 4.0.0 source behavior, reviewed 2026-10-18. If a later release changes fields or workflows, update the English canonical manual and all three translations together.
+Document baseline: OSCAR 4.0.0-dev.1 source behavior, reviewed 2026-10-18. If a later release changes fields or workflows, update the English canonical manual and all three translations together.

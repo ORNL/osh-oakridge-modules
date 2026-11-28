@@ -112,7 +112,55 @@ public final class SystemUpdateHostBridge {
                 }
             }
         }
-        return "3.12.0";
+        return "4.0.0-dev.1";
+    }
+
+    public String getReleaseChannel() {
+        Path channelFile = controlDir.resolve("channel.json");
+        if (Files.isRegularFile(channelFile)) {
+            try {
+                String raw = Files.readString(channelFile, StandardCharsets.UTF_8);
+                JsonElement parsed = JsonParser.parseString(raw);
+                if (parsed != null && parsed.isJsonObject()) {
+                    String val = optString(parsed.getAsJsonObject(), "channel");
+                    if (!val.isBlank()) {
+                        return SystemUpdateReleaseChecker.normalizeChannel(val);
+                    }
+                }
+            } catch (Exception e) {
+                if (log != null) {
+                    log.warn("Failed reading system-update channel.json: {}", e.getMessage());
+                }
+            }
+        }
+        String envChannel = System.getenv("OSCAR_UPDATE_CHANNEL");
+        if (envChannel != null && !envChannel.isBlank()) {
+            return SystemUpdateReleaseChecker.normalizeChannel(envChannel);
+        }
+        return SystemUpdateReleaseChecker.CHANNEL_STABLE;
+    }
+
+    public synchronized String setReleaseChannel(String requestedChannel, String username) throws IOException {
+        assertOperationalUpgradeAllowed();
+        if (requestedChannel == null || requestedChannel.isBlank()) {
+            throw new IllegalArgumentException("A release channel ('stable' or 'dev') is required.");
+        }
+        String trimmed = requestedChannel.trim().toLowerCase(Locale.ROOT);
+        if (!SystemUpdateReleaseChecker.CHANNEL_STABLE.equals(trimmed)
+                && !SystemUpdateReleaseChecker.CHANNEL_DEV.equals(trimmed)) {
+            throw new IllegalArgumentException(
+                    "Unsupported release channel '" + requestedChannel + "' (expected 'stable' or 'dev').");
+        }
+        Files.createDirectories(controlDir);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("channel", trimmed);
+        payload.put("updatedAt", Instant.now().toString());
+        payload.put("updatedBy", (username == null || username.isBlank()) ? "admin" : username);
+        Path tmp = controlDir.resolve("channel.json.tmp." + UUID.randomUUID());
+        Path target = controlDir.resolve("channel.json");
+        Files.writeString(tmp, GSON.toJson(payload) + "\n", StandardCharsets.UTF_8);
+        Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        return trimmed;
     }
 
     public boolean isGuiUpdateEnabledByEnv() {
@@ -144,14 +192,16 @@ public final class SystemUpdateHostBridge {
         }
 
         boolean hostBridgeEnabled = !obj.has("guiUpdateEnabled") || optBoolean(obj, "guiUpdateEnabled", true);
+        String releaseChannel = getReleaseChannel();
         obj.addProperty("currentVersion", currentVersion);
+        obj.addProperty("releaseChannel", releaseChannel);
         obj.addProperty("sandboxMode", sandboxMode);
         obj.addProperty("guiUpdateEnabled", envEnabled && hostBridgeEnabled && !sandboxMode);
         obj.addProperty("requiresGitHubLogin", false);
         if (!obj.has("availableDiskGib")) {
             obj.addProperty("availableDiskGib", probeAvailableDiskGib());
         }
-        appendCliInstructions(obj);
+        appendCliInstructions(obj, releaseChannel);
 
         JsonObject staged = describeLatestStagedBundle();
         if (staged != null) {
@@ -242,12 +292,13 @@ public final class SystemUpdateHostBridge {
         }
     }
 
-    private static void appendCliInstructions(JsonObject obj) {
-        obj.addProperty("linuxCheckCommand", "sudo bash oscar.sh update check");
-        obj.addProperty("linuxUpgradeCommand", "sudo bash oscar.sh update apply");
+    private static void appendCliInstructions(JsonObject obj, String releaseChannel) {
+        String channelSuffix = SystemUpdateReleaseChecker.CHANNEL_DEV.equals(releaseChannel) ? " --channel dev" : "";
+        obj.addProperty("linuxCheckCommand", "sudo bash oscar.sh update check" + channelSuffix);
+        obj.addProperty("linuxUpgradeCommand", "sudo bash oscar.sh update apply" + channelSuffix);
         obj.addProperty("linuxEnableBridgeCommand", "sudo bash oscar.sh update enable-ui-bridge");
-        obj.addProperty("windowsCheckCommand", ".\\oscar.bat update check");
-        obj.addProperty("windowsUpgradeCommand", ".\\oscar.bat update apply");
+        obj.addProperty("windowsCheckCommand", ".\\oscar.bat update check" + channelSuffix);
+        obj.addProperty("windowsUpgradeCommand", ".\\oscar.bat update apply" + channelSuffix);
         obj.addProperty("windowsEnableBridgeCommand", ".\\oscar.bat update enable-ui-bridge");
     }
 

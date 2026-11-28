@@ -1,4 +1,4 @@
-# Manuel d'administration et d'exploitation d'OSCAR 4.0.0
+# Manuel d'administration et d'exploitation d'OSCAR 4.0.0-dev.1
 
 Ce manuel couvre la première utilisation et l'exploitation complète : certificat, connexion, plan géoréférencé, import/création des voies, adjudication et preuves, événements, statistiques nationales, rapports et fédération de nœuds.
 
@@ -32,7 +32,7 @@ L'interface d'administration sélectionne automatiquement le manuel correspondan
 
 Vous avez besoin :
 
-- d'un déploiement OSCAR 4.0.0 installé et démarré ;
+- d'un déploiement OSCAR 4.0.0-dev.1 installé et démarré ;
 - de l'URL OSCAR, généralement `https://oscar.local/` sauf si un autre hôte a été choisi ;
 - d'un compte administrateur pour `/sensorhub/admin` ;
 - de l'image de site approuvée et des coordonnées des coins inférieur gauche et supérieur droit ;
@@ -1123,7 +1123,7 @@ Utilisez les commandes `archive status`, `archive verify`, de conservation, d'ex
 suppression avec simulation/jeton du lanceur, ainsi que `backup` et `backup-verify` uniquement en mode
 `single`. Protégez séparément la clé de chiffrement et conservez une copie hors hôte si la politique
 du site exige un autre domaine de défaillance. Ne supprimez jamais à la main les fichiers catalogués.
-OSCAR 4.0.0 établit la base globale de démarrage propre : les déploiements pilotes antérieurs à 4.0
+OSCAR 4.0.0-dev.1 établit la base globale de démarrage propre : les déploiements pilotes antérieurs à 4.0
 (`3.5`–`3.12`) effectuent une installation propre avec `oscar init`, et toutes les versions futures
 `4.0.0 -> 4.x -> 5.x` — y compris les futures versions majeures de PostgreSQL — se mettent à niveau
 sur place avec retour arrière automatique instantané en cas d'échec. Les guides de stockage de
@@ -1310,7 +1310,7 @@ Le bac à sable réutilise les images OSCAR installées avec des volumes jetable
 
 ### 13.3 Mise à jour système sans compte GitHub et créateur USB d’installation automatique
 
-Les administrateurs peuvent mettre à niveau OSCAR directement depuis **OSCAR Viewer -> Utilisateurs et accès (`/users?tab=update`) -> Mise à jour système** (ou via `sudo bash oscar.sh update check|apply` sous Ubuntu 24.04 et `.\oscar.bat update check|apply` sous Windows 11) **sans compte ni jeton GitHub**. OSCAR interroge anonymement les versions officielles `ORNL/oscar`, vérifie l’empreinte SHA-256 avant l’extraction dans un répertoire propre parallèle, préserve `.env`, `secrets/`, `tls/` et les volumes Docker, et effectue un repli automatique si `/healthz` échoue. Sur les portails isolés hors ligne, l’archive `oscar-<version>.zip` peut être téléversée directement depuis le même panneau.
+Les administrateurs peuvent mettre à niveau OSCAR directement depuis **OSCAR Viewer -> Utilisateurs et accès (`/users?tab=update`) -> Mise à jour système** (ou via `sudo bash oscar.sh update check|apply` sous Ubuntu 24.04/26.04 LTS et `.\oscar.bat update check|apply` sous Windows 11) **sans compte ni jeton GitHub**. Par défaut, OSCAR suit le canal **`Production (Stable — Officielle)`** (`releases/latest`), tandis que les portails d’évaluation peuvent activer volontairement **`Développement (Pré-version — Optionnel)`** dans le même panneau (ou via `--channel dev` / `update channel dev`) pour découvrir les pré-versions Dev anonymement via `releases.atom` et repasser sur Production à tout moment. OSCAR vérifie l’empreinte SHA-256 avant l’extraction dans un répertoire propre parallèle, préserve `.env`, `secrets/`, `tls/` et les volumes Docker, et effectue un repli automatique si `/healthz` échoue. Sur les portails isolés hors ligne, l’archive `oscar-<version>.zip` peut être téléversée directement depuis le même panneau.
 
 ![Mise à jour système GitHub sans compte et hors ligne](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/54-zero-login-github-system-update.png)
 
@@ -1409,4 +1409,4 @@ Pour l'assistance technique, exportez une archive de diagnostic expurgée (`.zip
 
 ---
 
-Référence du document : comportement du code OSCAR 4.0.0, revu le 2026-10-18. Si une version ultérieure change les champs ou procédures, mettez à jour ensemble le manuel canonique anglais et les trois traductions.
+Référence du document : comportement du code OSCAR 4.0.0-dev.1, revu le 2026-10-18. Si une version ultérieure change les champs ou procédures, mettez à jour ensemble le manuel canonique anglais et les trois traductions.

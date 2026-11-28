@@ -299,6 +299,151 @@ public class SystemUpdateIntegrationTest {
         assertEquals(validSha, stagedReq.get("expectedSha256").getAsString());
     }
 
+    @Test
+    public void defaultsToStableLatestAndAllowsExplicitDevPrereleaseChannelOptIn() throws Exception {
+        // SemVer 2.0.0 numeric prerelease ordering checks
+        assertTrue(SystemUpdateReleaseChecker.compareSemVer("4.0.0-dev.2", "4.0.0-dev.1") > 0);
+        assertTrue(SystemUpdateReleaseChecker.compareSemVer("4.0.0-dev.10", "4.0.0-dev.2") > 0);
+        assertTrue(SystemUpdateReleaseChecker.compareSemVer("4.0.0-rc.1", "4.0.0-dev.10") > 0);
+        assertTrue(SystemUpdateReleaseChecker.compareSemVer("4.0.0", "4.0.0-rc.1") > 0);
+        assertTrue(SystemUpdateReleaseChecker.compareSemVer("4.1.0-dev.1", "4.0.0") > 0);
+        assertTrue(SystemUpdateReleaseChecker.isInPlaceCompatible40Plus("4.0.0-dev.1"));
+        assertFalse(SystemUpdateReleaseChecker.isInPlaceCompatible40Plus("3.12.2"));
+
+        tempDir = Files.createTempDirectory("oscar-system-update-channel-test");
+        System.setProperty(SystemUpdateHostBridge.PROP_CURRENT_VERSION, "4.0.0-dev.1");
+
+        Files.writeString(tempDir.resolve("status.json"), """
+                {
+                  "agentActive": true,
+                  "state": "IDLE",
+                  "stage": "IDLE",
+                  "progressPercent": 0,
+                  "availableDiskGib": 64.0
+                }
+                """, StandardCharsets.UTF_8);
+
+        byte[] devZip = buildValidReleaseZip("4.0.0-dev.2");
+        String devSha = sha256Hex(devZip);
+        byte[] prodZip = buildValidReleaseZip("3.12.2");
+        String prodSha = sha256Hex(prodZip);
+
+        mockGitHub = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        int port = mockGitHub.getAddress().getPort();
+        String baseUrl = "http://127.0.0.1:" + port + "/ORNL/oscar";
+
+        // Production Latest remains 3.12.2 while Dev Pre-release 4.0.0-dev.2 is published in releases.atom
+        mockGitHub.createContext("/ORNL/oscar/releases/latest", ex -> {
+            ex.getResponseHeaders().add("Location", baseUrl + "/releases/tag/v3.12.2");
+            ex.sendResponseHeaders(302, -1);
+            ex.close();
+        });
+        mockGitHub.createContext("/ORNL/oscar/releases.atom", ex -> {
+            String atom = """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <feed xmlns="http://www.w3.org/2005/Atom">
+                      <entry>
+                        <id>tag:github.com,2008:Repository/1/v4.0.0-dev.2</id>
+                        <updated>2026-11-29T01:00:00Z</updated>
+                        <link rel="alternate" type="text/html" href="%s/releases/tag/v4.0.0-dev.2"/>
+                        <title>Release v4.0.0-dev.2 (Dev Pre-release)</title>
+                        <content type="html">&lt;p&gt;OSCAR 4.0.0 Dev Pre-release build 2.&lt;/p&gt;</content>
+                      </entry>
+                      <entry>
+                        <id>tag:github.com,2008:Repository/1/v3.12.2</id>
+                        <updated>2026-11-28T01:00:00Z</updated>
+                        <link rel="alternate" type="text/html" href="%s/releases/tag/v3.12.2"/>
+                        <title>Release v3.12.2</title>
+                        <content type="html">&lt;p&gt;Production release 3.12.2.&lt;/p&gt;</content>
+                      </entry>
+                    </feed>
+                    """.formatted(baseUrl, baseUrl);
+            byte[] b = atom.getBytes(StandardCharsets.UTF_8);
+            ex.getResponseHeaders().add("Content-Type", "application/atom+xml;charset=utf-8");
+            ex.sendResponseHeaders(200, b.length);
+            ex.getResponseBody().write(b);
+            ex.close();
+        });
+        mockGitHub.createContext("/ORNL/oscar/releases/download/v4.0.0-dev.2/oscar-4.0.0-dev.2.zip.sha256", ex -> {
+            byte[] b = (devSha + " *oscar-4.0.0-dev.2.zip\n").getBytes(StandardCharsets.UTF_8);
+            ex.sendResponseHeaders(200, b.length);
+            ex.getResponseBody().write(b);
+            ex.close();
+        });
+        mockGitHub.createContext("/ORNL/oscar/releases/download/v4.0.0-dev.2/oscar-4.0.0-dev.2.zip", ex -> {
+            ex.getResponseHeaders().add("Content-Length", Integer.toString(devZip.length));
+            ex.sendResponseHeaders(200, -1);
+            ex.close();
+        });
+        mockGitHub.createContext("/ORNL/oscar/releases/download/v3.12.2/oscar-3.12.2.zip.sha256", ex -> {
+            byte[] b = (prodSha + " *oscar-3.12.2.zip\n").getBytes(StandardCharsets.UTF_8);
+            ex.sendResponseHeaders(200, b.length);
+            ex.getResponseBody().write(b);
+            ex.close();
+        });
+        mockGitHub.createContext("/ORNL/oscar/releases/download/v3.12.2/oscar-3.12.2.zip", ex -> {
+            ex.getResponseHeaders().add("Content-Length", Integer.toString(prodZip.length));
+            ex.sendResponseHeaders(200, -1);
+            ex.close();
+        });
+        mockGitHub.start();
+
+        var logger = LoggerFactory.getLogger(SystemUpdateIntegrationTest.class);
+        SystemUpdateHostBridge bridge = new SystemUpdateHostBridge(tempDir, logger);
+        SystemUpdateReleaseChecker checker = new SystemUpdateReleaseChecker(baseUrl, logger);
+        SystemUpdateServlet servlet = new SystemUpdateServlet(null, bridge, checker, logger);
+
+        // 1. Default channel MUST be stable (Production Latest = 3.12.2, NOT 4.0.0-dev.2)
+        assertEquals("stable", bridge.getReleaseChannel());
+        MockResponse stableCheck = invokeServlet(
+                servlet, "POST", "/check", "admin", true, "XMLHttpRequest",
+                "{\"force\":true}".getBytes(StandardCharsets.UTF_8));
+        assertEquals(200, stableCheck.status);
+        JsonObject stableBody = JsonParser.parseString(stableCheck.bodyString()).getAsJsonObject();
+        assertEquals("stable", stableBody.get("releaseChannel").getAsString());
+        JsonObject stableRel = stableBody.getAsJsonObject("latestRelease");
+        assertEquals("3.12.2", stableRel.get("latestVersion").getAsString());
+        assertEquals("stable", stableRel.get("channel").getAsString());
+        assertFalse(stableRel.get("isPrerelease").getAsBoolean());
+        assertFalse(stableRel.get("updateAvailable").getAsBoolean());
+
+        // 2. Reject invalid channel names cleanly (400 Bad Request)
+        MockResponse invalidChan = invokeServlet(
+                servlet, "POST", "/channel", "admin", true, "XMLHttpRequest",
+                "{\"channel\":\"nightly\"}".getBytes(StandardCharsets.UTF_8));
+        assertEquals(400, invalidChan.status);
+
+        // 3. Explicit opt-in to dev channel persists to channel.json and discovers 4.0.0-dev.2
+        MockResponse setDev = invokeServlet(
+                servlet, "POST", "/channel", "admin", true, "XMLHttpRequest",
+                "{\"channel\":\"dev\"}".getBytes(StandardCharsets.UTF_8));
+        assertEquals(200, setDev.status);
+        assertEquals("dev", bridge.getReleaseChannel());
+        assertTrue(Files.isRegularFile(tempDir.resolve("channel.json")));
+
+        MockResponse devCheck = invokeServlet(
+                servlet, "POST", "/check", "admin", true, "XMLHttpRequest",
+                "{\"force\":true}".getBytes(StandardCharsets.UTF_8));
+        assertEquals(200, devCheck.status);
+        JsonObject devBody = JsonParser.parseString(devCheck.bodyString()).getAsJsonObject();
+        assertEquals("dev", devBody.get("releaseChannel").getAsString());
+        assertTrue(devBody.get("linuxUpgradeCommand").getAsString().contains("--channel dev"));
+        JsonObject devRel = devBody.getAsJsonObject("latestRelease");
+        assertEquals("4.0.0-dev.2", devRel.get("latestVersion").getAsString());
+        assertEquals("dev", devRel.get("channel").getAsString());
+        assertTrue(devRel.get("isPrerelease").getAsBoolean());
+        assertTrue(devRel.get("updateAvailable").getAsBoolean());
+        assertTrue(devRel.get("inPlaceCompatible").getAsBoolean());
+        assertEquals(devSha, devRel.get("expectedSha256").getAsString());
+
+        // 4. Switching back to stable restores Production Latest behavior cleanly
+        MockResponse setStable = invokeServlet(
+                servlet, "POST", "/channel", "admin", true, "XMLHttpRequest",
+                "{\"channel\":\"stable\"}".getBytes(StandardCharsets.UTF_8));
+        assertEquals(200, setStable.status);
+        assertEquals("stable", bridge.getReleaseChannel());
+    }
+
     private static byte[] buildValidReleaseZip(String version) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(baos, StandardCharsets.UTF_8)) {

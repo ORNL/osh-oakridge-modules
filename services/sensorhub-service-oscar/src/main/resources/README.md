@@ -2,7 +2,7 @@
 
 ## Administrator and operator manual
 
-The detailed OSCAR 4.0.0 manual is maintained beside `OSCARServiceConfig`, where the administration UI can select it using the active language:
+The detailed OSCAR 4.0.0-dev.1 manual is maintained beside `OSCARServiceConfig`, where the administration UI can select it using the active language:
 
 - [English](com/botts/impl/service/oscar/i18n/README.md)
 - [Español](com/botts/impl/service/oscar/i18n/README_es.md)
@@ -26,7 +26,7 @@ The purpose of this module is to handle the following aspects of OSCAR (3.0+)
   - Early secondary-frame prune usage (`75%`, preserving primary `frame-3.jpg`), trigger (`85%`), and target (`80%`) filesystem usage
   - Check period, minimum object age, and monitored storage path (paired with cold-archive `RAW_TELEMETRY`/`DAILY_TELEMETRY` pressure protection that preserves `100%` of events, adjudications, and legal holds)
 
-OSCAR 4.0.0 retains exactly five verified JPEG frames per eligible aging camera clip and keeps
+OSCAR 4.0.0-dev.1 retains exactly five verified JPEG frames per eligible aging camera clip and keeps
 legacy video playback for events without the new retained-media representation. High-volume
 detector observations are owned by the tiered database lifecycle, while the required direct
 daily-file journal publishes immutable legacy CSVs independently of database retention. Use the

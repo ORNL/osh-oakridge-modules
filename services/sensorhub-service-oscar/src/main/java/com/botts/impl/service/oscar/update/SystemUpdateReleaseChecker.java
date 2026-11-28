@@ -40,11 +40,13 @@ public final class SystemUpdateReleaseChecker {
 
     public static final String PROP_GITHUB_WEB_BASE_URL = "oscar.update.githubWebBaseUrl";
     public static final String DEFAULT_GITHUB_WEB_BASE_URL = "https://github.com/ORNL/oscar";
+    public static final String CHANNEL_STABLE = "stable";
+    public static final String CHANNEL_DEV = "dev";
     public static final Pattern SEMVER_PATTERN = Pattern.compile(
             "^(\\d+)\\.(\\d+)\\.(\\d+)(?:-([0-9A-Za-z.-]+))?$");
 
     private static final Pattern TAG_LOCATION_PATTERN = Pattern.compile(
-            "/releases/tag/v([0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?)(?:[/?#]|$)");
+            "/releases/tag/v([0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?)(?:[\"'<>\\s/?#]|$)");
     private static final Pattern ATOM_ENTRY_PATTERN = Pattern.compile(
             "<entry>([\\s\\S]*?)</entry>", Pattern.CASE_INSENSITIVE);
     private static final Pattern ATOM_UPDATED_PATTERN = Pattern.compile(
@@ -64,8 +66,10 @@ public final class SystemUpdateReleaseChecker {
     private final HttpClient followRedirectClient;
     private final Logger log;
 
-    private volatile JsonObject cachedRelease;
-    private volatile long cachedAtEpochMs;
+    private volatile JsonObject cachedStableRelease;
+    private volatile long cachedStableAtEpochMs;
+    private volatile JsonObject cachedDevRelease;
+    private volatile long cachedDevAtEpochMs;
 
     public SystemUpdateReleaseChecker(Logger log) {
         this(resolveConfiguredBaseUrl(), log);
@@ -106,25 +110,66 @@ public final class SystemUpdateReleaseChecker {
         return baseUrl;
     }
 
+    public static String normalizeChannel(String channel) {
+        if (channel == null || channel.isBlank()) {
+            return CHANNEL_STABLE;
+        }
+        String norm = channel.trim().toLowerCase(Locale.ROOT);
+        if (CHANNEL_DEV.equals(norm) || "prerelease".equals(norm) || "pre-release".equals(norm)
+                || "development".equals(norm)) {
+            return CHANNEL_DEV;
+        }
+        return CHANNEL_STABLE;
+    }
+
+    public static boolean isPrereleaseVersion(String version) {
+        return version != null && version.contains("-");
+    }
+
     public JsonObject getCachedReleaseIfFresh(String currentVersion) {
-        JsonObject cached = this.cachedRelease;
-        long age = System.currentTimeMillis() - this.cachedAtEpochMs;
+        return getCachedReleaseIfFresh(currentVersion, CHANNEL_STABLE);
+    }
+
+    public JsonObject getCachedReleaseIfFresh(String currentVersion, String channel) {
+        String normChannel = normalizeChannel(channel);
+        JsonObject cached = CHANNEL_DEV.equals(normChannel) ? this.cachedDevRelease : this.cachedStableRelease;
+        long cachedAt = CHANNEL_DEV.equals(normChannel) ? this.cachedDevAtEpochMs : this.cachedStableAtEpochMs;
+        long age = System.currentTimeMillis() - cachedAt;
         if (cached == null || age < 0 || age > CACHE_TTL_MS) {
             return null;
         }
-        return attachComparison(cached.deepCopy(), currentVersion, true);
+        return attachComparison(cached.deepCopy(), currentVersion, normChannel, true);
     }
 
     public synchronized JsonObject checkLatestRelease(String currentVersion, boolean forceRefresh) throws IOException {
+        return checkLatestRelease(currentVersion, CHANNEL_STABLE, forceRefresh);
+    }
+
+    public synchronized JsonObject checkLatestRelease(String currentVersion, String channel, boolean forceRefresh)
+            throws IOException {
+        String normChannel = normalizeChannel(channel);
         long now = System.currentTimeMillis();
-        if (!forceRefresh && cachedRelease != null && (now - cachedAtEpochMs) < CACHE_TTL_MS) {
-            return attachComparison(cachedRelease.deepCopy(), currentVersion, true);
+        JsonObject existingCache = CHANNEL_DEV.equals(normChannel) ? this.cachedDevRelease : this.cachedStableRelease;
+        long existingAt = CHANNEL_DEV.equals(normChannel) ? this.cachedDevAtEpochMs : this.cachedStableAtEpochMs;
+        if (!forceRefresh && existingCache != null && (now - existingAt) < CACHE_TTL_MS) {
+            return attachComparison(existingCache.deepCopy(), currentVersion, normChannel, true);
         }
 
         String atomXml = fetchAtomFeedSafely();
-        String latestVersion = discoverLatestTagViaRedirect();
-        if (latestVersion == null || latestVersion.isBlank()) {
-            latestVersion = extractFirstVersionFromAtom(atomXml);
+        String stableVersion = discoverLatestTagViaRedirect();
+        String latestVersion;
+        if (CHANNEL_DEV.equals(normChannel)) {
+            String atomHighest = extractHighestVersionFromAtom(atomXml, true);
+            if (atomHighest != null && (stableVersion == null || compareSemVer(atomHighest, stableVersion) >= 0)) {
+                latestVersion = atomHighest;
+            } else {
+                latestVersion = stableVersion;
+            }
+        } else {
+            latestVersion = stableVersion;
+            if (latestVersion == null || latestVersion.isBlank()) {
+                latestVersion = extractFirstVersionFromAtom(atomXml);
+            }
         }
         if (latestVersion == null || !isValidSemVer(latestVersion)) {
             throw new IOException("Unable to reach GitHub Releases at " + baseUrl
@@ -145,6 +190,8 @@ public final class SystemUpdateReleaseChecker {
         JsonObject info = new JsonObject();
         info.addProperty("checkedAt", Instant.now().toString());
         info.addProperty("requiresGitHubLogin", false);
+        info.addProperty("channel", normChannel);
+        info.addProperty("isPrerelease", isPrereleaseVersion(latestVersion));
         info.addProperty("latestVersion", latestVersion);
         info.addProperty("tagName", tag);
         info.addProperty("releaseTitle", meta.title.isBlank() ? ("Release " + tag) : meta.title);
@@ -165,18 +212,25 @@ public final class SystemUpdateReleaseChecker {
             info.addProperty("downloadBytes", downloadBytes);
         }
 
-        this.cachedRelease = info;
-        this.cachedAtEpochMs = System.currentTimeMillis();
-        return attachComparison(info.deepCopy(), currentVersion, false);
+        if (CHANNEL_DEV.equals(normChannel)) {
+            this.cachedDevRelease = info;
+            this.cachedDevAtEpochMs = System.currentTimeMillis();
+        } else {
+            this.cachedStableRelease = info;
+            this.cachedStableAtEpochMs = System.currentTimeMillis();
+        }
+        return attachComparison(info.deepCopy(), currentVersion, normChannel, false);
     }
 
-    private JsonObject attachComparison(JsonObject info, String currentVersion, boolean fromCache) {
+    private JsonObject attachComparison(JsonObject info, String currentVersion, String channel, boolean fromCache) {
         String latest = info.has("latestVersion") ? info.get("latestVersion").getAsString() : "";
         String cur = (currentVersion == null || currentVersion.isBlank()) ? "0.0.0" : currentVersion.trim();
         int cmp = compareSemVer(latest, cur);
         boolean compatible = isInPlaceCompatible40Plus(latest);
         boolean assetReady = info.has("assetAvailable") && info.get("assetAvailable").getAsBoolean();
 
+        info.addProperty("channel", normalizeChannel(channel));
+        info.addProperty("isPrerelease", isPrereleaseVersion(latest));
         info.addProperty("currentVersion", cur);
         info.addProperty("fromCache", fromCache);
         info.addProperty("comparison", cmp);
@@ -285,21 +339,32 @@ public final class SystemUpdateReleaseChecker {
     }
 
     static String extractFirstVersionFromAtom(String atomXml) {
+        return extractHighestVersionFromAtom(atomXml, false);
+    }
+
+    static String extractHighestVersionFromAtom(String atomXml, boolean includePrereleases) {
         if (atomXml == null || atomXml.isBlank()) {
             return null;
         }
+        String best = null;
         Matcher entryMatcher = ATOM_ENTRY_PATTERN.matcher(atomXml);
         while (entryMatcher.find()) {
             String entry = entryMatcher.group(1);
             Matcher tagMatcher = TAG_LOCATION_PATTERN.matcher(entry);
             if (tagMatcher.find()) {
                 String candidate = tagMatcher.group(1);
-                if (isValidSemVer(candidate) && !candidate.contains("-")) {
-                    return candidate;
+                if (!isValidSemVer(candidate)) {
+                    continue;
+                }
+                if (!includePrereleases && isPrereleaseVersion(candidate)) {
+                    continue;
+                }
+                if (best == null || compareSemVer(candidate, best) > 0) {
+                    best = candidate;
                 }
             }
         }
-        return null;
+        return best;
     }
 
     private record AtomEntryMeta(String title, String publishedAt, String notesSummary) {
@@ -410,6 +475,44 @@ public final class SystemUpdateReleaseChecker {
         if (preB == null) {
             return -1;
         }
-        return preA.compareTo(preB);
+        String[] partsA = preA.split("\\.");
+        String[] partsB = preB.split("\\.");
+        int len = Math.min(partsA.length, partsB.length);
+        for (int i = 0; i < len; i++) {
+            String idA = partsA[i];
+            String idB = partsB[i];
+            if (idA.equals(idB)) {
+                continue;
+            }
+            boolean numA = isAllDigits(idA);
+            boolean numB = isAllDigits(idB);
+            if (numA && numB) {
+                int cmp = Long.compare(Long.parseLong(idA), Long.parseLong(idB));
+                if (cmp != 0) {
+                    return cmp;
+                }
+            } else if (numA != numB) {
+                return numA ? -1 : 1; // SemVer 2.0.0: numeric identifiers have lower precedence than non-numeric
+            } else {
+                int cmp = idA.compareTo(idB);
+                if (cmp != 0) {
+                    return cmp;
+                }
+            }
+        }
+        return Integer.compare(partsA.length, partsB.length);
+    }
+
+    private static boolean isAllDigits(String s) {
+        if (s == null || s.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < '0' || c > '9') {
+                return false;
+            }
+        }
+        return true;
     }
 }

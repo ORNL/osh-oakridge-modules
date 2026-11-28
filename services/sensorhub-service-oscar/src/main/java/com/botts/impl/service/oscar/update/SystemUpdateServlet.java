@@ -80,7 +80,8 @@ public final class SystemUpdateServlet extends HttpServlet {
         String sub = normalizeSubpath(req);
         if ("/status".equals(sub) || "/".equals(sub)) {
             String cur = bridge.resolveCurrentVersion();
-            JsonObject cached = checker.getCachedReleaseIfFresh(cur);
+            String channel = bridge.getReleaseChannel();
+            JsonObject cached = checker.getCachedReleaseIfFresh(cur, channel);
             sendJson(resp, HttpServletResponse.SC_OK, bridge.readStatus(cached));
             return;
         }
@@ -105,9 +106,13 @@ public final class SystemUpdateServlet extends HttpServlet {
                     boolean force = !body.has("force")
                             || !body.get("force").isJsonPrimitive()
                             || body.get("force").getAsBoolean();
+                    String requestedChannel = optStr(body, "channel");
+                    String channel = requestedChannel.isBlank()
+                            ? bridge.getReleaseChannel()
+                            : SystemUpdateReleaseChecker.normalizeChannel(requestedChannel);
                     String cur = bridge.resolveCurrentVersion();
                     try {
-                        JsonObject release = checker.checkLatestRelease(cur, force);
+                        JsonObject release = checker.checkLatestRelease(cur, channel, force);
                         sendJson(resp, HttpServletResponse.SC_OK, bridge.readStatus(release));
                     } catch (IOException ioe) {
                         JsonObject offlineResp = bridge.readStatus(null);
@@ -116,20 +121,32 @@ public final class SystemUpdateServlet extends HttpServlet {
                         sendJson(resp, HttpServletResponse.SC_BAD_GATEWAY, offlineResp);
                     }
                 }
+                case "/channel" -> {
+                    JsonObject body = parseJsonBody(req);
+                    String requestedChannel = optStr(body, "channel");
+                    String savedChannel = bridge.setReleaseChannel(requestedChannel, username);
+                    String cur = bridge.resolveCurrentVersion();
+                    JsonObject cached = checker.getCachedReleaseIfFresh(cur, savedChannel);
+                    sendJson(resp, HttpServletResponse.SC_OK, bridge.readStatus(cached));
+                }
                 case "/apply" -> {
                     JsonObject body = parseJsonBody(req);
                     String targetVersion = optStr(body, "targetVersion");
                     String expectedSha256 = optStr(body, "expectedSha256");
                     boolean createBackupFirst = optBool(body, "createBackupFirst", false);
+                    String requestedChannel = optStr(body, "channel");
+                    String channel = requestedChannel.isBlank()
+                            ? bridge.getReleaseChannel()
+                            : SystemUpdateReleaseChecker.normalizeChannel(requestedChannel);
 
                     if (targetVersion.isBlank()) {
-                        JsonObject latest = checker.checkLatestRelease(bridge.resolveCurrentVersion(), false);
+                        JsonObject latest = checker.checkLatestRelease(bridge.resolveCurrentVersion(), channel, false);
                         targetVersion = optStr(latest, "latestVersion");
                         if (expectedSha256.isBlank()) {
                             expectedSha256 = optStr(latest, "expectedSha256");
                         }
                     } else if (expectedSha256.isBlank()) {
-                        JsonObject cached = checker.getCachedReleaseIfFresh(bridge.resolveCurrentVersion());
+                        JsonObject cached = checker.getCachedReleaseIfFresh(bridge.resolveCurrentVersion(), channel);
                         if (cached != null && targetVersion.equals(optStr(cached, "latestVersion"))) {
                             expectedSha256 = optStr(cached, "expectedSha256");
                         }
@@ -137,7 +154,7 @@ public final class SystemUpdateServlet extends HttpServlet {
 
                     JsonObject queued = bridge.queueGitHubUpgrade(
                             targetVersion, expectedSha256, createBackupFirst, username);
-                    JsonObject cached = checker.getCachedReleaseIfFresh(bridge.resolveCurrentVersion());
+                    JsonObject cached = checker.getCachedReleaseIfFresh(bridge.resolveCurrentVersion(), channel);
                     if (cached != null) {
                         queued.add("latestRelease", cached);
                     }
