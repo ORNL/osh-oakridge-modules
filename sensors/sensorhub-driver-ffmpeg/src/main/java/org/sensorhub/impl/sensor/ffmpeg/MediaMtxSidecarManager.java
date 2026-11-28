@@ -853,7 +853,6 @@ public final class MediaMtxSidecarManager implements AutoCloseable {
                 + "hls: no\n"
                 + "webrtc: no\n"
                 + "srt: no\n"
-                + "moq: no\n"
                 + "paths: {}\n";
     }
 
