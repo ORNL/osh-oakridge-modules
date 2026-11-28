@@ -4,6 +4,9 @@ import org.sensorhub.api.config.DisplayInfo;
 
 public class StoragePressureRetentionConfig {
 
+    @DisplayInfo(label = "Early secondary-frame prune usage (%)", desc = "Start pruning secondary frames (keeping primary frame-3.jpg) when filesystem usage reaches this percentage before full media-set deletion triggers. Set to 0 to disable.")
+    public int earlySecondaryPruneUsagePercent = 75;
+
     @DisplayInfo(label = "Trigger usage (%)", desc = "Start pressure cleanup when filesystem usage reaches this percentage.")
     public int triggerUsagePercent = 85;
 
