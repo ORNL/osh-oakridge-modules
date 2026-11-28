@@ -1,4 +1,4 @@
-# Manual de administración y operación de OSCAR 3.12.1
+# Manual de administración y operación de OSCAR 3.12.2
 
 Este manual cubre el primer uso y la operación completa: certificado, acceso, plano georreferenciado, importación/creación de carriles, adjudicación y evidencias, eventos, estadísticas nacionales, informes y federación de nodos.
 
@@ -32,7 +32,7 @@ La interfaz de administración selecciona automáticamente la versión del manua
 
 Necesita:
 
-- un despliegue OSCAR 3.12.1 instalado y en ejecución;
+- un despliegue OSCAR 3.12.2 instalado y en ejecución;
 - la URL de OSCAR, normalmente `https://oscar.local/` salvo que se haya elegido otro host;
 - una cuenta administradora para `/sensorhub/admin`;
 - la imagen aprobada del sitio y la latitud/longitud de sus esquinas inferior izquierda y superior derecha;
@@ -244,6 +244,7 @@ predeterminado en producción sigue siendo de 5 minutos.
 
 | Campo | Predeterminado | Comportamiento |
 | --- | ---: | --- |
+| Uso para poda temprana de fotogramas secundarios (%) | 75 | Al alcanzar este umbral (antes de iniciar la eliminación completa de medios al 85%), OSCAR poda los fotogramas secundarios (`frame-1,2,4,5`) conservando el fotograma central principal (`frame-3.jpg`) y los recortes OCR (`0` desactiva la poda temprana). |
 | Uso de activación (%) | 85 | La limpieza comienza al alcanzar este uso. Debe ser mayor que el objetivo y no superar 100. |
 | Uso objetivo (%) | 80 | La limpieza continúa hasta alcanzarlo o agotar archivos elegibles. |
 | Periodo de comprobación (minutos) | 1 | Frecuencia de comprobación; debe ser mayor que cero. |
@@ -251,7 +252,7 @@ predeterminado en producción sigue siendo de 5 minutos.
 | Máximo de conjuntos multimedia por ciclo | 200 | Limita las entradas del índice directo inspeccionadas en un ciclo. La cola duradera reanuda el trabajo restante tras un reinicio o en el ciclo siguiente. |
 | Ruta de almacenamiento | `files` | Sistema de archivos cuyo uso controla la limpieza. Debe apuntar al volumen real de archivos OSCAR. |
 
-La limpieza por presión solo elimina objetos elegibles del bucket `videos` en orden de publicación duradero; durante un ciclo no enumera ni ordena todo el árbol de medios retenidos. Los CSV diarios están protegidos. Mantenga además supervisión del sistema operativo: este control de emergencia no sustituye las copias de seguridad.
+La limpieza por presión solo elimina objetos elegibles del bucket `videos` en orden de publicación duradero; durante un ciclo no enumera ni ordena todo el árbol de medios retenidos. De forma complementaria, el archivo frío Parquet aplica una política de presión de telemetría (`telemetryPressureEnabled = true`): al alcanzar `85%` (objetivo `80%`), reclama con seguridad las generaciones frías más antiguas de `RAW_TELEMETRY` / `DAILY_TELEMETRY` con más de `365 días` (o `30 días` con uso crítico `>= 92%`), protegiendo siempre el **100% de los eventos, adjudicaciones, retenciones legales, CSV diarios y filas de estado más reciente**. Las copias automáticas `config.json.bak.<yyyyMMddHHmmss>` también rotan automáticamente a un límite de `25` archivos (`-Dosh.config.maxBackups`) conservando las copias nombradas manualmente. Mantenga además supervisión del sistema operativo: este control de emergencia no sustituye las copias de seguridad.
 
 Los ID de observaciones procesadas comparten como máximo doce archivos exactos de cinco minutos con
 suma de comprobación por hora UTC del evento. Una hora completa se elimina solo cuando termina
@@ -262,10 +263,10 @@ más de 1,2 millones de ocupaciones distribuidas uniformemente por hora. Un
 JSON permanente por cámara. Copie y restaure como una unidad todo `videos/retained-media/v1`,
 incluidos índices, puntos de control, colas, manifiestos y libros de trabajo.
 
-Este formato compacto aparece por primera vez en 3.12.1 y no migra los prototipos previos
+Este formato compacto aparece por primera vez en 3.12.2 y no migra los prototipos previos
 `.deleted.json` ni árboles de marcadores por observación. Los sistemas de prueba deben comenzar con
-una base de datos y un prefijo de medios nuevos de 3.12.1. Para volver atrás, restaure ambos desde la
-misma copia coordinada anterior a 3.12.1; no ejecute un binario antiguo sobre este almacenamiento.
+una base de datos y un prefijo de medios nuevos de 3.12.2. Para volver atrás, restaure ambos desde la
+misma copia coordinada anterior a 3.12.2; no ejecute un binario antiguo sobre este almacenamiento.
 
 ### Códigos de disposición personalizados
 
@@ -863,6 +864,7 @@ Abra **Estado de salud** (`/health`) mediante el **icono de monitor de pulso car
 - **Estado de fallas** muestra gamma alta, gamma baja, neutrón alto, manipulación y ocupación prolongada como **Fallo**, **Normal** o **Desconocido**. La telemetría ausente o fallida permanece en **Desconocido**; nunca se considera saludable ni se muestra como normal.
 - **Ocupación actual** usa el flujo canónico `occupancyStatus` del Sistema de carril para mostrar un tiempo estable con RPM Rapiscan, Aspect y RS350.
 - **Última actualización** usa la hora local del navegador para la actualización más reciente de conexión o falla.
+- **Aviso de vencimiento del certificado TLS de la pasarela** aparece automáticamente en la parte superior de `/health` (vía `GET /sensorhub/oscar/diagnostics/tls-status`) únicamente cuando al certificado HTTPS le quedan `30 días` o menos (advertencia), `7 días` o menos (crítico) o está vencido, indicando a los administradores renovarlo con `sudo bash oscar.sh refresh-tls` (Ubuntu) o `.\oscar.bat refresh-tls` (Windows 11).
 
 Cada carril configura un **Umbral de ocupación prolongada (min)** en el servidor (`extendedOccupancyThresholdMinutes`, de `1` a `1440` minutos, predeterminado `1` minuto) en SensorHub Admin (**Lane Sensor System > General > Extended Occupancy Threshold (min)**). Cuando un vehículo ocupa un carril durante al menos ese umbral, el carril publica `Fault - Extended Occupancy` en `occupancyStatus`, activa el indicador de **Ocupación prolongada** e incrementa el contador de fallas `Ext-Occ` en Estadísticas nacionales e Informes de carril hasta que se despeja el carril. Si esa ocupación prolongada termina con una **alarma solo gamma** (`gammaAlarm = true`, `neutronAlarm = false`), OSCAR la suprime de la cola activa del panel y la adjudica automáticamente como **Código 9998: Alarma gamma de ocupación prolongada** (`username = "AUTO"`), mientras que cualquier ocupación prolongada con alarma de neutrones permanece activa para adjudicación del operador. En `/health`, también puede introducir de 1 a 1440 minutos en **Umbral de ocupación prolongada** para reevaluar la visualización en ese navegador sin modificar observaciones, adjudicaciones ni informes del servidor.
 
@@ -1046,7 +1048,7 @@ Con nodos remotos conectados mediante tokens `oscar_fed_...`, **Eventos -> Compa
 
 ## 12. Retención de datos y almacenamiento
 
-El perfil estándar 3.12.1 utiliza la arquitectura por niveles PostgreSQL + Apache Parquet V2 en modo
+El perfil estándar 3.12.2 utiliza la arquitectura por niveles PostgreSQL + Apache Parquet V2 en modo
 `PARQUET_PRIMARY` (`OSCAR_TIER_STORAGE_MODE=PARQUET_PRIMARY`). Los flujos de configuración estáticos
 (`sensorLocation`, `adjudicationCodes`, `siteInfo`) permanecen en PostgreSQL `ONLY oscar.obs`, mientras
 que las 26 salidas operativas, probatorias y móviles permitidas (`gammaCounts`, `gammaThreshold`, `neutronCounts`,
@@ -1120,9 +1122,9 @@ heredado `backup-prune` está retirado.
 Use los comandos `archive status`, `archive verify`, retenciones, exportación portátil y eliminación
 con vista previa y token del lanzador, y `backup` y `backup-verify` solo en modo `single`. Proteja por
 separado la clave de cifrado y conserve una copia externa si la política del sitio exige otro dominio
-de fallo. Nunca borre directamente archivos catalogados. Una actualización anterior a 3.12.1 conserva
+de fallo. Nunca borre directamente archivos catalogados. Una actualización anterior a 3.12.2 conserva
 la base y configuración anteriores: no crea todo el perfil ni activa las sumas de comprobación de
-PostgreSQL. Inicialice un despliegue 3.12.1 nuevo o aplique una migración de producción validada aparte.
+PostgreSQL. Inicialice un despliegue 3.12.2 nuevo o aplique una migración de producción validada aparte.
 Las guías de almacenamiento de `documentation/` son los procedimientos autorizados.
 
 Use el lanzador de la versión para `stop` y `restart` de todo el despliegue. Primero detiene la
@@ -1245,7 +1247,7 @@ En instalaciones con escáneres NII de rayos X (`UFF 2.0` o `UFF 3.0.0`), un adm
 
 - [ ] ID de nodo único; base de datos, Web ID, estadísticas y Auto Start revisados.
 - [ ] Retención de vídeo y presión revisadas antes de activar limpieza.
-- [ ] Se usó una base/configuración 3.12.1 nueva o una migración aprobada; el estado y la integridad del archivo son correctos.
+- [ ] Se usó una base/configuración 3.12.2 nueva o una migración aprobada; el estado y la integridad del archivo son correctos.
 - [ ] Se ha registrado el modo de copia. El modo desactivado no crea copias gestionadas por OSCAR; si se activa `single`, su instantánea actual se verifica, la clave externa se custodia aparte y se ha superado una restauración aislada.
 - [ ] Un carril de muestra publica CSV/manifiesto desde el diario; eventos retenidos muestran cinco JPEG y los heredados siguen reproduciéndose.
 - [ ] Servicios de buckets y OSCAR están iniciados.
@@ -1321,7 +1323,7 @@ Los administradores pueden actualizar OSCAR directamente desde **OSCAR Viewer ->
   </video>
 </details>
 
-Para nuevos servidores físicos Ubuntu Server 24.04 LTS, descargue el paquete independiente **`oscar-3.12.1-autoinstall-usb-creator.zip`** (`~73 KiB`) junto con `ubuntu-24.04.x-live-server-amd64.iso` y `oscar-3.12.1-ubuntu-x86_64-offline-full.zip` sin descomprimir antes el paquete sin conexión. Ejecute la **GUI de escritorio** (`create-autoinstall-usb.bat` en Windows 11 o `sudo bash create-autoinstall-usb.sh --gui` en Ubuntu), la **TUI interactiva** (`-Tui` / `--tui`) o la **CLI** para crear un USB UEFI Secure-Boot con hash SHA-512 (`$6$`), cifrado LUKS2 opcional, `--require-sudo-password`, `--ssh-keys-only` y **preconfiguración llave en mano del sitio** (contraseña web inicial `admin` con hash PBKDF2 sin texto plano en el USB, `lanes.csv` / `config.json` y auto-inicialización en el primer arranque mediante `-AutoInitOscar` / `--auto-init-oscar` para que en el sitio solo registre usuarios y suba `.pmtiles` o el plano de fondo), protegiendo siempre los discos internos y `OSCAR_BACKUP`. Al finalizar, tanto el creador de Windows 11 como el de Ubuntu generan automáticamente un **PDF imprimible de una página para el técnico** guardado únicamente en la estación local (`0600` en Linux, ACL NTFS restringida en Windows; nunca en el USB) con usuarios, contraseñas, frases de paso LUKS2/respaldo, resumen de red estática (`site-network.env`), SHA-256 verificado, archivos `seed/` y lista de verificación posterior a la instalación.
+Para nuevos servidores físicos Ubuntu Server 24.04 LTS, descargue el paquete independiente **`oscar-3.12.2-autoinstall-usb-creator.zip`** (`~73 KiB`) junto con `ubuntu-24.04.x-live-server-amd64.iso` y `oscar-3.12.2-ubuntu-x86_64-offline-full.zip` sin descomprimir antes el paquete sin conexión. Ejecute la **GUI de escritorio** (`create-autoinstall-usb.bat` en Windows 11 o `sudo bash create-autoinstall-usb.sh --gui` en Ubuntu), la **TUI interactiva** (`-Tui` / `--tui`) o la **CLI** para crear un USB UEFI Secure-Boot con hash SHA-512 (`$6$`), cifrado LUKS2 opcional, `--require-sudo-password`, `--ssh-keys-only` y **preconfiguración llave en mano del sitio** (contraseña web inicial `admin` con hash PBKDF2 sin texto plano en el USB, `lanes.csv` / `config.json` y auto-inicialización en el primer arranque mediante `-AutoInitOscar` / `--auto-init-oscar` para que en el sitio solo registre usuarios y suba `.pmtiles` o el plano de fondo), protegiendo siempre los discos internos y `OSCAR_BACKUP`. Al finalizar, tanto el creador de Windows 11 como el de Ubuntu generan automáticamente un **PDF imprimible de una página para el técnico** guardado únicamente en la estación local (`0600` en Linux, ACL NTFS restringida en Windows; nunca en el USB) con usuarios, contraseñas, frases de paso LUKS2/respaldo, resumen de red estática (`site-network.env`), SHA-256 verificado, archivos `seed/` y lista de verificación posterior a la instalación.
 
 ![Creador USB de autoinstalación Ubuntu 24.04 sin conexión](https://raw.githubusercontent.com/ORNL/osh-oakridge-modules/main/docs/oscar-operator-manual/images/55-bare-metal-autoinstall-usb-creator.png)
 
@@ -1348,7 +1350,7 @@ Para nuevos servidores físicos Ubuntu Server 24.04 LTS, descargue el paquete in
 | OSM 403/bloqueado | No use directamente servidores voluntarios incumpliendo su política. Configure proveedor/proxy OSM aprobado o use Esri mientras se corrige. |
 | CSV rechazado | Revise encabezado/orden, grupos de seis, índices secuenciales, número de celdas, numéricos, vacíos sin comillas y ausencia de comas internas. |
 | Falta un carril tras CSV | Busque UniqueID ya cargado, nombre mayor de 12, errores de hijos y espere la carga asíncrona. |
-| **Sensores** está vacío tras reiniciar después de cargar el CSV | La carga creó módulos en memoria, pero no se conservó la configuración completa. Vuelva a cargar si hace falta, espere a que aparezcan todos los carriles e hijos, pulse **Guardar** globalmente, reinicie OSCAR y compruebe otra vez **Sensores**. Si un nodo 3.12.1 sigue perdiendo los carriles, revise los logs de OSCAR y verifique que el propietario pueda escribir en `/var/lib/oscar/config.json`. |
+| **Sensores** está vacío tras reiniciar después de cargar el CSV | La carga creó módulos en memoria, pero no se conservó la configuración completa. Vuelva a cargar si hace falta, espere a que aparezcan todos los carriles e hijos, pulse **Guardar** globalmente, reinicie OSCAR y compruebe otra vez **Sensores**. Si un nodo 3.12.2 sigue perdiendo los carriles, revise los logs de OSCAR y verifique que el propietario pueda escribir en `/var/lib/oscar/config.json`. |
 | Una vista operativa está vacía o rechaza su clave | Confirme que **Claves de vista operativa** del carril contiene exactamente la clave en minúsculas, aplique y guarde globalmente, reinicie el carril si procede y use `?view=<clave>` o `/view/<clave>`. Una asignación vacía nunca coincide con una vista delimitada. |
 | RPM no inicia | Pruebe alcance del host, puerto, cortafuegos, rango Aspect y disponibilidad; revise el error del hijo. |
 | Cámara no inicia | Pruebe RTSP/credenciales, quite `rtsp://` del host, no duplique puerto, confirme códec Axis o ruta Custom y pruebe desde el host OSCAR. |
@@ -1405,4 +1407,4 @@ Para soporte técnico, exporte un paquete de diagnóstico saneado (`.zip`):
 
 ---
 
-Base del documento: comportamiento del código OSCAR 3.12.1, revisado el 2026-10-18. Si una versión posterior cambia campos o flujos, actualice conjuntamente el manual canónico en inglés y las tres traducciones.
+Base del documento: comportamiento del código OSCAR 3.12.2, revisado el 2026-10-18. Si una versión posterior cambia campos o flujos, actualice conjuntamente el manual canónico en inglés y las tres traducciones.
